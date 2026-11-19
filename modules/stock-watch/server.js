@@ -83,7 +83,9 @@ const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure
 /** Client IP: the last X-Forwarded-For hop (added by Railway's proxy; earlier hops are whatever the client sent), else the socket. */
 const ipOf = (req) => { const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); return hops.length ? hops[hops.length - 1] : String(req.socket.remoteAddress || ''); };
 
-/* Wrong-password limiter for the sign-in form and Basic auth: 10 per IP per 15 minutes, 100 across all IPs. */
+/* Wrong-password limiter for the sign-in form and Basic auth: 10 per IP per 15 minutes, 100 across all IPs.
+ * blocked() → 'ip' (this IP: refused without checking), 'global' (100 across all IPs: the password is still
+ * checked, so a stranger's flood can't lock out the owner; a wrong one gets 429), or false. */
 const LIMIT = { window: 15 * 60e3, perIp: 10, global: 100, maxIps: 10000 };
 const fails = new Map();   // ip → { n, until }
 let globalFails = [];      // times of the latest wrong passwords (at most LIMIT.global)
@@ -93,7 +95,8 @@ const limiter = {
     if (now - lastSweep > 60e3) { lastSweep = now; for (const [k, f] of fails) if (now >= f.until) fails.delete(k); }
     globalFails = globalFails.filter((t) => now - t < LIMIT.window);
     const f = fails.get(ip);
-    return (!!f && f.n >= LIMIT.perIp && now < f.until) || globalFails.length >= LIMIT.global;
+    if (f && f.n >= LIMIT.perIp && now < f.until) return 'ip';
+    return globalFails.length >= LIMIT.global ? 'global' : false;
   },
   fail(ip, now = Date.now()) {
     const f = fails.get(ip); const n = (f && now < f.until ? f.n : 0) + 1;
@@ -110,11 +113,12 @@ function auth(req) {
   const m = String(req.headers.authorization || '').match(/^Basic\s+(\S+)$/i);
   if (!m) return 'none';
   const ip = ipOf(req);
-  if (limiter.blocked(ip)) return 'limited';
+  const block = limiter.blocked(ip);
+  if (block === 'ip') return 'limited';
   const raw = Buffer.from(m[1], 'base64').toString('utf8'); const i = raw.indexOf(':');
   const pass = i >= 0 ? raw.slice(i + 1) : '';   // everything after the first ":" (passwords may contain ":")
   if (safeEqual(pass, PASSWORD)) { limiter.ok(ip); return 'ok'; }
-  limiter.fail(ip); return 'bad';
+  limiter.fail(ip); return block ? 'limited' : 'bad';
 }
 const TOO_MANY = 'Too many wrong passwords. Wait 15 minutes.';
 function loginPage(error = '') {
@@ -314,6 +318,7 @@ async function api(req, res, url) {
   }
   if (p === '/api/demo' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, 'Shopify is connected, so demo data is off (it would mix with real data)');
+    if (d.source === 'live') return fail(res, 409, 'This store holds real data. Clear it first (Danger zone) if you really want the demo.');
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
@@ -379,9 +384,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/login' && req.method === 'POST') {
       if (!PASSWORD) return send(res, 303, '', 'text/plain', { location: '/' });
       const ip = ipOf(req);
-      if (limiter.blocked(ip)) return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
+      const block = limiter.blocked(ip);
+      if (block === 'ip') return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
-      if (!safeEqual(pass, PASSWORD)) { limiter.fail(ip); return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8'); }
+      if (!safeEqual(pass, PASSWORD)) {
+        limiter.fail(ip);
+        return block ? send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' }) : send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
+      }
       limiter.ok(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
       return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });

@@ -8,7 +8,7 @@ Shows a D2C brand which products to reorder before they run out, and how many �
 
 Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; Sign out is a POST to `/logout`. Scripts can still use Basic auth (any user name; the password may contain `:`).
 
-Login hardening (ADR-0011, SW-008): one limiter for the form and Basic auth, 10 wrong passwords per IP (last `X-Forwarded-For` hop, else the socket) and 100 across all IPs per 15 minutes → 429. With `NODE_ENV=production` (set in the Dockerfile) the app refuses to start unless `ADMIN_PASSWORD` is at least 12 characters. Cookies are signed with a random secret in `DATA_DIR/secret` (mode 600) plus a password fingerprint: changing the password signs everyone out; deleting the file does too.
+Login hardening (ADR-0011, SW-008): one limiter for the form and Basic auth, 10 wrong passwords per IP (last `X-Forwarded-For` hop, else the socket) and 100 across all IPs per 15 minutes → 429. When only the 100 cap is hit the password is still checked (right one passes, wrong one 429), so a stranger can't lock the owner out; the per-IP block is hard. With `NODE_ENV=production` (set in the Dockerfile) the app refuses to start unless `ADMIN_PASSWORD` is at least 12 characters. Cookies are signed with a random secret in `DATA_DIR/secret` (mode 600) plus a password fingerprint: changing the password signs everyone out; deleting the file does too.
 
 ## How data flows
 
@@ -20,7 +20,7 @@ Google Sheet CSV / upload ───┘
 
 - **Stock row:** `{ t, variantId, sku, product, variant, before, now, price, src }`, one per stock change.
 - **Order row:** `{ t, order, variantId, sku, qty, price, src }`, one per order line.
-- **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs.
+- **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs. `/api/demo` returns 409 while the store holds real data (source `live`).
 - **Catalog** (`store.json` → `catalog`, Shopify only): `{variantId → productId, product, variant, sku, type, tags, price, cost, status, tracked, active, stock, seenAt, inactiveSince}`, replaced on every pull (ADR-0010). Engine takes stock now and attributes from it; inactive variants are left out of reorder and overstock.
 - **Engine** (`src/engine.js`, pure functions): stock-out episodes, in-stock sales rate, ₹ lost (weighted by the store's hour-of-day sales pattern), reorder status and quantity.
 

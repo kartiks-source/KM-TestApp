@@ -23,7 +23,7 @@ Never put any of these in code, Markdown, logs, commit messages, chat or a Googl
 
 - **One shared admin password** (`ADMIN_PASSWORD`). The sign-in page (`POST /login`) sets an HttpOnly, SameSite=Lax cookie valid 30 days (`Secure` behind HTTPS). Scripts can use HTTP Basic auth with any user name.
 - **Without `ADMIN_PASSWORD` the app is open.** It refuses to start without one only when Shopify is connected. SW-008 makes it refuse in production (`NODE_ENV=production`) whenever the password is missing or under 12 characters.
-- **Login attempts:** the form allows 10 wrong passwords per IP per 15 minutes, then 429. Known gaps fixed by SW-008: Basic auth isn't rate-limited, and the IP comes from a client-set `X-Forwarded-For`.
+- **Login attempts:** the form allows 10 wrong passwords per IP per 15 minutes, then 429. Known gaps fixed by SW-008: Basic auth isn't rate-limited, and the IP comes from a client-set `X-Forwarded-For`. Across all IPs, 100 wrong passwords per 15 minutes switch every new attempt to "password still checked, a wrong one gets 429": the cap slows a spread-out guesser without letting a stranger lock the owner out (critic round 1, SEC-1).
 - **Flow ingest** is not behind the login; it's protected by the ingest key alone.
 - **`/health`** is open and returns only `{"ok":true}`.
 - **Shopify is read-only in code:** `src/shopify.js` `assertReadOnly()` lets only GraphQL query documents through (no `mutation`, no `subscription`) and the app asks only for read scopes, because a shared key may carry write scopes. No webhooks are registered.
@@ -37,7 +37,7 @@ All need the admin login except `/ingest/*`. Each wipe is backed up first (`docs
 | Endpoint | Effect | Undo |
 |---|---|---|
 | `POST /api/clear` | deletes every stock change and order line | restore the `…-before-clear.json` backup |
-| `POST /api/demo` | replaces all data with demo data (refused while Shopify is connected) | restore the `…-before-demo.json` backup |
+| `POST /api/demo` | replaces all data with demo data (refused while Shopify is connected, and 409 while the store holds real data: Clear first; the page asks to confirm) | restore the `…-before-demo.json` backup |
 | `POST /api/import?replaceDemo=1` | removes demo data, then adds the CSV rows | restore if it wasn't demo |
 | `POST /api/import` | adds CSV rows (duplicates skipped) | restore a backup from before the import |
 | `PUT /api/settings` | planning settings, store name, Sheet links; `newIngestKey: true` rotates the ingest key (breaks Flow until updated) | set the old values again; a rotated key can't be brought back |

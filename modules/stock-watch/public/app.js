@@ -554,7 +554,7 @@
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
-        <div class="toolbar">${sh.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
+        <div class="toolbar">${sh.source || src.kind === 'live' ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
         <div id="clear-confirm"></div></details>
       <form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`;
   }
@@ -668,7 +668,8 @@
       }
       if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
       if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
-      if (t.id === 'load-demo') { t.disabled = true; await api('/api/demo', { method: 'POST' }); toast('Demo data loaded'); await load(); }
+      if (t.id === 'load-demo') { $('#clear-confirm').innerHTML = '<div class="confirm">Replace all data with demo data? <button class="btn danger" id="demo-yes">Load demo</button><button class="btn ghost" id="clear-no">Keep</button></div>'; }
+      if (t.id === 'demo-yes') { t.disabled = true; await api('/api/demo', { method: 'POST' }); toast('Demo data loaded'); await load(); }
       if (t.id === 'clear-all') { $('#clear-confirm').innerHTML = '<div class="confirm">Delete every stock change and order line? <button class="btn danger" id="clear-yes">Delete all</button><button class="btn ghost" id="clear-no">Keep</button></div>'; }
       if (t.id === 'clear-no') { $('#clear-confirm').innerHTML = ''; }
       if (t.id === 'clear-yes') { await api('/api/clear', { method: 'POST' }); toast('All data deleted'); await load(); }

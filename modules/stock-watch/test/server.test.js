@@ -75,6 +75,24 @@ test('login: global cap of 100 wrong passwords per 15 minutes across all IPs (SW
     assert.equal(r.status, 401, `try ${i}`);
   }
   assert.equal((await s.req('/api/settings', { headers: { ...basic('guess'), 'x-forwarded-for': '192.0.2.200' } })).status, 429);
+  // SEC-1: the cap never locks out the right password (Basic or the form) from a fresh IP
+  assert.equal((await s.req('/api/settings', { headers: { ...basic(PASSWORD), 'x-forwarded-for': '203.0.113.99' } })).status, 200);
+  const form = await s.req('/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': '203.0.113.98' }, body: 'password=' + encodeURIComponent(PASSWORD) });
+  assert.equal(form.status, 303);
+  const wrong = await s.req('/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': '203.0.113.97' }, body: 'password=nope' });
+  assert.equal(wrong.status, 429, 'a wrong password while the cap is hit is 429');
+});
+
+test('demo: refused (409) while the store holds real data (QA-1)', async (t) => {
+  const s = await start(); t.after(s.stop);
+  const now = Date.now(), ts = (d) => new Date(now - d * DAY).toISOString();
+  const stock = ['Time,Variant ID,Stock now', `${ts(2)},5,10`, `${ts(1)},5,8`].join('\n');
+  assert.equal((await s.req('/api/import?kind=stock', { method: 'POST', body: stock })).status, 200);
+  const r = await s.req('/api/demo', { method: 'POST' });
+  assert.equal(r.status, 409);
+  assert.equal((await (await s.req('/api/report')).json()).source, 'live');
+  assert.equal((await s.req('/api/clear', { method: 'POST' })).status, 200);
+  assert.equal((await s.req('/api/demo', { method: 'POST' })).status, 200, 'after Clear the demo can come back');
 });
 
 test('login: passwords with ":" work in Basic auth; form sign-in sets a cookie; logout is POST only (SW-008)', async (t) => {
