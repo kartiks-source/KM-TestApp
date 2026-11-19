@@ -1,0 +1,165 @@
+'use strict';
+/*
+ * Catalys · Stock-out Watch — server. Plain Node, no dependencies.
+ *
+ *   npm start            → http://localhost:4400
+ *   ADMIN_PASSWORD=...   → the page and /api ask for it (user "catalys")
+ *   PORT, DATA_DIR       → optional
+ */
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const store = require('./src/store');
+const engine = require('./src/engine');
+const rows = require('./src/rows');
+const demo = require('./src/demo');
+
+const PORT = Number(process.env.PORT) || 4400;
+const PASSWORD = process.env.ADMIN_PASSWORD || '';
+const PUBLIC = path.join(__dirname, 'public');
+const SYNC_EVERY = 15 * 60e3;
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+
+/* ---------- helpers ---------- */
+const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => {
+  res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', ...extra });
+  res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
+};
+const fail = (res, code, message) => send(res, code, { ok: false, error: message });
+const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
+  let size = 0; const chunks = [];
+  req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Too large'), { code: 413 })); req.destroy(); } else chunks.push(c); });
+  req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  req.on('error', reject);
+});
+const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+function authed(req) {
+  if (!PASSWORD) return true;
+  const m = String(req.headers.authorization || '').match(/^Basic (.+)$/);
+  if (!m) return false;
+  const [, pass = ''] = Buffer.from(m[1], 'base64').toString().split(':');
+  return safeEqual(pass, PASSWORD);
+}
+const publicSettings = (s) => ({ ...s });
+
+/* ---------- Google Sheet sync (published CSV links of the Stock log / Order log tabs) ---------- */
+async function syncSheet() {
+  const s = store.load().settings;
+  if (!s.sheetStockCsv && !s.sheetOrderCsv) return { skipped: true };
+  const out = { stock: 0, orders: 0 };
+  try {
+    for (const [kind, url] of [['stock', s.sheetStockCsv], ['order', s.sheetOrderCsv]]) {
+      if (!url) continue;
+      if (!/^https:\/\/docs\.google\.com\//.test(url)) throw new Error('Sheet links must be Google Sheets "Publish to web" CSV links');
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
+      if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
+      const parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order');
+      if (kind === 'stock') out.stock = store.add('stock', parsed.rows); else out.orders = store.add('orders', parsed.rows);
+    }
+    store.setSync({ lastSync: Date.now(), lastSyncError: null });
+    return out;
+  } catch (e) {
+    store.setSync({ lastSync: Date.now(), lastSyncError: e.message });
+    throw e;
+  }
+}
+
+/* ---------- API ---------- */
+async function api(req, res, url) {
+  const p = url.pathname;
+  const d = store.load();
+  const days = Number(url.searchParams.get('days')) || 30;
+
+  /* Shopify Flow → "Send HTTP request" (no login; protected by the ingest key) */
+  const ingest = p.match(/^\/ingest\/(stock|order)$/);
+  if (ingest && req.method === 'POST') {
+    const key = url.searchParams.get('key') || req.headers['x-ingest-key'];
+    if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
+    const raw = await readBody(req, 2e6);
+    let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
+    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1]));
+    const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list);
+    return send(res, 200, { ok: true, received: list.length, added: n });
+  }
+
+  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' }, 'application/json', { 'www-authenticate': 'Basic realm="Stock-out Watch"' });
+
+  if (p === '/api/report' && req.method === 'GET') {
+    const r = engine.report(d.stock, d.orders, d.settings, { days });
+    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError });
+  }
+  if (p.startsWith('/api/product/') && req.method === 'GET') {
+    const id = decodeURIComponent(p.slice('/api/product/'.length));
+    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, d.settings, { days }) });
+  }
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError });
+  if (p === '/api/settings' && req.method === 'PUT') {
+    const b = JSON.parse(await readBody(req) || '{}'); const patch = {};
+    const n = (k, lo, hi) => { if (b[k] != null && b[k] !== '' && Number.isFinite(+b[k])) patch[k] = Math.min(hi, Math.max(lo, +b[k])); };
+    n('leadDays', 0, 180); n('coverDays', 1, 365); n('safetyDays', 0, 60); n('demandWindowDays', 7, 90); n('smallTopUpDays', 1, 60); n('minPerDay', 0, 100); n('tzOffsetMin', -720, 840);
+    if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
+    for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
+    if (b.newIngestKey === true) patch.ingestKey = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, { ok: true, settings: store.setSettings(patch) });
+  }
+  if (p === '/api/import' && req.method === 'POST') {
+    const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
+    const parsed = rows.fromCsv(await readBody(req), kind);
+    if (d.source === 'demo' && url.searchParams.get('replaceDemo') === '1') store.replaceAll([], [], 'empty');
+    const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows);
+    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
+  }
+  if (p === '/api/sync' && req.method === 'POST') {
+    try { return send(res, 200, { ok: true, ...(await syncSheet()) }); } catch (e) { return fail(res, 502, e.message); }
+  }
+  if (p === '/api/demo' && req.method === 'POST') {
+    const g = demo.generate({ now: Date.now() });
+    store.replaceAll(g.stock, g.orders, 'demo');
+    return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
+  }
+  if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
+  if (p === '/api/export/reorder.csv' && req.method === 'GET') {
+    const r = engine.report(d.stock, d.orders, d.settings, { days });
+    const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
+    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(q).join(',')).join('\n');
+    return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
+  }
+  return fail(res, 404, 'Not found');
+}
+
+/* ---------- static ---------- */
+function serveStatic(req, res, url) {
+  if (!authed(req)) return send(res, 401, 'Login needed', 'text/plain', { 'www-authenticate': 'Basic realm="Stock-out Watch"' });
+  let file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
+  if (!file.startsWith(PUBLIC)) return send(res, 403, 'Forbidden', 'text/plain');
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
+  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+  fs.createReadStream(file).pipe(res);
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://local');
+  try {
+    if (url.pathname === '/health') return send(res, 200, { ok: true });
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
+    return serveStatic(req, res, url);
+  } catch (e) {
+    console.error(e);
+    return fail(res, e.code === 413 ? 413 : 500, e.code === 413 ? 'Upload too large' : 'Something went wrong on the server');
+  }
+});
+
+if (require.main === module) {
+  const d = store.load();
+  if (d.source === 'empty' && !d.stock.length && !d.orders.length) {
+    const g = demo.generate({ now: Date.now() });
+    store.replaceAll(g.stock, g.orders, 'demo');
+    console.log('Loaded demo data (replace it from Data & settings).');
+  }
+  setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY).unref();
+  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${PORT}${PASSWORD ? ' (password on)' : ''}`));
+}
+
+module.exports = { server };

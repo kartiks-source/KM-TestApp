@@ -1,0 +1,84 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const E = require('../src/engine');
+const R = require('../src/rows');
+
+const H = E.HOUR, D = E.DAY;
+const t0 = Date.parse('2026-11-01T00:00:00Z');
+
+test('stock-out episodes: out, small refill, out again, proper restock', () => {
+  const ch = [
+    { t: t0, before: 100, now: 99 },
+    { t: t0 + 10 * D, before: 1, now: 0 },
+    { t: t0 + 11 * D, before: 0, now: 10 },
+    { t: t0 + 12 * D, before: 1, now: 0 },
+    { t: t0 + 14 * D, before: 0, now: 200 },
+  ];
+  const eps = E.episodes(ch, t0 + 20 * D);
+  assert.equal(eps.length, 2);
+  assert.deepEqual(eps.map((e) => [(e.end - e.start) / D, e.topUp, e.open]), [[1, 10, false], [2, 200, false]]);
+});
+
+test('an open stock-out runs to now', () => {
+  const eps = E.episodes([{ t: t0, before: 3, now: 0 }], t0 + 5 * H);
+  assert.equal(eps.length, 1); assert.equal(eps[0].open, true); assert.equal(eps[0].end - eps[0].start, 5 * H);
+});
+
+test('demand ignores time out of stock', () => {
+  const eps = [{ start: t0 + 10 * D, end: t0 + 13 * D }];
+  const { perDay } = E.demandPerDay(250, t0, t0 + 28 * D, eps);
+  assert.equal(Math.round(perDay * 100) / 100, 10);           // 250 units over 25 in-stock days
+});
+
+test('reorder plan', () => {
+  assert.equal(E.plan({ stock: 0, perDay: 10, lead: 7, cover: 30, safety: 3 }).status, 'Out now');
+  assert.equal(E.plan({ stock: 20, perDay: 10, lead: 7, cover: 30, safety: 3 }).status, 'Critical');
+  assert.equal(E.plan({ stock: 80, perDay: 10, lead: 7, cover: 30, safety: 3 }).status, 'Order now');
+  assert.equal(E.plan({ stock: 150, perDay: 10, lead: 7, cover: 30, safety: 3 }).status, 'Order this week');
+  assert.equal(E.plan({ stock: 500, perDay: 10, lead: 7, cover: 30, safety: 3 }).status, 'OK');
+  assert.equal(E.plan({ stock: 80, perDay: 10, lead: 7, cover: 30, safety: 3 }).qty, 320);   // 10 × 40 − 80
+});
+
+test('selling hours follow the store’s hourly pattern and split by local day', () => {
+  const flat = new Array(24).fill(1);
+  const r = E.sellingHours(t0, t0 + 48 * H, flat, 330);
+  assert.equal(Math.round(r.total), 48);
+  assert.equal(Math.round(Object.values(r.byDay).reduce((a, b) => a + b, 0)), 48);
+  const nightOnly = flat.map((_, h) => (h < 6 ? 4 : 0));     // all sales between 00:00 and 06:00 IST
+  const day = E.sellingHours(Date.parse('2026-11-01T06:30:00Z'), Date.parse('2026-11-01T12:30:00Z'), nightOnly, 330);   // 12:00–18:00 IST
+  assert.equal(day.total, 0);
+});
+
+test('report: lost value, small top-up and repeat flags, reorder list', () => {
+  const now = t0 + 28 * D;
+  const stock = [
+    { t: t0, variantId: '1', sku: 'A', product: 'Serum', variant: '30 ml', before: 300, now: 300, price: 500 },
+    { t: t0 + 10 * D, variantId: '1', before: 1, now: 0 },
+    { t: t0 + 11 * D, variantId: '1', before: 0, now: 10 },
+    { t: t0 + 12 * D, variantId: '1', before: 1, now: 0 },
+    { t: t0 + 14 * D, variantId: '1', before: 0, now: 40 },
+  ];
+  const orders = [];
+  for (let d = 0; d < 28; d++) if (d < 10 || d === 11 || d >= 14) orders.push({ t: t0 + d * D, order: `#${d}`, variantId: '1', sku: 'A', qty: 10, price: 500 });
+  const r = E.report(stock, orders, { tzOffsetMin: 0 }, { now, days: 28 });
+  const p = r.products[0];
+  assert.equal(p.perDay, 10);
+  assert.equal(r.stockouts.length, 2);
+  const first = r.stockouts.find((s) => s.topUp === 10);
+  assert.equal(first.small, true); assert.equal(first.repeat, true);
+  assert.equal(r.totals.lost, Math.round(3 * 10 * 500));        // 3 days out × 10/day × ₹500 (flat hours)
+  assert.equal(p.status, 'Order now');                           // 40 in stock at 10/day = 4 days (> 3 = not critical, < lead + safety)
+});
+
+test('rows: CSV with header, Flow line without header, JSON webhook', () => {
+  const csv = 'Time,Variant ID,SKU,Product,Variant,Stock before,Stock now,Price\n2026-11-17T10:00:00+05:30,gid://shopify/ProductVariant/42,"S,1",Serum,30 ml,5,0,499\n';
+  const a = R.fromCsv(csv, 'stock').rows;
+  assert.equal(a.length, 1); assert.equal(a[0].variantId, '42'); assert.equal(a[0].sku, 'S,1'); assert.equal(a[0].now, 0);
+  const b = R.fromWebhook('2026-11-17T10:05:00+0530,42,S1,Serum,30 ml,0,12,499', 'stock');
+  assert.equal(b[0].now, 12); assert.equal(b[0].t, Date.parse('2026-11-17T10:05:00+05:30'));
+  const c = R.fromWebhook({ created_at: '2026-11-17T10:06:00+05:30', order: '#1001', variant_id: 42, sku: 'S1', quantity: 2, price: 449 }, 'order');
+  assert.equal(c[0].qty, 2); assert.equal(c[0].price, 449);
+  const noTime = R.fromWebhook(',42,S1,Serum,,3,2,499', 'stock', 123);
+  assert.equal(noTime[0].t, 123);
+});
