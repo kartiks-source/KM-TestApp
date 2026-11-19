@@ -18,6 +18,7 @@ const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
 const period = require('./src/period');
+const digests = require('./src/digest-service');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -152,6 +153,17 @@ function syncShopify() {
   return shopifyRun;
 }
 
+/* ---------- morning digest (SW-028): the report as of `now`, with yesterday; a fresh pull before sending ---------- */
+const digestCtx = {
+  report({ days, now }) {
+    const d = store.load(), rowsAt = period.asOf(d.stock, d.orders, now);
+    const r = engine.report(rowsAt.stock, rowsAt.orders, d.settings, { days, now });
+    r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r);
+    return r;
+  },
+  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(); },
+};
+
 /* ---------- API ---------- */
 async function api(req, res, url) {
   const p = url.pathname;
@@ -171,6 +183,8 @@ async function api(req, res, url) {
   }
 
   if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
+  const dg = await digests.handle(req, url, readBody, digestCtx);   // /api/digest… (SW-028)
+  if (dg) return send(res, dg.code, dg.body, dg.type);
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { ...span });
@@ -282,6 +296,7 @@ if (require.main === module) {
     setTimeout(pull, 5000).unref();
     setInterval(pull, SYNC_EVERY).unref();
   }
+  digests.schedule(digestCtx);
   server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${PORT}${PASSWORD ? ' (password on)' : ''}`));
 }
 

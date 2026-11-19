@@ -411,3 +411,13 @@ table.fixed td:first-child { max-width: none; }
 .rolepick .menu .linkbtn small { color: var(--soft); font-size: 12px; }
 .rolepick .menu .linkbtn.on { background: var(--brand-wash); }
 .rolepick .menu .linkbtn.on b { color: var(--brand); }
+
+/* Sprint 2 · B-roles: Share menu + Morning digest settings (SW-028) */
+.share .menu { min-width: 230px; }
+.share .menu .linkbtn { width: 100%; }
+.dg-roles { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0; }
+.dg-roles label { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; font-size: 13px; }
+.dg-h { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: var(--soft); }
+.dg-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.okv { color: var(--ok); font-weight: 600; }
+@media (max-width: 760px) { .share .menu { right: 0; left: auto; } .dg-roles label { min-height: 44px; } }

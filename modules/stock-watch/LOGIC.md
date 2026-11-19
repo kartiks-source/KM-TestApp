@@ -341,3 +341,26 @@ No number changes with a role: a role view only **removes** parts of today's def
 - Data & settings is never removed: it holds the switch back. Removing a page from the menu doesn't lock it (view-only access is SW-029).
 - Why: each role has one decision (docs/RACI.md); the rest is noise for that person. Considered: per-role pages. Rejected: they'd add screens for everyone and drift from the default.
 - Checked: `test/roles.test.js` (every role removes something on its home page, never Data); `test/smoke/roles-smoke.js` counts visible pieces per role against the default at 1280/1440/1920/390.
+
+## 14. Morning digest (SW-028, `src/digest.js`, `src/digest-service.js`)
+
+A few plain-language lines per role, with a link that opens that role's view (`/?role=ops#reorder`). At most 6 lines including the title; the link comes after. Same rules and numbers as the page: order today, overstock and best sellers come from the default 30-day report; "yesterday" is §5a.
+
+| Role | When | Lines |
+|---|---|---|
+| CEO | Mondays | sales lost last 7 days (₹, % of demand) **vs the 7 days before**; profit lost; cash in overstock; best sellers at risk |
+| Founder / COO (and "Everyone") | daily | order today ₹ and products; still out + cost per day; yesterday; overstock |
+| Ops / inventory | daily | order today lines + ₹; top 3 lines (qty, days left); yesterday ran out / back |
+| Marketing | daily | pause promotion count + top 3; push (overstock ₹) + top 3 |
+| Finance | Mondays | cash to order today + more due this week; overstock; sales lost last 7 days |
+| Buyer, Warehouse | not pushed (RACI "–") | order today; top 3 by order cost (buyer) or pieces (warehouse). Available from Share and `GET /api/digest?role=` |
+
+- **Still out, cost per day** = Σ over products at 0 stock that sell: in-stock rate (§3) × average price paid. What a day of the current stock-outs costs in sales, at today's rates.
+- **Pause promotion** (marketing) = selling products (rate > 0) that are out of stock, or have fewer days left than the lead time (a reorder placed today can't land in time). Biggest sellers (₹ sold) first. **Push these** = overstocked products (§7c), most ₹ stuck first.
+- **Vs the 7 days before** (CEO): the same 7-day report worked out from the rows as they stood 7 days ago (nothing recorded after then), so it shows what the page showed that day.
+- **More due this week** (finance) = order value of everything on the reorder list − order value for today.
+- **When it's sent:** every minute the server checks: not paused, a webhook URL is set, store-time hour ≥ the set hour [9] and < hour + 3 (a restart doesn't lose the morning's send), and the role hasn't had one today (weekly roles: Mondays only). Then it pulls fresh data (sheet, Shopify) and POSTs each due role's digest as JSON `{app, kind, at, store, role, roleName, title, lines, link, text, note?}`. One try per role per day; a failure is logged, not retried all morning ("Send now" retries by hand). A failed pull still sends, with `note` saying the numbers are from the last good pull.
+- **Every send is logged** (last 50 kept, last 5 shown under Data & settings → Morning digest): time, role, scheduled or by hand, HTTP status or error. The webhook URL is never shown back or logged (it often carries a token); only its host. `DIGEST_WEBHOOK_URL` overrides the saved one. https only (http only to this machine, for testing).
+- **No webhook:** Overview → Share → Copy morning digest, or Send digest on WhatsApp (`wa.me/?text=`, opens WhatsApp with the text ready; no account or key on our side).
+- Why a webhook and not email: no email provider, keys or dependencies; Zapier / Make / Slack / a WhatsApp Business tool turn one POST into email, chat or WhatsApp per recipient. Considered: an email API (needs a provider account and key in env); left for when a client asks.
+- When it can be wrong: the CEO comparison counts a stock-out still open 7 days ago up to that day only; per-role recipients are one webhook with `role` in the body (the receiving tool routes by role).

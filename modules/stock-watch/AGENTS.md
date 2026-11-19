@@ -31,6 +31,11 @@ Google Sheet CSV / upload ───┘
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
+| `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
+| `src/digest.js` | morning digest text per role, pure (SW-028) |
+| `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
+| `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
+| `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |
@@ -44,6 +49,12 @@ Google Sheet CSV / upload ───┘
 - Fallback if tokens can't be shared: our own read-only Shopify app (not built).
 - Scopes needed: `read_products`, `read_inventory`, `read_orders`.
 - Once a key source is set, the app refuses to start without `ADMIN_PASSWORD`, and demo data is turned off.
+
+## Role views and digest (Sprint 2 · B-roles)
+
+- Role views only remove UI (ADR-0006); config in `public/roles.js`, rules in LOGIC.md §13. Browser check: `node test/smoke/roles-smoke.js` (needs Playwright; `CHROMIUM_PATH` if its browser isn't downloaded).
+- Digest: LOGIC.md §14. Optional variables `DIGEST_WEBHOOK_URL`, `PUBLIC_URL`. Without a webhook nothing is sent; Share → Copy / WhatsApp still works.
+- Next: per-role webhook URLs if a client needs separate recipients; warehouse home on the Ordered list once SW-012 lands; marketing home on Pause/Push chips once SW-026 lands.
 
 ## Railway variables now
 

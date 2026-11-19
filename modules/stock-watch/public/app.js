@@ -285,7 +285,7 @@
     return `
       <section class="headline">
         <h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today · stock-outs cost <span class="lost">${money(t.lost)}</span> ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</h1>
-        <button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>
+        ${window.SW_DIGEST ? SW_DIGEST.shareMenu() : '<button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>'}
         ${ydayStrip(r.yesterday)}
       </section>
       <section class="tiles t4">
@@ -474,6 +474,7 @@
           <div class="form">${ASSUME.map(([k, label, , , tip]) => field(k, label, s[k], tip)).join('')}</div></details>
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
+      ${window.SW_DIGEST ? SW_DIGEST.panel() : ''}
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
         <div class="toolbar">${sh.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
         <div id="clear-confirm"></div></details>
