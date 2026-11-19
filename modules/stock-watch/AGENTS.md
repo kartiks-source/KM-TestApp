@@ -16,8 +16,10 @@ Shopify Flow → /ingest/*  ───┼─→ rows (stock changes, order lines)
 Google Sheet CSV / upload ───┘
 ```
 
-- **Stock row:** `{ t, variantId, sku, product, variant, before, now, price }`, one per stock change.
-- **Order row:** `{ t, order, variantId, sku, qty, price }`, one per order line.
+- **Stock row:** `{ t, variantId, sku, product, variant, before, now, price, src }`, one per stock change.
+- **Order row:** `{ t, order, variantId, sku, qty, price, src }`, one per order line.
+- **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs.
+- **Catalog** (`store.json` → `catalog`, Shopify only): `{variantId → productId, product, variant, sku, type, tags, price, cost, status, tracked, active, stock, seenAt, inactiveSince}`, replaced on every pull (ADR-0010). Engine takes stock now and attributes from it; inactive variants are left out of reorder and overstock.
 - **Engine** (`src/engine.js`, pure functions): stock-out episodes, in-stock sales rate, ₹ lost (weighted by the store's hour-of-day sales pattern), reorder status and quantity.
 
 ## Files
@@ -28,9 +30,9 @@ Google Sheet CSV / upload ───┘
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows |
-| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
+| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
-| `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
+| `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |
@@ -48,6 +50,12 @@ Google Sheet CSV / upload ───┘
 ## Railway variables now
 
 `ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (so the app can write to the volume), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
+
+## Running in production
+
+- Runs under tini (Dockerfile). SIGTERM/SIGINT: timers stop, a running Shopify pull gets up to 25 s (`STOP_WAIT_MS`), the store is written, then the process exits.
+- `/health`: 200, or 503 while saving fails. Railway health check set in root `railway.json`.
+- `/status` (no login, for an uptime monitor): `{ok, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, uptimeMin}`; 503 when the last Shopify pull is > 45 min old or saving fails. No names, keys or error text. `/api/report` carries the same `freshness` for the stale-data banner (UI: stream E).
 
 ## Commands
 

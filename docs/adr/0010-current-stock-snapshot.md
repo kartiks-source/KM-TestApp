@@ -1,6 +1,6 @@
 # 0010. Current-stock snapshot separate from change history
 
-- Status: Proposed (implement in SW-002)
+- Status: Accepted (implemented in SW-002, 2026-11-19)
 - Date: 2026-11-19
 - Deciders: builder, architect
 
@@ -16,4 +16,5 @@ Keep `db.catalog` (variant → product ID, attributes, tags, price, cost, status
 
 - Dead stock and current cost are always present; profit maths uses today's cost.
 - Catalog also carries product ID and tags, which group-by (SW-022) needs.
+- Implementation notes: the catalog lives in `store.json` as `catalog` and is written only after a complete stock pull. Inactive = product not ACTIVE, inventory untracked, or missing from the pull (kept as `DELETED` for 120 days). `inactiveSince` = first pull that saw it inactive; an open stock-out ends there.
 - One more structure to back up and migrate (schemaVersion, SW-047).

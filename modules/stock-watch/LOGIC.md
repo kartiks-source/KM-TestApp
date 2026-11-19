@@ -24,17 +24,30 @@ Two streams, nothing else:
 - **Stock is the variant's total across all locations.** A stock-out means the shopper couldn't buy it anywhere on the site, which is what loses the sale.
 - **A variant is the unit of analysis** (e.g. "Nesting Table · Black Marble"), because that's what a shopper picks and what goes out of stock.
 - **The same row arriving twice is stored once.** Stock rows are matched on time + variant + before + after; order lines on order number + variant + quantity (`src/rows.js`).
-- **Data older than 120 days is dropped** (`src/store.js`), since nothing on the page looks further back than 90 days.
+- **Data older than 120 days is dropped** (`src/store.js`), since nothing on the page looks further back than 90 days, **with two exceptions per variant:** its newest stock row (its stock now, even if it hasn't moved in months) and the row that opened a stock-out that's still running. Without them, dead stock lost its only row after 120 days and vanished from Overstock, and a long stock-out lost its start.
+
+### Current stock and attributes (the catalog)
+
+With Shopify connected, every pull also stores the **catalog**: each variant's stock now, list price, unit cost, category, tags, product ID and status, replaced whole on every pull (ADR-0010). The numbers use it as follows:
+
+- **Stock now, price, cost and category come from the catalog**, not from the last stock row. A cost change in Shopify shows on the next pull even if stock didn't move, so profit and cash maths use today's cost. Stock rows are the change history, used for stock-outs.
+- **Inactive variants** (product archived or draft, inventory not tracked, or no longer in Shopify) are left out of reorder and overstock: they can't be sold, so their stock isn't cash you can free by selling and they don't need ordering. They still count in Sold and Lost for days they sold, and appear in Products (status *Inactive*) only if they sold or had a stock-out in the period. The Data page shows **Excluded: N archived/draft, X pcs**.
+- **A stock-out on a variant that went inactive ends when it went inactive** (first pull that saw it inactive), so an archived product doesn't keep adding ₹ lost or sit in *Still out*.
+- A variant deleted from Shopify is kept as *deleted* for 120 days, then dropped with its rows.
+
+Without Shopify (Flow, Sheet, CSV), there's no catalog: stock now is the newest stock row, and nothing is inactive unless the row source leaves it out.
 
 **Where it comes from and how precise it is:**
 
 | Source | Stock-out timing |
 |---|---|
 | Shopify pull (read-only, every 15 minutes) | to within 15 minutes; a stock-out that starts and ends between two reads is missed |
-| Shopify Flow → this app or the Google Sheet | to the minute, because Flow fires on each change |
+| Shopify Flow → this app (no Shopify connection) or the Google Sheet | to the minute, because Flow fires on each change |
 | CSV upload | as precise as the file |
 
-Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine: the same change can arrive twice at slightly different times, but a second "went to 0" while a product is already out (or a second "back in stock" after it's back) changes nothing, so stock-outs aren't double-counted. Exact repeats of a row are dropped.
+**One source per store (ADR-0009).** Once Shopify is connected, the pull is the only source: Flow (`/ingest/*`), Sheet sync and CSV import are refused (409) with a plain message, because their order lines are keyed differently (order + variant + quantity vs Shopify's line ID) and the same sale would count twice. Clear and import also wait while a pull runs. Without Shopify, Flow, Sheet and CSV can be used together: they share one key, so the same order line sent by two of them is stored once. Every row records where it came from (`src`: shopify, flow, sheet, csv, demo). Rows stored before Shopify was connected stay; the pull replaces all lines of each order it reads (by order name), so a Flow or CSV copy of an order from the last 60 days is replaced, not doubled. Exact repeats of a row are dropped.
+
+**Is the data fresh?** With Shopify connected, the data counts as **stale when the last good pull is more than 45 minutes old** (three missed 15-minute pulls), or when there has been no good pull within 45 minutes of the app starting. Stale data turns the unauthenticated `/status` to 503 for the uptime monitor, and `/api/report` carries `freshness {lastPull, ageMin, stale}` for the "Data is X h old" banner. Without Shopify nothing is ever stale, because Flow, Sheet and CSV data arrive whenever the brand sends them.
 
 **Times without a time zone** (in a CSV or Flow row) are read as India time.
 
@@ -65,7 +78,7 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 
 **When it can be wrong:**
 - **Bundles or pre-orders** sold at 0 stock would look like stock-outs.
-- **Products that are paused rather than out** would also look out. Untracked products and products not set to Active are skipped in the Shopify pull for this reason.
+- **Products that are paused rather than out** would also look out. Untracked products and products not set to Active get no stock rows from the Shopify pull for this reason, and a stock-out ends when the product turns inactive (section 1, catalog).
 
 ---
 
@@ -239,7 +252,9 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 
 **Why:** this is the cost-cutting side of the same maths. Money sitting in stock that won't sell for months could pay for stock that's running out. The usual moves are to stop reordering it, bundle it with a best seller, or discount it. The "twice" margin keeps a product that's only slightly over from being flagged.
 
-**When it can be wrong:** stock bought ahead of a known season or campaign will look overstocked until the demand arrives.
+**Left out:** inactive variants (archived, draft, untracked, deleted; section 1). A variant that hasn't moved in months still counts: its stock comes from the catalog or its newest stock row, which is never pruned.
+
+**When it can be wrong:** stock bought ahead of a known season or campaign will look overstocked until the demand arrives. A product set to draft while it's being restocked or re-shot drops out of overstock until it's active again.
 
 ## 7d. Trend (sparkline and % change)
 
@@ -293,7 +308,7 @@ Tables are built to fit the screen without sideways scrolling: on laptops narrow
 
 ## 10. Demo data (not real)
 
-`src/demo.js` builds 60 days for a home-décor store on **Sammsara's public product list** (names, variants, prices from `sammsara.com/products.json`, saved in `src/demo-catalog.json`). **Every stock level, order and stock-out is invented.** The page shows "Demo data" whenever it's on, and demo data switches off as soon as Shopify is connected.
+`src/demo.js` builds 60 days for a home-décor store on **Sammsara's public product list** (names, variants, prices from `sammsara.com/products.json`, saved in `src/demo-catalog.json`). **Every stock level, order and stock-out is invented.** The page shows "Demo data" whenever it's on. **Demo and real data never mix:** the first real row (Shopify, Flow, Sheet or CSV) deletes the demo before it's stored, and once a store has held real data the demo is never loaded again at start-up, not even after **Clear all data** or a new demo version (`everLive` in `store.json`). Loading it by hand from the Data page still works while Shopify isn't connected.
 
 How it's generated, so the patterns look like a real store:
 - **Popularity:** each product gets a demand rank. A few sell 5–10 a day; most sell under 1. Cheaper items sell more.

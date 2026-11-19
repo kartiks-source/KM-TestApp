@@ -41,7 +41,7 @@
   const dayLabel = (k) => { const [, m, d] = k.split('-'); return `${+d} ${MON[+m - 1]}`; };
   const dur = (h) => (h >= 48 ? `${n1(h / 24)} days` : `${n1(h)} h`);
 
-  const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Slow seller': 'idle', 'No stock data': 'idle' };
+  const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Slow seller': 'idle', 'No stock data': 'idle', Inactive: 'idle' };
   const narrow = () => window.innerWidth < 760;
   const SHORT = { 'Order this week': 'This week', 'No stock data': 'No stock' };
   const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}" title="${esc(s)}">${esc(SHORT[s] || s)}</span>`;
@@ -434,7 +434,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings</h1></section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}</p></section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p></section>
 
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>

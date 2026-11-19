@@ -5,7 +5,8 @@
  *
  * Needs only these read scopes: read_products, read_inventory, read_orders.
  *
- *   pullStock   every variant's total stock now; a stock row is stored only when it changed
+ *   pullStock   every variant's total stock now; a stock row is stored only when it changed, and the
+ *               whole catalog (stock now, price, cost, type, tags, status) is returned on every pull
  *   pullOrders  orders changed since the last pull (first run: created in the last 60 days). Each order's
  *               lines are replaced whole, so later cancellations, refunds and edits are picked up.
  *               What counts as a sale: not cancelled, not a test order, units net of refunds and
@@ -69,7 +70,7 @@ async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
 const STOCK_Q = `query Stock($after: String) {
   productVariants(first: 250, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { title status productType } }
+    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { id title status productType tags } }
   }
 }`;
 
@@ -100,21 +101,32 @@ const vid = (gid) => String(gid || '').replace(/^gid:\/\/shopify\/ProductVariant
 
 /**
  * Compare the store's stock now with what we saw last time.
- * Returns stock rows for what changed, and the new last-seen map.
+ * Returns stock rows for what changed (active, tracked variants only), the new last-seen map, and
+ * the catalog: every variant returned, with stock now, attributes and whether it's active (SW-002).
+ * Inactive = product archived or draft, or stock not tracked; it's kept in the catalog, marked.
  */
 function diffStock(variants, lastQty, t) {
-  const rows = []; const next = {};
+  const rows = []; const next = {}; const catalog = {};
   for (const v of variants) {
-    if (v.inventoryItem && v.inventoryItem.tracked === false) continue;
-    if (v.product && v.product.status && v.product.status !== 'ACTIVE') continue;
     const id = vid(v.id); const now = Number(v.inventoryQuantity);
-    if (!id || !Number.isFinite(now)) continue;
+    if (!id) continue;
+    const tracked = !(v.inventoryItem && v.inventoryItem.tracked === false);
+    const status = v.product?.status || 'ACTIVE';
+    const cost = Number(v.inventoryItem?.unitCost?.amount) > 0 ? Number(v.inventoryItem.unitCost.amount) : null;
+    const variant = v.title === 'Default Title' ? '' : (v.title || '');
+    catalog[id] = {
+      productId: String(v.product?.id || '').replace(/^gid:\/\/shopify\/Product\//, ''), product: v.product?.title || '', variant, sku: v.sku || '',
+      type: v.product?.productType || '', tags: Array.isArray(v.product?.tags) ? v.product.tags : [], price: Number(v.price) || 0, cost,
+      status: tracked ? status : (status === 'ACTIVE' ? 'UNTRACKED' : status), tracked, active: tracked && status === 'ACTIVE',
+      stock: Number.isFinite(now) ? now : null, seenAt: t,
+    };
+    if (!catalog[id].active || !Number.isFinite(now)) continue;
     next[id] = now;
     const before = Object.prototype.hasOwnProperty.call(lastQty, id) ? lastQty[id] : null;
     if (before === now) continue;
-    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(Number(v.inventoryItem?.unitCost?.amount) > 0 ? { cost: Number(v.inventoryItem.unitCost.amount) } : {}) });
+    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant, before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(cost ? { cost } : {}) });
   }
-  return { rows, lastQty: next };
+  return { rows, lastQty: next, catalog };
 }
 
 /** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */

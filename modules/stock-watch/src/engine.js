@@ -221,6 +221,16 @@ function report(stock, orders, settings = {}, opts = {}) {
     p.sku = p.sku || o.sku || '';
     p.lines.push(o);
   }
+  /* current stock and attributes come from the Shopify catalog when there is one (SW-002, ADR-0010);
+     stock rows are then history only. Inactive = archived, draft, untracked or deleted. */
+  const cat = opts.catalog && typeof opts.catalog === 'object' ? opts.catalog : {};
+  for (const [id, c] of Object.entries(cat)) {
+    const p = get(String(id));
+    if (c.sku) p.sku = c.sku; if (c.product) p.product = c.product; if (c.variant != null && c.product) p.variant = c.variant; if (c.type) p.type = c.type;
+    if (num(c.price)) p.price = num(c.price); if (num(c.cost)) p.cost = num(c.cost);
+    if (c.stock != null && Number.isFinite(+c.stock)) p.stock = num(c.stock);
+    if (c.active === false) { p.inactive = c.status || 'INACTIVE'; p.inactiveSince = c.inactiveSince || now; }
+  }
 
   const orderSpan = minMax(orders, (o) => o.t), stockSpan = minMax(stock, (r) => r.t);
   const firstOrder = orders.length ? orderSpan.min : now;
@@ -240,9 +250,12 @@ function report(stock, orders, settings = {}, opts = {}) {
   }
 
   const products = [], reorder = [], stockouts = [];
+  const excluded = { variants: 0, pcs: 0, byStatus: {} };
   for (const p of P.values()) {
     const name = [p.product, p.variant && p.variant !== 'Default Title' ? p.variant : ''].filter(Boolean).join(' · ') || p.sku || p.id;
-    const eps = episodes(p.changes, now);
+    /* an inactive product can't be bought, so a stock-out it was in ends when it went inactive */
+    const eps = p.inactive ? episodes(p.changes, Math.min(now, Math.max(p.inactiveSince, p.changes.length ? p.changes[p.changes.length - 1].t : 0))) : episodes(p.changes, now);
+    if (p.inactive) for (const e of eps) if (e.open) { e.open = false; e.inactive = true; }
     const pFirst = Number.isFinite(p.first) ? p.first : demandFrom;
     const pFrom = Math.max(demandFrom, pFirst);   // a new launch isn't diluted by days before it existed
     /* a long stock-out (under 7 in-stock days in the window) looks further back, so it keeps its demand */
@@ -265,7 +278,7 @@ function report(stock, orders, settings = {}, opts = {}) {
         const d = daily[k]; if (!d) continue;
         d.lost += w * perSellingHour * price; d.unitsLost += w * perSellingHour; d.outSkus.add(p.id);
       }
-      const small = !e.open && perDay > 0 && e.topUp < perDay * S.smallTopUpDays;
+      const small = !e.open && !e.inactive && perDay > 0 && e.topUp < perDay * S.smallTopUpDays;
       const next = eps[i + 1];
       const repeat = !!next && next.start - e.end < 7 * DAY;
       if (small) smallTopUps++;
@@ -273,7 +286,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       stockouts.push({
         id: p.id, name, sku: p.sku, start: e.start, end: e.open ? null : e.end, open: e.open,
         hours: round((e.end - e.start) / HOUR, 1), hoursInPeriod: round((e.end - a) / HOUR, 1), unitsLost: round(uLost, 1), lost: Math.round(vLost),
-        topUp: e.open ? null : e.topUp, topUpDays: !e.open && perDay > 0 ? round(e.topUp / perDay, 1) : null,
+        topUp: e.open || e.inactive ? null : e.topUp, topUpDays: !e.open && !e.inactive && perDay > 0 ? round(e.topUp / perDay, 1) : null,
         small, repeat, perDay: round(perDay, 2),
       });
     });
@@ -305,6 +318,12 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
     row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
     Object.assign(row, trend(p.lines, eps, now, p.first));
+    if (p.inactive) {   // left out of reorder and overstock; listed only if it sold or lost sales in the period
+      excluded.variants++; excluded.pcs += Math.max(0, num(p.stock)); excluded.byStatus[p.inactive] = (excluded.byStatus[p.inactive] || 0) + 1;
+      Object.assign(row, { status: 'Inactive', inactive: p.inactive, orderQty: 0, orderValue: 0, excessUnits: 0, excessValue: 0, overstock: false });
+      if (row.sold || row.lost || row.unitsSold || row.outs) products.push(row);
+      continue;
+    }
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
@@ -377,6 +396,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       lastStock: stock.length ? stockSpan.max : null,
       firstOrder: orders.length ? firstOrder : null,
       lastOrder: orders.length ? orderSpan.max : null,
+      catalog: Object.keys(cat).length, excluded,
     },
   };
 }
@@ -398,7 +418,9 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (let t = now - (days - 1) * DAY; t <= now; t += DAY) units[dayKey(t, S.tzOffsetMin)] = 0;
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, S.tzOffsetMin); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
-  const r = report(stock, orders, S, { now, days });
+  const r = report(stock, orders, S, { now, days, catalog: opts.catalog });
+  const c = opts.catalog && opts.catalog[id];
+  if (!timeline.length && c && c.stock != null) timeline.push({ t: from, stock: num(c.stock) }, { t: now, stock: num(c.stock) });   // never moved: flat at its stock now
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,
     dailyUnits: Object.entries(units).map(([day, u]) => ({ day, units: u })),
     stockouts: r.stockouts.filter((s) => String(s.id) === String(id)).sort((a, b) => a.start - b.start) };
