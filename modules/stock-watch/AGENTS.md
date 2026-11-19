@@ -6,7 +6,7 @@ Read the root `AGENTS.md` first. This file is this module's working memory: keep
 
 Shows a D2C brand which products to reorder before they run out, and how many ₹ every stock-out cost in sales. The user is the brand or its agency. The question it answers: "was a bad sales day the ads, or an empty shelf?"
 
-Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; `/logout` signs out. Scripts can still use Basic auth (any user name).
+Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; `/logout` signs out. Scripts can still use Basic auth (any user name). Optional `VIEW_PASSWORD`: a view-only sign-in that sees everything and changes nothing (server refuses every `/api` write with 403; LOGIC.md §13).
 
 ## How data flows
 
@@ -29,6 +29,8 @@ Google Sheet CSV / upload ───┘
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
+| `src/access.js` | roles: admin / view password, role in the signed cookie, the 403 gate for view sessions (SW-029) |
+| `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |

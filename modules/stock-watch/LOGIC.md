@@ -311,3 +311,23 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 `modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds, with two differences:
 - **It values every hour of a stock-out equally** (no hour-of-day weighting, section 4a). Its ₹ lost can differ from the web app's for stock-outs mostly at night or mostly in the evening; over whole days the two agree.
 - **It uses a fixed 30-day window** and counts a stock-out that started before it in full, where the web app counts only the hours inside the selected period.
+
+## 13. Who can change what (view-only sign-in, settings change log)
+
+Code: `src/access.js`, `src/audit.js` (SW-029, ADR-0011). Tests: `test/access.test.js`.
+
+**Rule.**
+- Two shared passwords. `ADMIN_PASSWORD` signs in as **admin** (sees and changes everything). `VIEW_PASSWORD` (optional) signs in as **view**: every number, page and CSV export is the same, but nothing can be changed.
+- The server decides, not the page: any `POST`, `PUT`, `PATCH` or `DELETE` to `/api/…` from a view session (cookie or Basic auth) is refused with **403** before any route runs. That covers settings, Plan settings "Save as default", imports, sheet sync, Shopify "Pull now", demo, clear, and any write route added later (e.g. "Mark ordered").
+- A view session never receives the Flow ingest key (it would let them write through `/ingest`).
+- The page hides what a viewer can't use (ADR-0006: role views only remove): no Data page, no "Save as default". Trying values in Plan settings still works (it changes nothing stored); Reset is kept.
+- The role is inside the signed session cookie, with a fingerprint of `VIEW_PASSWORD`: a view cookie can't be edited into admin, and changing or removing `VIEW_PASSWORD` signs all view sessions out. Admin cookies keep their old form, so existing sign-ins stay valid.
+- The server refuses to start when `VIEW_PASSWORD` is set without `ADMIN_PASSWORD` (nobody would need to sign in) or equals it.
+- **Change log:** every settings save writes one entry per setting whose value actually changed: `{ at, by, key, old, new }`. `by` is the role (`admin`), with "(script)" when the change came with Basic auth instead of a sign-in. Numbers are compared as numbers (14 and "14" are the same). The ingest key is never logged: it shows as "(old key) → (new key)". Newest first, last 200 kept in `store.json` (`settingsLog`).
+- **Shown:** the latest change to lead time, stock should last or buffer under Plan settings ("Last changed … by … · old → new"), for every role; the last 50 changes under Data → Settings → "Advanced: change log" (admin).
+
+**Why.** RACI: CEO and finance view, they don't change assumptions or data. A page that only hides buttons can be bypassed with one `curl`, so the check sits on the server. The log answers "who changed cover days and when" when a reorder number moves.
+
+**Considered.** Named users (needs a user store or Performity SSO, later ADR). Per-route checks (easy to forget on a new route; one gate before every write is safer).
+
+**Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords.

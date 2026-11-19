@@ -395,3 +395,9 @@ table.fixed td:first-child { max-width: none; }
   .headline .hbtn { margin-left: 0; }
   .colpick .menu { right: auto; left: 0; }
 }
+
+/* SW-029: last Plan settings change, settings change log; view-only sign-in has no Data link */
+.rail a[hidden] { display: none; }
+.plast { padding: 0 14px 8px; overflow-wrap: anywhere; }
+.log { max-height: 320px; overflow-y: auto; font-size: 13px; }
+.log .ep span { overflow-wrap: anywhere; min-width: 0; }

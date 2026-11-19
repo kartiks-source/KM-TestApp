@@ -4,6 +4,7 @@
  *
  *   npm start            → http://localhost:4400
  *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected.
+ *   VIEW_PASSWORD=...    → optional second password: sees everything, changes nothing (src/access.js, SW-029)
  *   PORT, DATA_DIR       → optional
  *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
  */
@@ -17,9 +18,13 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const access = require('./src/access');
+const audit = require('./src/audit');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
+const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
+const PASSWORDS = { admin: PASSWORD, view: VIEW_PASSWORD };
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -43,18 +48,18 @@ const COOKIE = 'sw_session';
 const SESSION_DAYS = 30;
 const sign = (exp) => crypto.createHmac('sha256', 'stock-watch-session|' + PASSWORD).update(String(exp)).digest('base64url');
 const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
-function sessionOk(req) {
-  const [exp, sig] = cookieOf(req, COOKIE).split('.');
-  return !!exp && +exp > Date.now() && !!sig && safeEqual(sig, sign(exp));
-}
+const sessionRole = (req) => access.cookieRole(cookieOf(req, COOKIE), sign, safeEqual, { view: VIEW_PASSWORD });
+/** The caller's role ('admin' | 'view'), or '' when not signed in. Truthy = signed in. */
 function authed(req) {
-  if (!PASSWORD) return true;
-  if (sessionOk(req)) return true;
+  if (!PASSWORD) return access.ADMIN;
+  const r = sessionRole(req); if (r) return r;
   const m = String(req.headers.authorization || '').match(/^Basic (.+)$/);
-  if (!m) return false;
+  if (!m) return '';
   const [, pass = ''] = Buffer.from(m[1], 'base64').toString().split(':');
-  return safeEqual(pass, PASSWORD);
+  return access.roleForPassword(pass, PASSWORDS, safeEqual) || '';
 }
+/** Who made a change, for the settings log: the role, plus "script" when it came with Basic auth. */
+const whoOf = (req, role) => (req.headers.authorization && !sessionRole(req) ? `${role} (script)` : role);
 const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
 const fails = new Map();   // ip → { n, until }: slow down password guessing
 const ipOf = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -74,9 +79,10 @@ ${error ? `<p class="e" role="alert">${error}</p>` : ''}
 <div><label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="current-password" autofocus required></div>
 <button type="submit">Sign in</button></form></body></html>`;
 }
-const publicSettings = (s) => ({ ...s });
+const publicSettings = (s, role = access.ADMIN) => access.visibleSettings(s, role);
 /* The planning assumptions people can tweak. Same limits whether trying a value or saving it. */
 const LIMITS = { leadDays: [0, 180], coverDays: [1, 365], safetyDays: [0, 60], demandWindowDays: [7, 90], smallTopUpDays: [1, 60], minPerDay: [0, 100], tzOffsetMin: [-720, 840] };
+const PLAN_KEYS = ['leadDays', 'coverDays', 'safetyDays'];   // the three shown under Plan settings
 const clampSetting = (k, v) => (v == null || String(v).trim() === '' || !Number.isFinite(+v) ? undefined : Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], +v)));
 /** Saved settings, with any ?leadDays=… style trial values on top (not saved). */
 function settingsFor(url, saved) {
@@ -169,7 +175,9 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
 
-  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
+  const role = authed(req);
+  if (!role) return send(res, 401, { ok: false, error: 'Login needed' });
+  if (access.refused(role, req.method, p)) return fail(res, 403, access.READ_ONLY);   // view-only: no write route runs (SW-029)
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
@@ -179,7 +187,7 @@ async function api(req, res, url) {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: audit.recent(d, 50), lastPlanChange: audit.lastOf(d, PLAN_KEYS), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
     const run = syncShopify();
@@ -193,6 +201,7 @@ async function api(req, res, url) {
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
     if (b.newIngestKey === true) patch.ingestKey = crypto.randomBytes(16).toString('hex');
+    audit.record(d, audit.diff(d.settings, patch), whoOf(req, role));   // saved with the settings below
     return send(res, 200, { ok: true, settings: store.setSettings(patch) });
   }
   if (p === '/api/import' && req.method === 'POST') {
@@ -246,13 +255,14 @@ const server = http.createServer(async (req, res) => {
       const ip = ipOf(req); const f = fails.get(ip);
       if (f && f.n >= 10 && Date.now() < f.until) return send(res, 429, loginPage('Too many tries. Wait 15 minutes.'), 'text/html; charset=utf-8');
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
-      if (!PASSWORD || !safeEqual(pass, PASSWORD)) {
+      const role = PASSWORD ? access.roleForPassword(pass, PASSWORDS, safeEqual) : null;
+      if (!role) {
         const n = (f && Date.now() < f.until ? f.n : 0) + 1; fails.set(ip, { n, until: Date.now() + 15 * 60e3 });
         return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
       }
       fails.delete(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
-      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
+      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${access.cookieValue(exp, role, sign, VIEW_PASSWORD)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
     }
     if (url.pathname === '/logout') return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
@@ -268,6 +278,8 @@ if (require.main === module) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
   }
+  const accessProblem = access.configProblem(PASSWORDS);
+  if (accessProblem) { console.error('Refusing to start: ' + accessProblem); process.exit(1); }
   const d = store.load();
   const stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
   if (!keys.status().source && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {

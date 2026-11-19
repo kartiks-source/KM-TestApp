@@ -63,6 +63,7 @@
   async function load() {
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
+    state.role = set.role || 'admin'; state.changes = set.changes || []; state.lastPlanChange = set.lastPlanChange || null;   // SW-029
     header();
     render._animate = true; render();
   }
@@ -85,6 +86,7 @@
       + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
       + shopifyBadge();
     $$('.range button').forEach((b) => b.classList.toggle('on', +b.dataset.days === state.days));
+    if (viewOnly()) { $('#tabs a[data-view="data"]').hidden = true; pill.removeAttribute('href'); }   // view-only: no Data page (SW-029)
   }
 
   function shopifyBadge() {
@@ -114,14 +116,26 @@
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
   }
 
+  /* ---------- view-only sign-in and the settings change log (SW-029) ---------- */
+  const viewOnly = () => state.role === 'view';
+  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key' };
+  const shortVal = (v) => (v == null || v === '' ? '–' : String(v).length > 40 ? String(v).slice(0, 37) + '…' : String(v));
+  const changeText = (c) => `${esc(SETTING_LABEL[c.key] || c.key)}: ${esc(shortVal(c.old))} → <b>${esc(shortVal(c.new))}</b>`;
+  function changeLog() {
+    const list = state.changes || [];
+    return `<details class="fold-in"><summary>Advanced: change log</summary>${list.length
+      ? `<div class="log">${list.map((c) => `<div class="ep"><span class="muted">${dt(c.at)}</span><span>${changeText(c)}</span><span class="muted">by ${esc(c.by)}</span></div>`).join('')}</div>`
+      : '<p class="muted small">No settings changed yet.</p>'}</details>`;
+  }
+
   /* ---------- planning assumptions: change a number, every figure updates; save when happy ---------- */
   function planBar() {
     const S = state.settings, R = state.report.settings, t = state.report.totals;
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
         <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
-    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span><span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</summary>
-      <div class="pbody">${fields}</div></details>`;
+    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ` <span class="badge demo">trying new values</span><span class="pact">${viewOnly() ? '' : '<button class="btn" id="what-save">Save as default</button>'}<button class="btn ghost" id="what-reset">Reset</button></span>` : ''}</summary>
+      <div class="pbody">${fields}</div>${state.lastPlanChange ? `<p class="muted small plast">Last changed ${dt(state.lastPlanChange.at)} by ${esc(state.lastPlanChange.by)} · ${changeText(state.lastPlanChange)}</p>` : ''}</details>`;
   }
   let whatTimer = null;
   function setWhat(k, v) {
@@ -463,6 +477,7 @@
         </div>
         <details class="fold-in"><summary>Advanced: planning rules</summary>
           <div class="form">${ASSUME.map(([k, label, , , tip]) => field(k, label, s[k], tip)).join('')}</div></details>
+        ${changeLog()}
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
@@ -506,7 +521,8 @@
     if (!state.report) return;
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
     $('#view').classList.toggle('calm', !render._animate); render._animate = false;   // bars animate when a page opens, not on every filter or keystroke
-    $('#view').innerHTML = (VIEWS[state.view] || overview)();
+    if (state.view === 'data' && viewOnly()) state.view = 'overview';
+    $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<p class="phone-only"><a class="btn ghost" href="/logout">Sign out</a></p>' : '');
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
     render._caret = null;
