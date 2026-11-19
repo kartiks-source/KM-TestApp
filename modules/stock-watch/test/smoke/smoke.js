@@ -4,7 +4,7 @@
  *
  *   node modules/stock-watch/test/smoke/smoke.js
  *
- * Starts the app on a temp DATA_DIR (demo data, password on) at SMOKE_PORT (4804), or uses BASE_URL +
+ * Starts the app on a temp DATA_DIR (demo data, password on) at SMOKE_PORT (4804; refuses a port already in use), or uses BASE_URL +
  * SMOKE_PASSWORD for a running app. At 1440×900 and 390×844 it checks: no console errors, no sideways
  * scroll on any page, Plan settings Reset and Save as default, the product drawer, and CSV import.
  * Screenshots go to SMOKE_OUT (default: a temp folder, printed at the end). Exit code 1 on any failure.
@@ -57,17 +57,31 @@ async function launch(chromium) {
   }
 }
 
+/** Is something already listening on the port? Then the smoke would drive (and change) someone else's app. */
+const portTaken = (port) => new Promise((res) => {
+  const sock = require('node:net').connect(port, '127.0.0.1');
+  sock.once('connect', () => { sock.destroy(); res(true); });
+  sock.once('error', () => res(false));
+});
+
 async function startApp() {
-  if (process.env.BASE_URL) return { base: process.env.BASE_URL.replace(/\/$/, ''), stop: () => {} };
+  if (process.env.BASE_URL) return { base: process.env.BASE_URL.replace(/\/$/, ''), own: false, stop: () => {} };
+  if (await portTaken(PORT)) throw new Error(`port ${PORT} is already in use: set SMOKE_PORT to a free port (the smoke never runs against an app it didn't start, unless BASE_URL says so)`);
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-smoke-data-'));
   const child = spawn(process.execPath, ['server.js'], { cwd: APP, env: { ...process.env, DATA_DIR: data, PORT: String(PORT), ADMIN_PASSWORD: PASSWORD, NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; child.stdout.on('data', (b) => { log += b; }); child.stderr.on('data', (b) => { log += b; });
+  let died = null; child.once('exit', (code) => { died = code ?? 'signal'; });
+  const stop = async () => {
+    if (child.exitCode == null && child.signalCode == null) await new Promise((r) => { child.once('exit', r); child.kill(); });
+    fs.rmSync(data, { recursive: true, force: true });
+  };
   const base = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(base + '/health')).ok) return { base, stop: async () => { await new Promise((r) => { child.once('exit', r); child.kill(); }); fs.rmSync(data, { recursive: true, force: true }); } }; } catch { /* not up yet */ }
+    if (died != null) { await stop(); throw new Error(`app exited (${died}) before it was up:\n${log}`); }
+    try { if ((await fetch(base + '/health')).ok) return { base, own: true, stop }; } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 200));
   }
-  child.kill(); throw new Error('app did not start:\n' + log);
+  await stop(); throw new Error('app did not start:\n' + log);
 }
 
 async function signIn(page, base) {
@@ -90,7 +104,7 @@ async function tryLead(page, v) {
   await page.waitForSelector('#what-reset', { timeout: 5000 });
 }
 
-async function run(browser, base, vp) {
+async function run(browser, base, vp, own) {
   const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
   const page = await ctx.newPage();
   const errors = [];
@@ -140,7 +154,9 @@ async function run(browser, base, vp) {
     check(vp.name, 'drawer opens and closes', !!title, title);
   } catch (e) { check(vp.name, 'drawer opens and closes', false, e.message.split('\n')[0]); }
 
-  /* CSV import. The first real row clears the demo (SW-007), so the demo is loaded again after it for the next viewport */
+  /* CSV import. The first real row clears the demo and makes the store live (SW-007); a live store refuses the demo
+     (409, QA-1), so on our own app: clear, then load the demo again for the next viewport. Through page.request, so
+     a refusal is never a console error. */
   try {
     await page.goto(`${base}/#data`); await ready(page);
     await page.click('details.fold:has(#imp-file) > summary');
@@ -152,7 +168,11 @@ async function run(browser, base, vp) {
     await page.waitForFunction(() => /Read \d+ rows/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 5000 });
     check(vp.name, 'CSV import', true, await page.textContent('#toast'));
   } catch (e) { check(vp.name, 'CSV import', false, e.message.split('\n')[0]); }
-  await page.evaluate(() => fetch('/api/demo', { method: 'POST' })).catch(() => {});
+  if (own) {
+    await page.request.post(`${base}/api/clear`);
+    const demo = await page.request.post(`${base}/api/demo`);
+    if (!demo.ok()) check(vp.name, 'demo reloaded for the next viewport', false, `POST /api/demo → ${demo.status()}`);
+  }
 
   check(vp.name, 'no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await ctx.close();
@@ -162,8 +182,9 @@ async function run(browser, base, vp) {
   const { chromium } = loadPlaywright();
   const app = await startApp();
   const browser = await launch(chromium);
-  try { for (const vp of VIEWPORTS) await run(browser, app.base, vp); }
+  try { for (const vp of VIEWPORTS) await run(browser, app.base, vp, app.own); }
   finally { await browser.close(); await app.stop(); }
+  if (!results.length) { console.error('No checks ran.'); process.exit(1); }
   const w = Math.max(...results.map((r) => r.name.length));
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.vp.padEnd(7)} ${r.name.padEnd(w)}  ${r.detail}`);
   const bad = results.filter((r) => !r.ok).length;
