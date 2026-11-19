@@ -448,3 +448,10 @@ table.fixed td:first-child { max-width: none; }
 .wknums .wo b { color: var(--lost); }
 .mcard h3 { min-width: 0; }
 #drawer-title { padding-right: 36px; }
+
+/* stale-data banner (SW-019) */
+.stale { margin: 12px 22px 0; padding: 8px 14px; border-radius: var(--r); background: var(--lost-soft); border: 1px solid #F5C6D0; color: var(--ink); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.stale[hidden] { display: none; }
+.stale b { color: var(--lost); }
+.stale a { margin-left: auto; font-weight: 600; white-space: nowrap; }
+@media (max-width: 760px) { .stale { margin: 10px 10px 0; } .stale a { margin-left: 0; } }

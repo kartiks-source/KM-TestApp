@@ -70,7 +70,33 @@
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     header();
     render._animate = true; render();
+    freshness();
   }
+
+  /* ---------- stale-data banner (SW-019): "Data is X h old" when the last Shopify pull is over 45 minutes old ----------
+     Reads the unauthed GET /status when the server has it, else the Shopify lastSync that came with the report. */
+  const STALE_MIN = 45;
+  const asTime = (v) => (typeof v === 'number' && v > 1e12 ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
+  const ageText = (min) => (min < 90 ? `${Math.round(min)} min` : min < 48 * 60 ? `${n1(min / 60)} h` : `${n1(min / 1440)} days`);
+  async function freshness() {
+    let st = null;
+    try {
+      const r = await fetch('/status', { cache: 'no-store', credentials: 'same-origin' });
+      if ((r.headers.get('content-type') || '').includes('json')) st = await r.json();
+    } catch { /* no /status: use the report */ }
+    const sh = state.shopify || {};
+    const fromStatus = st && (asTime(st.lastSync) ?? asTime(st.shopify?.lastSync) ?? asTime(st.lastPull) ?? (Number.isFinite(st.ageMin) ? Date.now() - st.ageMin * 60e3 : null));
+    const last = fromStatus ?? asTime(sh.lastSync);
+    const connected = !!sh.source || st?.stale === true;
+    const age = last ? (Date.now() - last) / 60e3 : null;
+    const stale = connected && (st?.stale === true || (age != null && age > STALE_MIN));
+    const el = $('#stale');
+    if (!stale) { el.hidden = true; return; }
+    const err = sh.lastError || st?.lastError || st?.shopify?.lastError;
+    el.innerHTML = `<b>${age != null ? `Data is ${ageText(age)} old.` : 'Data may be out of date.'}</b> <span>${last ? `Last Shopify pull ${dt(last)}` : 'No Shopify pull yet'}${err ? ` · ${esc(err)}` : ''}${sh.running ? ' · pulling now…' : ''}. Numbers may not show the latest stock and orders.</span> <a href="#data">Data &amp; settings</a>`;
+    el.hidden = false;
+  }
+  setInterval(() => { if (state.report) freshness(); }, 60e3);
 
   function header() {
     const r = state.report, s = state.settings;

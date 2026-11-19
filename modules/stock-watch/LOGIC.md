@@ -36,6 +36,8 @@ Two streams, nothing else:
 
 Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine: the same change can arrive twice at slightly different times, but a second "went to 0" while a product is already out (or a second "back in stock" after it's back) changes nothing, so stock-outs aren't double-counted. Exact repeats of a row are dropped.
 
+**Stale data:** when Shopify is connected and the last successful pull is more than **45 minutes** old (three missed 15-minute runs), a red banner above every page says "Data is X h old" with the time of the last pull and any error. It reads the server's `/status` when available, else the pull time sent with the report.
+
 **Times without a time zone** (in a CSV or Flow row) are read as India time.
 
 ### What counts as a sale
