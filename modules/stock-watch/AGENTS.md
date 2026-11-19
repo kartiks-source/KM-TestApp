@@ -28,7 +28,7 @@ Google Sheet CSV / upload ───┘
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows |
-| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
+| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
@@ -48,6 +48,11 @@ Google Sheet CSV / upload ───┘
 ## Railway variables now
 
 `ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (so the app can write to the volume), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
+
+## Running in production
+
+- Runs under tini (Dockerfile). SIGTERM/SIGINT: timers stop, a running Shopify pull gets up to 25 s (`STOP_WAIT_MS`), the store is written, then the process exits.
+- `/health`: 200, or 503 while saving fails. Railway health check set in root `railway.json`.
 
 ## Commands
 

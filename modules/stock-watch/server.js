@@ -18,7 +18,7 @@ const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
 
-const PORT = Number(process.env.PORT) || 4400;
+const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
@@ -237,7 +237,7 @@ function serveStatic(req, res, url) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
   try {
-    if (url.pathname === '/health') return send(res, 200, { ok: true });
+    if (url.pathname === '/health') { const h = store.health(); return send(res, h.ok ? 200 : 503, { ok: h.ok, ...(h.ok ? {} : { error: h.loadError || `Saving data fails: ${h.lastSaveError?.message}` }) }); }
     if (url.pathname === '/login' && req.method === 'GET') {
       if (!PASSWORD || authed(req)) return send(res, 302, '', 'text/plain', { location: '/' });
       return send(res, 200, loginPage(), 'text/html; charset=utf-8');
@@ -263,24 +263,48 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+/* ---------- start and stop ---------- */
+const timers = [];
+let stopping = false;
+/** SIGTERM / SIGINT (Railway redeploy, Ctrl-C): stop the timers, let a running pull finish (up to
+ *  25 s), write the store, then close. A pull cut short resumes from its saved cursor next time. */
+async function shutdown(signal) {
+  if (stopping) return; stopping = true;
+  console.log(`${signal}: stopping`);
+  timers.forEach((t) => clearInterval(t));
+  if (shopifyRun) await Promise.race([shopifyRun.catch(() => {}), new Promise((r) => setTimeout(r, Number(process.env.STOP_WAIT_MS) || 25000))]);
+  const saved = store.save(true);
+  if (!saved) console.error('Stopped without saving the latest changes:', store.health().lastSaveError?.message);
+  const code = saved ? 0 : 1;
+  server.close(() => process.exit(code));
+  server.closeIdleConnections?.();
+  setTimeout(() => process.exit(code), 3000).unref();
+}
+
 if (require.main === module) {
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
   }
-  const d = store.load();
+  let d;
+  try { d = store.load(); } catch (e) {
+    console.error(`Refusing to start: ${e.message}`);
+    process.exit(1);
+  }
   const stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
   if (!keys.status().source && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
     loadDemo();
     console.log('Loaded demo data (replace it from Data & settings).');
   }
-  setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY).unref();
+  timers.push(setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY));
   if (keys.status().source) {
     const pull = () => syncShopify().catch((e) => console.warn('shopify pull failed:', e.message));
-    setTimeout(pull, 5000).unref();
-    setInterval(pull, SYNC_EVERY).unref();
+    timers.push(setTimeout(pull, 5000));
+    timers.push(setInterval(pull, SYNC_EVERY));
   }
-  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${PORT}${PASSWORD ? ' (password on)' : ''}`));
+  timers.forEach((t) => t.unref());
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
+  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''}`));
 }
 
 module.exports = { server, syncShopify };
