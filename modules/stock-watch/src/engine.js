@@ -291,7 +291,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '',
     };
-    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price }, enumerable: false });
+    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0) }, enumerable: false });
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
     row.cost = p.cost ? Math.round(p.cost) : null;
@@ -309,14 +309,16 @@ function report(stock, orders, settings = {}, opts = {}) {
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
 
-  /* best sellers (ABC by revenue in the period): A = the products making the first 80% of sales,
-     B = the next 15%, C = the rest and anything that didn't sell */
-  const bySold = products.slice().sort((a, b) => b.sold - a.sold);
-  const allSold = bySold.reduce((s, p) => s + p.sold, 0);
+  /* best sellers (ABC by ₹ demand a day: the sales rate × average price paid, both from the demand
+     window, so the rank and every order quantity stay put when the period buttons change):
+     A = the products making the first 80% of demand, B = the next 15%, C = the rest and anything with none */
+  const demandOf = (p) => p._plan.demand;
+  const byDemand = products.slice().sort((a, b) => demandOf(b) - demandOf(a) || String(a.id).localeCompare(String(b.id)));
+  const allDemand = byDemand.reduce((s, p) => s + demandOf(p), 0);
   let run = 0;
-  for (const p of bySold) {
-    const before = allSold ? run / allSold : 1; run += p.sold;
-    p.abc = !p.sold ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
+  for (const p of byDemand) {
+    const before = allDemand ? run / allDemand : 1; run += demandOf(p);
+    p.abc = !(demandOf(p) > 0) ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
   }
   /* a best seller is never "slow": it earns its place by ₹ even when it sells few units (e.g. furniture) */
   for (const p of products) {

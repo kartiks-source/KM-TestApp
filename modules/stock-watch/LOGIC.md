@@ -195,7 +195,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Rule:** a product selling below *Ignore below* [0.2 units a day, about 6 a month] is a **Slow seller**. Slow sellers are left out of the reorder list and alerts, but their stock-outs and ₹ lost are still counted.
 
-**Exception: a best seller (A, section 7a) is never a slow seller.** A ₹90,000 sofa selling one a month can be in the top 80% of revenue; it stays on the reorder list.
+**Exception: a best seller (A, section 7a) is never a slow seller.** A ₹90,000 sofa selling one a month can be in the top 80% of ₹ demand; it stays on the reorder list.
 
 **Why:** for a product selling one unit a month, "days left" and "order quantity" swing wildly with a single order, and filling the reorder list with them hides the products that matter. It's not marked "not selling" because these products do sell, just slowly. A product with no sales at all is never "Out now" or on the reorder list, whatever the cutoff.
 
@@ -203,14 +203,18 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 ## 7a. Best sellers (A / B / C)
 
-**Rule:** products are ranked by ₹ sold in the selected period. Going down that list, the products that together make the **first 80% of sales are A (best sellers)**, the next 15% are B, and the rest, plus anything that didn't sell, are C. A products show a small **A** badge everywhere.
+**Rule:** products are ranked by **₹ demand a day** = sales per day (section 3) × average price paid (section 4), both from the 28-day sales history, **not** the selected period. Going down that list, the products that together make the **first 80% of demand are A (best sellers)**, the next 15% are B, and the rest, plus anything with no demand, are C. A products show a **Best seller** tag everywhere.
 
 - **Best sellers at risk** = A products that are Out now, Critical or Order now.
 - The reorder list puts A products first within each status.
 
 **Why:** a stock-out on an A product costs the most and is usually the one ads are pushing. 80 / 15 / 5 is the standard ABC split in inventory management.
 
-**When it can be wrong:** a launch or a heavily discounted product can jump into A for one period. Switch the period (7 / 30 / 60 days) to see whether it holds.
+**Why demand, and why not the selected period:** the rank decides who stays on the reorder list (section 7) and comes first in it, so it has to rest on the same 28 days as the order quantity. Ranked by the selected period, switching 7 → 60 days changed who was a best seller and so the cash to order (demo: order value ₹46.3 lakh at 7 days vs ₹46.8 lakh at 60). Demand rather than ₹ sold, because ₹ sold drops for a product while it's out of stock: a best seller out for three weeks fell to C and out of **Best sellers at risk**, exactly when it was most at risk. For a product in stock the whole time, demand a day is just its ₹ sold ÷ days, so the order is the same as ranking by sales.
+
+*Considered:* ₹ sold over the 28-day window (simpler, but has the stock-out problem above).
+
+**When it can be wrong:** a launch or a heavily discounted product can jump into A while its 28 days are dominated by the launch or the sale. Its rate has the same lag (section 3).
 
 ## 7b. Profit lost and margin
 

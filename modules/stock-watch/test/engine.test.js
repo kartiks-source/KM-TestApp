@@ -313,3 +313,35 @@ test('out since before the history starts: rate from the days before the stock-o
   assert.equal(r.basis, 'before-out');
   assert.ok(Math.abs(r.perDay - 3) < 0.01, `perDay ${r.perDay}`);
 });
+
+/* ---- SW-031: best-seller rank doesn't move with the period buttons ---- */
+test('ABC rank and order value are the same at 7 / 30 / 60 days', () => {
+  const now = Date.parse('2026-11-19T07:30:00Z');
+  const g = require('../src/demo').generate({ now });
+  const runs = [7, 30, 60].map((days) => E.report(g.stock, g.orders, {}, { days, now }));
+  const key = (r) => Object.fromEntries(r.products.map((p) => [p.id, [p.abc, p.status, p.orderQty, p.orderValue]]));
+  const base = key(runs[0]);
+  for (const r of runs.slice(1)) {
+    assert.deepEqual(key(r), base);
+    assert.equal(r.totals.orderValueAll, runs[0].totals.orderValueAll);
+    assert.equal(r.totals.orderValueNow, runs[0].totals.orderValueNow);
+    assert.equal(r.totals.bestsellers, runs[0].totals.bestsellers);
+    assert.equal(r.totals.bestAtRisk, runs[0].totals.bestAtRisk);
+  }
+});
+
+test('ABC ranks on demand: a best seller out of stock most of the window stays A', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'best', sku: 'B', product: 'Best', before: 400, now: 400, price: 1000 },
+    { t: now - 25 * D, variantId: 'best', sku: 'B', product: 'Best', before: 1, now: 0, price: 1000 },
+    { t: now - 90 * D, variantId: 'small', sku: 'S', product: 'Small', before: 400, now: 400, price: 100 }];
+  const orders = [];
+  for (let d = 1; d <= 90; d++) {
+    if (d > 25) orders.push({ t: now - d * D + H, order: `#b${d}`, variantId: 'best', qty: 5, price: 1000 });
+    orders.push({ t: now - d * D + H, order: `#s${d}`, variantId: 'small', qty: 2, price: 100 });
+  }
+  const r = E.report(stock, orders, S0, { days: 7, now });   // 'best' sold nothing in the last 7 or 25 days
+  const P = Object.fromEntries(r.products.map((p) => [p.id, p]));
+  assert.equal(P.best.sold, 0); assert.equal(P.best.abc, 'A');
+  assert.equal(P.small.abc, 'C');                             // 200 of 5,200 ₹/day: under the last 5%
+});
