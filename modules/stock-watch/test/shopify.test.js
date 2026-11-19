@@ -43,29 +43,33 @@ test('stock: untracked and non-active products are left out', () => {
   assert.deepEqual(r.rows.map((x) => x.variantId), ['3']);
 });
 
-test('orders: lines become rows, test orders and custom lines skipped', () => {
-  const o = { name: '#1001', createdAt: '2026-11-18T10:00:00Z', test: false };
-  const lines = [{ quantity: 2, sku: 'A', variant: { id: 'gid://shopify/ProductVariant/9' }, discountedUnitPriceSet: { shopMoney: { amount: '350.0' } } }, { quantity: 1, sku: '', variant: null }];
-  assert.deepEqual(S.orderRows(o, lines), [{ t: Date.parse(o.createdAt), order: '#1001', variantId: '9', sku: 'A', qty: 2, price: 350 }]);
-  assert.deepEqual(S.orderRows({ ...o, test: true }, lines), []);
+test('orders: what counts as a sale — not cancelled, not test, units net of refunds, price after all discounts', () => {
+  const o = { name: '#1001', createdAt: '2026-11-18T10:00:00Z', test: false, cancelledAt: null };
+  const line = (id, cur, price, v = '9') => ({ id: `gid://shopify/LineItem/${id}`, currentQuantity: cur, sku: 'A', variant: v ? { id: `gid://shopify/ProductVariant/${v}` } : null, discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: String(price) } } });
+  assert.deepEqual(S.orderRows(o, [line(1, 2, 315), line(2, 0, 500), line(3, 1, 10, null)]),
+    [{ t: Date.parse(o.createdAt), order: '#1001', line: '1', variantId: '9', sku: 'A', qty: 2, price: 315 }]);   // refunded line and custom line drop out
+  assert.deepEqual(S.orderRows({ ...o, test: true }, [line(1, 2, 315)]), []);
+  assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-19T00:00:00Z' }, [line(1, 2, 315)]), []);
 });
 
-test('orders: pages and extra line items are all read, progress saved per page', async () => {
+test('orders: first run loads 60 days by creation; later runs re-read changed orders; pages and extra lines all read', async () => {
   const now = Date.parse('2026-11-19T00:00:00Z');
-  const line = (v) => ({ quantity: 1, sku: v, variant: { id: `gid://shopify/ProductVariant/${v}` }, discountedUnitPriceSet: { shopMoney: { amount: '10' } } });
+  const line = (v) => ({ id: `gid://shopify/LineItem/${v}`, currentQuantity: 1, sku: v, variant: { id: `gid://shopify/ProductVariant/${v}` }, discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: '10' } } });
   const pages = [
-    { orders: { pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [{ id: 'o1', name: '#1', createdAt: '2026-11-10T00:00:00Z', lineItems: { pageInfo: { hasNextPage: true, endCursor: 'l1' }, nodes: [line('1')] } }] } },
-    { orders: { pageInfo: { hasNextPage: false }, nodes: [{ id: 'o2', name: '#2', createdAt: '2026-11-12T00:00:00Z', lineItems: { pageInfo: { hasNextPage: false }, nodes: [line('3')] } }] } },
+    { orders: { pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [{ id: 'o1', name: '#1', createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-11T00:00:00Z', lineItems: { pageInfo: { hasNextPage: true, endCursor: 'l1' }, nodes: [line('1')] } }] } },
+    { orders: { pageInfo: { hasNextPage: false }, nodes: [{ id: 'o2', name: '#2', createdAt: '2026-11-12T00:00:00Z', updatedAt: '2026-11-12T05:00:00Z', cancelledAt: '2026-11-12T05:00:00Z', lineItems: { pageInfo: { hasNextPage: false }, nodes: [line('3')] } }] } },
   ];
   const seen = []; let filter;
   const q = async (doc, v) => {
     if (doc.includes('order(id')) return { order: { lineItems: { pageInfo: { hasNextPage: false }, nodes: [line('2')] } } };
     filter = v.q; return pages[v.after ? 1 : 0];
   };
-  const r = await S.pullOrders(null, { q, now, onPage: (rows, cursor) => seen.push([rows.map((x) => x.variantId), cursor]) });
-  assert.equal(r.total, 3);
-  assert.deepEqual(seen, [[['1', '2'], Date.parse('2026-11-10T00:00:00Z')], [['3'], Date.parse('2026-11-12T00:00:00Z')]]);
-  assert.match(filter, /^created_at:>='2026-09-20T00:00:00.000Z'$/);   // first run: 60 days back
+  const r = await S.pullOrders(null, { q, now, onPage: (names, rows, cursor) => seen.push([names, rows.map((x) => x.variantId), cursor]) });
+  assert.equal(r.total, 2);
+  assert.deepEqual(seen, [[['#1'], ['1', '2'], Date.parse('2026-11-11T00:00:00Z')], [['#2'], [], Date.parse('2026-11-12T05:00:00Z')]]);   // #2 cancelled → no lines, so its old lines get removed
+  assert.match(filter, /^created_at:>='2026-09-20/);
+  await S.pullOrders(Date.parse('2026-11-18T00:00:00Z'), { q, now });
+  assert.match(filter, /^updated_at:>='2026-11-17T23:30/);       // 30-minute overlap
 });
 
 test('keys: secret formats and store names', () => {

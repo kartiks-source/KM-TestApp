@@ -128,6 +128,6 @@ function fromWebhook(body, kind, stampNow = Date.now()) {
 
 /** Stable identity of a row, so the same row imported twice is kept once. */
 const stockKey = (r) => `${r.t}|${r.variantId}|${r.before}|${r.now}`;
-const orderKey = (r) => `${r.order || r.t}|${r.variantId}|${r.qty}`;
+const orderKey = (r) => (r.line ? `${r.order}|L${r.line}` : `${r.order || r.t}|${r.variantId}|${r.qty}`);
 
 module.exports = { parseCsv, toTime, fromCsv, fromWebhook, stockKey, orderKey, STOCK_COLS, ORDER_COLS };

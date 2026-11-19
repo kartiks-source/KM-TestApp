@@ -3,6 +3,22 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (cross-module + UI critic fixes)
+Cross-module critic (14 findings):
+- What counts as a sale now matches DAWBU: Shopify pull leaves out cancelled and test orders, nets refunds/removals (`currentQuantity`), uses price after line + order-level discounts (`discountedUnitPriceAfterAllDiscountsSet`, checked in Shopify's docs), and re-reads orders updated since the last run, replacing their lines (later cancellations/refunds picked up). Order lines keyed by Shopify line ID.
+- Docs fixed: Flow + pull duplicates (stock-outs not double-counted; wording corrected), "Out for" = full length while ₹ lost and product-days use hours inside the period, Sheet LOGIC.md now lists every difference (order value at price, no A-first, no duplicate dropping, sale definition depends on Flow, tabs count ₹ lost differently), SETUP.md warns about pasting overlapping exports, stale comments and package description.
+- Not done yet (next cycle): shared packages (`packages/shopify-read`, `packages/rows`, `packages/stock-rules`) with a parity test between engine.js and StockWatch.gs. Recorded in DECISIONS.md.
+UI critic (16 findings):
+- Typing in Assumptions reversed digits (number inputs lost the caret on redraw) → text inputs with decimal keypad; caret kept.
+- Tables page by 50 (Show more / Show all); headers stay pinned under the top bar; keyboard: rows and headers focusable, Enter/Space opens or sorts, aria-sort, drawer focuses Close and returns focus to the row.
+- Contrast: lost red #C8344F, faint grey #6B7385, amber text #9A5B0F; "This week" pill neutral; stock-outs rail count grey (history, not an alert).
+- Drawer leads with the decision: order qty + value, days left, rate, sales + profit lost, and a readable trend.
+- Stock-outs page headline totals sales and profit lost; column "Sales lost"; "Out again" wording consistent; "Order now" naming consistent.
+- Bars animate only when a page opens, not on every keystroke; reduced motion respected for the Assumptions arrow.
+- Phone: bigger touch targets, curated Sort-by (no meaningless options), Order now list above the chart, category not in code font.
+- Gift cards removed from the demo catalog (not inventory).
+- Open: Products 92px too wide at 1440 (left for the simplicity pass: fewer default columns).
+
 ## 2026-11-19 · stock-watch (logic critic fixes)
 Logic critic found 12 confirmed + 1 suspected issues; all fixed except where noted:
 - New launches: sales rate now starts at the product's first record (was diluted → false "Overstocked").

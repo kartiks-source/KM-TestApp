@@ -6,7 +6,10 @@
  * Needs only these read scopes: read_products, read_inventory, read_orders.
  *
  *   pullStock   every variant's total stock now; a stock row is stored only when it changed
- *   pullOrders  order lines created since the last pull (first run: the last 60 days)
+ *   pullOrders  orders changed since the last pull (first run: created in the last 60 days). Each order's
+ *               lines are replaced whole, so later cancellations, refunds and edits are picked up.
+ *               What counts as a sale: not cancelled, not a test order, units net of refunds and
+ *               removals (currentQuantity), price after line AND order-level discounts.
  *
  * Paced by Shopify's own cost budget: waits whenever less than half of it is left,
  * so the store's other apps are never starved.
@@ -70,14 +73,15 @@ const STOCK_Q = `query Stock($after: String) {
   }
 }`;
 
+const LINE_FIELDS = 'id currentQuantity sku variant { id } discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } }';
 const ORDERS_Q = `query Orders($after: String, $q: String) {
-  orders(first: 40, after: $after, query: $q, sortKey: CREATED_AT) {
+  orders(first: 40, after: $after, query: $q, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id name createdAt test
+      id name createdAt updatedAt cancelledAt test
       lineItems(first: 20) {
         pageInfo { hasNextPage endCursor }
-        nodes { quantity sku variant { id } discountedUnitPriceSet { shopMoney { amount } } }
+        nodes { ${LINE_FIELDS} }
       }
     }
   }
@@ -87,7 +91,7 @@ const MORE_LINES_Q = `query Lines($id: ID!, $after: String) {
   order(id: $id) {
     lineItems(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { quantity sku variant { id } discountedUnitPriceSet { shopMoney { amount } } }
+      nodes { ${LINE_FIELDS} }
     }
   }
 }`;
@@ -113,13 +117,13 @@ function diffStock(variants, lastQty, t) {
   return { rows, lastQty: next };
 }
 
-/** Order nodes → order rows (test orders skipped). */
+/** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */
 function orderRows(order, lines) {
-  if (order.test) return [];
+  if (order.test || order.cancelledAt) return [];
   const t = Date.parse(order.createdAt);
-  return lines.filter((l) => l.variant?.id && l.quantity > 0).map((l) => ({
-    t, order: order.name, variantId: vid(l.variant.id), sku: l.sku || '', qty: l.quantity,
-    price: Number(l.discountedUnitPriceSet?.shopMoney?.amount) || 0,
+  return lines.filter((l) => l.variant?.id && l.currentQuantity > 0).map((l) => ({
+    t, order: order.name, line: String(l.id || '').replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '',
+    qty: l.currentQuantity, price: Number(l.discountedUnitPriceAfterAllDiscountsSet?.shopMoney?.amount) || 0,
   }));
 }
 
@@ -134,17 +138,21 @@ async function pullStock(lastQty, { q = gql, now = Date.now() } = {}) {
 }
 
 /**
- * Order lines created after `since` (ms), oldest first. onPage(rows, cursor) is called after every
- * page so progress is saved as it goes (cursor = newest createdAt seen so far).
+ * Orders changed since `since` (ms; the newest updatedAt seen last time), oldest change first.
+ * First run (no `since`): every order created in the last 60 days.
+ * onPage(orderNames, rows, cursor) after each page: the caller replaces those orders' lines whole,
+ * and saves the cursor so a long first load resumes where it stopped.
  */
 async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} } = {}) {
-  const from = Math.max(since ? since - OVERLAP : 0, now - BACKFILL_DAYS * 864e5);
-  const filter = `created_at:>='${new Date(from).toISOString()}'`;
-  let after = null; let cursor = since || from; let total = 0;
+  const filter = since
+    ? `updated_at:>='${new Date(since - OVERLAP).toISOString()}'`
+    : `created_at:>='${new Date(now - BACKFILL_DAYS * 864e5).toISOString()}'`;
+  let after = null; let cursor = since || 0; let total = 0;
   do {
     const d = await q(ORDERS_Q, { after, q: filter });
-    const rows = [];
+    const rows = [], names = [];
     for (const o of d.orders.nodes) {
+      names.push(o.name);
       const lines = [...o.lineItems.nodes];
       let li = o.lineItems.pageInfo;
       while (li.hasNextPage) {
@@ -152,10 +160,10 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
         lines.push(...m.order.lineItems.nodes); li = m.order.lineItems.pageInfo;
       }
       rows.push(...orderRows(o, lines));
-      cursor = Math.max(cursor, Date.parse(o.createdAt) || 0);
+      cursor = Math.max(cursor, Date.parse(o.updatedAt) || Date.parse(o.createdAt) || 0);
     }
     total += rows.length;
-    await onPage(rows, cursor);
+    await onPage(names, rows, cursor);
     after = d.orders.pageInfo.hasNextPage ? d.orders.pageInfo.endCursor : null;
   } while (after);
   return { total, cursor };

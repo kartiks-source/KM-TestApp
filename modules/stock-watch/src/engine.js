@@ -215,7 +215,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       if (repeat) repeats++;
       stockouts.push({
         id: p.id, name, sku: p.sku, start: e.start, end: e.open ? null : e.end, open: e.open,
-        hours: round((e.end - e.start) / HOUR, 1), unitsLost: round(uLost, 1), lost: Math.round(vLost),
+        hours: round((e.end - e.start) / HOUR, 1), hoursInPeriod: round((e.end - a) / HOUR, 1), unitsLost: round(uLost, 1), lost: Math.round(vLost),
         topUp: e.open ? null : e.topUp, topUpDays: !e.open && perDay > 0 ? round(e.topUp / perDay, 1) : null,
         small, repeat, perDay: round(perDay, 2),
       });

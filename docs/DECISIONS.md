@@ -22,4 +22,5 @@ Newest first. Each one: date, decision, who decided, why.
 - One repo (`kartiks-source/KM-TestApp`), one folder per module, context in Markdown.
 
 ## Open
+- **Shared packages for multi-module logic** (proposed by the cross-module critic, 19 Nov): `packages/shopify-read` (keys + read-only guard + pulls), `packages/rows` (row formats + FORMATS.md), `packages/stock-rules` (episodes, in-stock rate, plan, trend, sale definition) with their tests and LOGIC sections; modules keep their reports. A build step copies stock-rules into the Sheet's `SW` block, and a parity test runs the same data through both. npm workspaces; Dockerfile copies `packages/`. Do this before a second module reuses the logic.
 - Align with Performity's code stack and conventions where it speeds up production; keep separate where it doesn't. Waiting for access to the app repo (only the marketing site is visible).

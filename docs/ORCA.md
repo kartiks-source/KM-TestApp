@@ -50,6 +50,15 @@ orca worktree create --repo name:Stock-Watch --name critic-modules --agent codex
   --prompt "You are the cross-module critic. Compare every business rule across modules/* (and LOGIC.md files, DECISIONS.md), and against the client's existing tools where known. Report rule differences, undocumented ones, doc/code drift, and what should become shared code so modules don't fork. file:line both sides. Don't fix anything."
 ```
 
+# 4. Simplicity critic: is it easy for anyone?
+orca worktree create --repo name:Stock-Watch --name critic-simple --agent claude \
+  --prompt "You are the simplicity critic. Run the app and look at every screen. For each: its one job, the number that should dominate, what competes with it, concepts a user must learn, jargon. Propose what to cut, merge or hide behind More, with plain wording, and a default-vs-detailed spec per screen. Don't fix anything."
+
+# 5. Mobile critic and fixer: works in its own worktree, the builder merges
+orca worktree create --repo name:Stock-Watch --name mobile-fix --agent claude \
+  --prompt "You are the mobile critic and fixer. Run the app at 390x844 (and 360x740). Find what's hard on a phone: decision not first, tiny touch targets (<44px), crowded rows, sideways scroll, long lists, text that needs zooming. Fix them in this worktree (public/app.js, public/styles.css), keep desktop unchanged (check 1280 and 1440 still have no sideways scroll), run npm test, commit on this branch with a summary of each fix."
+```
+
 The builder fixes what holds up and notes anything rejected (and why) in `docs/DEVLOG.md`.
 
 ## Finishing

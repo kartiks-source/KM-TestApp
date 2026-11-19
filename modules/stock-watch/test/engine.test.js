@@ -212,3 +212,16 @@ test('slow-seller cutoff 0 never makes a product with no demand "Out now"', () =
   assert.notEqual(r.products[0].status, 'Out now');
   assert.equal(r.reorder.length, 0);
 });
+
+test('store: replacing an order removes its old lines (cancellation / refund picked up later)', () => {
+  const os = require('node:os'), fs = require('node:fs'), path = require('node:path');
+  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-'));
+  delete require.cache[require.resolve('../src/store')];
+  const store = require('../src/store');
+  store.replaceAll([], [], 'empty');
+  store.replaceOrders(['#1', '#2'], [{ t: Date.now(), order: '#1', line: 'a', variantId: 'v', qty: 2, price: 10 }, { t: Date.now(), order: '#2', line: 'b', variantId: 'v', qty: 1, price: 10 }]);
+  assert.equal(store.load().orders.length, 2);
+  store.replaceOrders(['#1'], [{ t: Date.now(), order: '#1', line: 'a', variantId: 'v', qty: 1, price: 10 }]);   // one unit refunded
+  store.replaceOrders(['#2'], []);                                                                            // cancelled
+  assert.deepEqual(store.load().orders.map((o) => [o.order, o.qty]), [['#1', 1]]);
+});

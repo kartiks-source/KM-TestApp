@@ -7,7 +7,7 @@
  *
  *   Flow 1 "Product variant inventory quantity changed" → Add row to tab  Stock log
  *   Flow 2 "Order created" → For each line item       → Add row to tab  Order log
- *   (exact Flow setup: docs/STOCK-WATCH.md)
+ *   (exact Flow setup: SETUP.md in this folder)
  *
  * Tabs it writes:  🚨 Reorder now · 💸 Lost sales · 📅 Daily ·  (⚙️ Settings is yours to edit)
  * Menu: 📦 Stock Watch → Set up (once) · Refresh now.  Refreshes itself every 15 minutes.
@@ -26,7 +26,7 @@ const DEFAULTS = [
   ['Daily email to', '', 'Optional: comma-separated emails for a 9 am summary'],
 ];
 
-/* ============================== PURE LOGIC (no Apps Script calls; unit-tested) ============================== */
+/* ============================== PURE LOGIC (no Apps Script calls; mirrors modules/stock-watch/src/engine.js — not yet covered by tests) ============================== */
 const SW = (() => {
   const HOUR = 36e5, DAY = 864e5;
   const num = (x) => (Number.isFinite(+x) ? +x : 0);

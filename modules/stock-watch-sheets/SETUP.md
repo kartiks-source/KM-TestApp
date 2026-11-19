@@ -85,7 +85,7 @@ Then **Turn on workflow**.
 
 ## Good to know
 
-- **History starts when the Flows are switched on.** Lost-sales numbers build up from that day, and sales per day settles after about a week. If you have order history in a Shopify export, paste it into `Order log` in the same column order to start with a better sales rate.
+- **History starts when the Flows are switched on.** Lost-sales numbers build up from that day, and sales per day settles after about a week. If you have order history in a Shopify export, paste it into `Order log` in the same column order to start with a better sales rate. **Paste only orders from before the Flows were switched on:** the Sheet doesn't drop repeated rows, so overlapping orders would count twice. Leave out cancelled and test orders, and use quantities net of refunds.
 - **Stock is the total across all locations,** which is what decides whether the store shows "sold out".
 - **Products selling under 0.2 a day are left out of alerts.** Change this in ⚙️ Settings.
 - **The log tabs are written by Flow.** Don't sort or edit them; just let them grow. The script reads them and never changes Shopify.

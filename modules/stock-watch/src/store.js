@@ -62,8 +62,19 @@ function add(kind, rows) {
 function prune() {
   const cut = Date.now() - KEEP_DAYS * 864e5;
   const d = load();
-  if (d.stock.length && d.stock[0].t < cut) d.stock = d.stock.filter((r) => r.t >= cut);
-  if (d.orders.length && d.orders[0].t < cut) d.orders = d.orders.filter((r) => r.t >= cut);
+  if (d.stock.some((r) => r.t < cut)) { d.stock = d.stock.filter((r) => r.t >= cut); d._stockKeys = new Set(d.stock.map(stockKey)); }
+  if (d.orders.some((r) => r.t < cut)) { d.orders = d.orders.filter((r) => r.t >= cut); d._orderKeys = new Set(d.orders.map(orderKey)); }
+}
+
+/** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
+function replaceOrders(names, rows) {
+  const d = load(); const set = new Set(names);
+  const before = d.orders.length;
+  d.orders = d.orders.filter((r) => !set.has(r.order)).concat(rows);
+  d._orderKeys = new Set(d.orders.map(orderKey));
+  if (rows.length && d.source === 'empty') d.source = 'live';
+  prune(); save();
+  return { added: rows.length, removed: before - (d.orders.length - rows.length) };
 }
 
 function replaceAll(stock, orders, source) {
@@ -85,4 +96,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { load, add, replaceAll, setSettings, setSync, setShopify, save };
+module.exports = { load, add, replaceAll, replaceOrders, setSettings, setSync, setShopify, save };

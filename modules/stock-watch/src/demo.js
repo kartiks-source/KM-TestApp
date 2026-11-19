@@ -15,7 +15,7 @@
 const { HOUR, DAY } = require('./engine');
 const CATALOG = require('./demo-catalog.json').items;
 
-const VERSION = 'sammsara-5';           // bump to make running servers rebuild their demo data
+const VERSION = 'sammsara-6';           // bump to make running servers rebuild their demo data
 const STORE_NAME = 'Sammsara (demo)';
 
 function rng(seed) {      // mulberry32: same demo every time

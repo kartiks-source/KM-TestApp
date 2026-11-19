@@ -34,7 +34,21 @@ Two streams, nothing else:
 | Shopify Flow → this app or the Google Sheet | to the minute, because Flow fires on each change |
 | CSV upload | as precise as the file |
 
-Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine, because duplicate rows are dropped.
+Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine: the same change can arrive twice at slightly different times, but a second "went to 0" while a product is already out (or a second "back in stock" after it's back) changes nothing, so stock-outs aren't double-counted. Exact repeats of a row are dropped.
+
+**Times without a time zone** (in a CSV or Flow row) are read as India time.
+
+### What counts as a sale
+
+| | Shopify pull | Flow / Sheet / CSV |
+|---|---|---|
+| Cancelled orders | left out, also when cancelled after we first read the order | whatever the template sends; send only live orders |
+| Test orders | left out | left out only if the Flow condition excludes them |
+| Refunds and removed items | netted: units are Shopify's `currentQuantity` | as sent |
+| Discounts | price after line **and** order-level discounts (`discountedUnitPriceAfterAllDiscountsSet`) | as sent |
+| Later edits | each run re-reads orders updated since the last run (30-minute overlap) and replaces their lines | not picked up |
+
+This matches the DAWBU dashboard's definition (cancelled out, refunds and discounts netted), so the two show the same sales for the same days. One known difference remains: DAWBU sums variants into products **by title**, and we keep **variants by ID**. Totals agree, but per-product rows can differ where two products share a title.
 
 ---
 
@@ -45,7 +59,8 @@ Why both: the pull needs no setup by the brand, while Flow is exact. Running bot
 **Why:** zero stock is the only state in which a shopper definitely can't buy. Negative stock (overselling) counts as out too, because it means orders were taken that can't ship.
 
 **Edge cases:**
-- **Stock-outs that started before the selected period:** only the hours inside the period are counted.
+- **Stock-outs that started before the selected period:** ₹ lost and the "product-days with an empty shelf" count only the hours inside the period. The **Out for** column shows the stock-out's full length, so you can see how long it really lasted.
+- **A cancellation or return that puts stock back** can end a stock-out early, and if it's only a piece or two it shows up as a small top-up. Read small top-ups of 1–2 pieces with that in mind.
 - **A product whose first-ever record shows 0:** counted as out from that moment, because we have no evidence it was in stock.
 
 **When it can be wrong:**

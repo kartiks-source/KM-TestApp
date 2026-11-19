@@ -10,8 +10,10 @@
     filter: { reorder: 'all', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
+    limit: {},                                  // rows shown per table (pages of 50)
     colW: (() => { try { return JSON.parse(localStorage.getItem('sw-colw') || '{}'); } catch { return {}; } })(),
   };
+  const PAGE = 50;
   const ASSUME = [
     ['leadDays', 'Lead time (d)', '', 1, 'Supplier order → stock sellable'],
     ['coverDays', 'Cover (d)', '', 5, 'How long a reorder should last after it lands'],
@@ -62,7 +64,7 @@
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     header();
-    render();
+    render._animate = true; render();
   }
 
   function header() {
@@ -116,11 +118,10 @@
     const S = state.settings, R = state.report.settings, t = state.report.totals;
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
-        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="number" inputmode="decimal" min="0" step="${step}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
+        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
     const impact = `<div class="pimpact"><span title="Cash to commit (at unit cost) for everything Out now, Critical or Order now">Order now <b>${money(t.orderValueNow)}</b></span><span title="Order value of the whole reorder list">Full list <b>${money(t.orderValueAll)}</b></span><span title="Overstocked products (stock over twice what lead + cover + safety days need): the cash in stock beyond that need">Overstock <b>${money(t.excessValue)}</b></span></div>`;
-    return `<details class="plan" ${(state.planOpen ?? !narrow()) ? 'open' : ''}><summary>Assumptions${trial ? ' <span class="badge demo">trying new values</span>' : ''}${impact}</summary>
-      <div class="pbody">${fields}
-        ${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
+    return `<details class="plan" ${(state.planOpen ?? !narrow()) ? 'open' : ''}><summary>Assumptions${trial ? ' <span class="badge demo">trying new values</span><span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}${impact}</summary>
+      <div class="pbody">${fields}</div></details>`;
   }
   let whatTimer = null;
   function setWhat(k, v) {
@@ -167,25 +168,29 @@
       rows = rows.slice().sort((a, b) => { const x = v(a), y = v(b); return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
+    const total = rows.length, limit = state.limit[id] || PAGE;
+    rows = rows.slice(0, limit);
+    const more = total > rows.length ? `<div class="more"><button class="btn ghost" data-more="${id}">Show ${Math.min(PAGE, total - rows.length)} more</button><span class="muted">${inr.format(rows.length)} of ${inr.format(total)}</span><button class="btn ghost" data-more="${id}" data-all="1">Show all</button></div>` : '';
     cols = cols.filter(colVisible);
     const W = state.colW[colKey(id)], fixed = W && cols.every((c) => W[c.k]);
     if (fixed) { const sum = cols.reduce((a, c) => a + W[c.k], 0), room = tableRoom(); if (sum > room) cols.forEach((c) => { W[c.k] = Math.max(40, Math.floor((W[c.k] * room) / sum)); }); }
-    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    if (!card) return desk;
+    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}" tabindex="0" aria-sort="${s && s.k === c.k ? (s.dir > 0 ? 'ascending' : 'descending') : 'none'}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}" tabindex="0">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    if (!card) return desk + more;
     const cur = s ? `${s.k}|${s.dir}` : '';
-    const opts = cols.filter((c) => c.sortable !== false).flatMap((c) => [[`${c.k}|-1`, `${c.label}: high → low`], [`${c.k}|1`, `${c.label}: low → high`]]);
+    const opts = cols.filter((c) => (c.r || c.val) && !['status', 'name', 'type', 'start', 'end'].includes(c.k))
+      .flatMap((c) => (c.k === 'daysLeft' ? [[`${c.k}|1`, 'Days left: fewest first']] : [[`${c.k}|-1`, `${c.label}: highest first`]]));
     const phone = `<div class="phone">
         <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
       </div>`;
-    return desk + phone;
+    return desk + phone + more;
   }
   const kv = (label, value, cls = '') => `<div class="${cls}"><span>${label}</span><b>${value}</b></div>`;
 
   /* ---------- charts (SVG, to scale) ---------- */
   function dailyChart(daily) {
-    const W = narrow() ? 360 : 1000, H = narrow() ? 230 : 365, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
+    const W = narrow() ? 360 : Math.max(1000, Math.round(innerWidth * 0.62)), H = narrow() ? 230 : 365, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
     const max = Math.max(1, ...daily.map((d) => d.sold + d.lost));
     const step = niceStep(max / 4); const top = Math.ceil(max / step) * step;
     const y = (v) => T + (H - T - B) * (1 - v / top);
@@ -236,7 +241,7 @@
   function overview() {
     const r = state.report, t = r.totals, top = r.products.filter((p) => p.lost > 0).slice(0, 10);
     const maxLost = Math.max(1, ...top.map((p) => p.lost));
-    const hours = r.stockouts.reduce((s, e) => s + e.hours, 0);
+    const hours = r.stockouts.reduce((s, e) => s + (e.hoursInPeriod ?? e.hours), 0);   // only the hours inside the period
     const openNow = r.stockouts.filter((e) => e.open).sort((a, b) => b.lost - a.lost);
     const outProducts = new Set(r.stockouts.map((s) => s.id)).size;
     const note = t.stockouts
@@ -261,7 +266,7 @@
         <div class="panel-head"><h2>Sold vs lost to stock-outs, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold</span><span><i style="background:#E0506E"></i>Lost to stock-outs</span></div></div>
         ${dailyChart(r.daily)}
       </div>
-        <div class="panel ov-order"><div class="panel-head"><h2>Order today</h2><a href="#reorder">All ${r.reorder.length}</a></div>
+        <div class="panel ov-order"><div class="panel-head"><h2>Order now</h2><a href="#reorder">All ${r.reorder.length}</a></div>
           ${r.reorder.length ? `<div class="bars">${r.reorder.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${abcMark(p)}${esc(p.name)}</span>${pill(p.status)}<span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering right now.</p>'}
         </div>
         <div class="panel ov-loss"><div class="panel-head"><h2>Biggest losses</h2><a href="#products">All products</a></div>
@@ -319,17 +324,17 @@
     const rows = r.stockouts.filter((s) => (f === 'all' || (f === 'open' ? s.open : f === 'small' ? s.small : s.repeat)) && (!q || `${s.name} ${s.sku}`.toLowerCase().includes(q)))
       .map((s, i) => ({ ...s, key: i }));
     return `
-      <section class="headline ex"><h1>Every stock-out, and what it cost</h1>
-        <p>₹ lost = selling hours out of stock × the product’s normal sales per hour × its average selling price. Hours are weighted by when this store actually sells, so a night-time stock-out counts for less.</p></section>
+      <section class="headline"><h1>${inr.format(r.stockouts.length)} stock-outs cost <span class="lost">${money(r.totals.lost)}</span> in sales${r.totals.hasCost ? ` · ${money(r.totals.lostProfit)} profit` : ''}</h1>
+        <p class="exp">₹ lost = hours out of stock (weighted by when this store sells) × normal sales per hour × average price paid. ${r.stockouts.filter((s) => s.open).length} still out.</p></section>
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
       ${table('stockouts', [
         { k: 'name', label: 'Product', f: (s) => `<span class="pname" title="${esc(s.name)}">${esc(s.name)}</span><span class="sku">${esc(s.sku)}</span>` },
-        { k: 'lost', label: 'Lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
+        { k: 'lost', label: 'Sales lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
         { k: 'hours', label: 'Out for', r: 1, nw: 1, f: (s) => dur(s.hours) },
         { k: 'start', label: 'Went out', nw: 1, f: (s) => dt(s.start) },
         { k: 'end', label: 'Back in', nw: 1, f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
-        { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small" title="Refilled with less than a week of sales">Small top-up</span>' : '', s.repeat ? '<span class="st again" title="Out again within a week">Again &lt;7d</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
+        { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small" title="Refilled with less than a week of sales">Small top-up</span>' : '', s.repeat ? '<span class="st again" title="Out again within a week">Out again</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
         { k: 'topUp', label: 'Refill', r: 1, nw: 1, tip: 'Pieces added when it came back, and how many days of sales that covers', f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} <span class="muted">· ${n1(s.topUpDays)} d</span>`), val: (s) => s.topUp ?? -1 },
         { k: 'unitsLost', label: 'Units lost', r: 1, pr: 3, f: (s) => n1(s.unitsLost) },
       ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.', (s) => `
@@ -382,7 +387,7 @@
 </div>
       ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
         <header><h3>${abcMark(p)}${esc(p.name)}</h3>${pill(p.status)}</header>
-        <div class="mfacts">${trendCell(p)}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span>${p.overstock ? `<span class="plumv">${money(p.excessValue)} excess</span>` : ''}<span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
+        <div class="mfacts">${trendCell(p)}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span>${p.overstock ? `<span class="plumv">${money(p.excessValue)} excess</span>` : ''}<span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="catm">${esc(p.type)}</span>` : ''}</div>`)}`;
   }
   const inShape = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function downloadProductsCsv() {
@@ -455,28 +460,34 @@
       body.innerHTML = `
         <h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? pill(p.status) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
-        <section class="tiles" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-          <div class="tile"><b>${p?.stock ?? '–'}</b><span>in stock now</span></div>
-          <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per day (in stock)</span></div>
-          <div class="tile lost"><b>${money(p?.lost)}</b><span>lost in ${state.days} days</span></div>
+        <section class="tiles dtiles">
+          <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)}` : ''}</span></div>
+          <div class="tile ${p?.daysLeft != null && p.daysLeft <= 3 ? 'lost' : ''}"><b>${p?.daysLeft == null ? (p?.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b><span>days left · ${p?.stock ?? '–'} in stock</span></div>
+          <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day</span></div>
+          <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
+        <div class="panel"><h2>Trend</h2><div class="trc big">${p ? spark(p, 240, 44) + trendChip(p) : ''}</div><p class="muted small">${p ? (p.weeks || []).map((w, i) => (w.units == null ? '' : `${WEEK_LABEL(i)}: ${w.units}${w.outDays ? ` (out ${n1(w.outDays)} d)` : ''}`)).filter(Boolean).reverse().slice(0, 4).join(' · ') : ''}</p></div>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
         <div class="panel chart"><h2>Units sold per day</h2>${unitsChart(d.dailyUnits)}</div>
-        <div class="panel"><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again within a week</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div>`;
+        <div class="panel"><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div>`;
+      $('#drawer-close').focus();
     } catch (e) { body.innerHTML = `<p>Couldn’t load this product: ${esc(e.message)}</p>`; }
   }
-  const closeDrawer = () => { $('#drawer').hidden = true; };
+  let lastRow = null;
+  const closeDrawer = () => { const was = !$('#drawer').hidden; $('#drawer').hidden = true; if (was && lastRow && document.contains(lastRow)) lastRow.focus(); };
 
   /* ---------- render + events ---------- */
   const VIEWS = { overview, reorder, stockouts, products, data: dataView };
   function render() {
     if (!state.report) return;
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
+    $('#view').classList.toggle('calm', !render._animate); render._animate = false;   // bars animate when a page opens, not on every filter or keystroke
     $('#view').innerHTML = (VIEWS[state.view] || overview)();
     const focusId = render._focus; render._focus = null;
-    if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch { /* number inputs */ } } }
+    if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
+    render._caret = null;
   }
-  function route() { closeDrawer(); state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
+  function route() { closeDrawer(); render._animate = true; state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', async (e) => {
     if (e.target.closest('.rz')) return;
@@ -485,9 +496,10 @@
     if (!t) return;
     if (t.matches('.range button')) { state.days = +t.dataset.days; await load(); return; }
     if (t.dataset.go) { const v = t.dataset.go; state.filter[v] = t.dataset.filter; location.hash = v; return; }
-    if (t.dataset.filterReorder) { state.filter.reorder = t.dataset.filterReorder; render(); return; }
-    if (t.dataset.filterStockouts) { state.filter.stockouts = t.dataset.filterStockouts; render(); return; }
-    if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; render(); return; }
+    if (t.dataset.more) { const id = t.dataset.more; state.limit[id] = t.dataset.all ? 1e9 : (state.limit[id] || PAGE) + PAGE; render(); return; }
+    if (t.dataset.filterReorder) { state.filter.reorder = t.dataset.filterReorder; state.limit.reorder = 0; render(); return; }
+    if (t.dataset.filterStockouts) { state.filter.stockouts = t.dataset.filterStockouts; state.limit.stockouts = 0; render(); return; }
+    if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; state.limit.products = 0; render(); return; }
     if (t.id === 'csv-products') { downloadProductsCsv(); return; }
     if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
 
@@ -496,7 +508,7 @@
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
     }
     if (t.dataset.product) { openProduct(t.dataset.product); return; }
-    if (t.matches('tr[data-id], .mcard[data-id]')) { openProduct(t.dataset.id); return; }
+    if (t.matches('tr[data-id], .mcard[data-id]')) { lastRow = t; openProduct(t.dataset.id); return; }
     if (t.id === 'drawer-close') { closeDrawer(); return; }
     if (t.id === 'copy-note') { copy($('.note p').textContent); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
@@ -532,9 +544,9 @@
     } catch (err) { toast(err.message); t.disabled = false; }
   });
   document.addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.what) { render._focus = e.target.id; setWhat(e.target.dataset.what, e.target.value); return; }
+    if (e.target.dataset && e.target.dataset.what) { render._focus = e.target.id; render._caret = e.target.selectionStart; setWhat(e.target.dataset.what, e.target.value.replace(',', '.')); return; }
     const m = e.target.id && e.target.id.match(/^q-(reorder|stockouts|products)$/);
-    if (m) { state.q[m[1]] = e.target.value; render._focus = e.target.id; render(); }
+    if (m) { state.q[m[1]] = e.target.value; state.limit[m[1]] = 0; render._focus = e.target.id; render._caret = e.target.selectionStart; render(); }
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'f-type') { state.filter.type = e.target.value; render(); return; }
@@ -569,7 +581,8 @@
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeDrawer();
-    if (e.key === 'Enter' && e.target.matches && e.target.matches('.mcard[data-id]')) openProduct(e.target.dataset.id);
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.mcard[data-id], tr[data-id]')) { e.preventDefault(); lastRow = e.target; openProduct(e.target.dataset.id); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('th[data-k]')) { e.preventDefault(); e.target.click(); }
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);

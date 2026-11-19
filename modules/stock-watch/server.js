@@ -138,7 +138,7 @@ function syncShopify() {
       store.setShopify({ lastQty: s.lastQty });
       let orders = 0;
       await shopify.pullOrders(store.load().shopify.ordersCursor, {
-        onPage: (rows, cursor) => { orders += store.add('orders', rows); store.setShopify({ ordersCursor: cursor }); },
+        onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows).added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
       });
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
