@@ -401,3 +401,5 @@ table.fixed td:first-child { max-width: none; }
 .plast { padding: 0 14px 8px; overflow-wrap: anywhere; }
 .log { max-height: 320px; overflow-y: auto; font-size: 13px; }
 .log .ep span { overflow-wrap: anywhere; min-width: 0; }
+/* SW-030: run history in the Data status card */
+.log .err-t { color: var(--lost); font-size: 12.5px; }

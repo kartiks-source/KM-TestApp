@@ -3,12 +3,12 @@
  * Settings change log (SW-029, LOGIC.md §13). One entry per changed setting:
  *   { at, by, key, old, new }
  * Kept in the store (store.json → settingsLog), newest first, at most MAX entries.
- * Secrets are never written: the ingest key shows as "(old key)" → "(new key)".
+ * Keys are never written: the ingest key shows as "(old key)" → "(new key)".
  * Pure helpers on the store object; the caller saves.
  */
 
 const MAX = 200;
-const SECRET = new Set(['ingestKey']);
+const HIDDEN = new Set(['ingestKey']);
 const MASK = { old: '(old key)', new: '(new key)' };
 
 /** Settings in `patch` whose value differs from `before`, as [{ key, old, new }]. Numbers compared as numbers. */
@@ -18,7 +18,7 @@ function diff(before, patch) {
     const was = before ? before[key] : undefined;
     const same = typeof v === 'number' && was != null && String(was).trim() !== '' ? +was === v : was === v;
     if (same) continue;
-    out.push(SECRET.has(key) ? { key, old: was ? MASK.old : null, new: MASK.new } : { key, old: was === undefined ? null : was, new: v });
+    out.push(HIDDEN.has(key) ? { key, old: was ? MASK.old : null, new: MASK.new } : { key, old: was === undefined ? null : was, new: v });
   }
   return out;
 }

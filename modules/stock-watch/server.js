@@ -20,6 +20,7 @@ const keys = require('./src/keys');
 const shopify = require('./src/shopify');
 const access = require('./src/access');
 const audit = require('./src/audit');
+const runs = require('./src/runs');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -96,6 +97,7 @@ async function syncSheet() {
   const s = store.load().settings;
   if (!s.sheetStockCsv && !s.sheetOrderCsv) return { skipped: true };
   const out = { stock: 0, orders: 0 };
+  const run = runs.begin('sheet');   // run history (SW-030)
   try {
     for (const [kind, url] of [['stock', s.sheetStockCsv], ['order', s.sheetOrderCsv]]) {
       if (!url) continue;
@@ -105,9 +107,11 @@ async function syncSheet() {
       const parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order');
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows); else out.orders = store.add('orders', parsed.rows);
     }
+    Object.assign(run, { stock: out.stock, lines: out.orders }); runs.finish(store.load(), run);
     store.setSync({ lastSync: Date.now(), lastSyncError: null });
     return out;
   } catch (e) {
+    Object.assign(run, { stock: out.stock, lines: out.orders }); runs.finish(store.load(), run, e.message);
     store.setSync({ lastSync: Date.now(), lastSyncError: e.message });
     throw e;
   }
@@ -124,10 +128,11 @@ function loadDemo() {
 
 /* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ---------- */
 let shopifyRun = null;
+let shopifyProgress = null;   // live counts of the running pull (SW-030)
 function shopifyStatus() {
   const k = keys.status(); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
-    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun,
+    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun, progress: runs.progress(shopifyProgress),
     backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
 }
 function syncShopify() {
@@ -135,24 +140,28 @@ function syncShopify() {
   if (shopifyRun) return shopifyRun;
   shopifyRun = (async () => {
     const started = Date.now();
+    const run = shopifyProgress = runs.begin('shopify', started);
     try {
       if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
       const nm = store.load().settings.storeName;
       if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
       const s = await shopify.pullStock(store.load().shopify.lastQty);
       const stock = store.add('stock', s.rows);
+      Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
       store.setShopify({ lastQty: s.lastQty });
       let orders = 0;
       await shopify.pullOrders(store.load().shopify.ordersCursor, {
-        onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows).added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
+        onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows).added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
       });
+      runs.finish(store.load(), run);
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
       return { stock, orders };
     } catch (e) {
+      runs.finish(store.load(), run, e.message);
       store.setShopify({ lastTry: started, lastError: e.message });
       throw e;
-    } finally { shopifyRun = null; }
+    } finally { shopifyRun = null; shopifyProgress = null; }
   })();
   return shopifyRun;
 }
@@ -187,7 +196,7 @@ async function api(req, res, url) {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: audit.recent(d, 50), lastPlanChange: audit.lastOf(d, PLAN_KEYS), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: audit.recent(d, 50), lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
     const run = syncShopify();

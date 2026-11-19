@@ -63,6 +63,7 @@
   async function load() {
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
+    state.runs = set.runs || [];   // SW-030
     state.role = set.role || 'admin'; state.changes = set.changes || []; state.lastPlanChange = set.lastPlanChange || null;   // SW-029
     header();
     render._animate = true; render();
@@ -78,8 +79,10 @@
     const err = sh.lastError || src.err;
     const pill = $('#sync-pill');
     pill.className = 'sync-pill ' + (err ? 'err' : src.kind === 'demo' ? 'demo' : src.kind === 'live' ? 'ok' : '');
-    pill.querySelector('span').textContent = err ? 'Sync issue' : src.kind === 'demo' ? 'Demo data' : sh.running ? 'Syncing…' : 'Data Sync';
-    pill.title = err || (src.kind === 'demo' ? 'Showing demo data' : 'Data is syncing');
+    pill.querySelector('span').textContent = err ? 'Sync issue' : src.kind === 'demo' ? 'Demo data' : sh.running ? syncingText(sh.progress) : 'Data Sync';
+    if ($('#sync-progress')) $('#sync-progress').textContent = syncingText(sh.progress);
+    watchSync();
+    pill.title = err || (src.kind === 'demo' ? 'Showing demo data' : sh.running ? syncingText(sh.progress) : 'Data is syncing');
     const badge = src.kind === 'demo' ? '<span class="badge demo">Demo data</span>' : src.kind === 'live' ? '<span class="badge live">Live data</span>' : '<span class="badge empty">No data yet</span>';
     $('#source').innerHTML = `${badge}<span>${inr.format(d.stockRows)} stock changes · ${inr.format(d.orderRows)} order lines</span>`
       + (d.lastStock ? `<span>Last stock change: ${dt(d.lastStock)}</span>` : '')
@@ -114,6 +117,30 @@
         <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 15 minutes' : 'Loads the last 60 days on the first pull'}</dd>
         <dt>Reads only</dt><dd>${scopes} · API ${esc(sh.apiVersion || '')}</dd></dl>
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
+  }
+
+  /* ---------- sync progress and run history (SW-030) ---------- */
+  const syncingText = (p) => (!p ? 'Syncing…' : p.phase === 'orders' ? `Syncing · ${inr.format(p.orders)} orders` : 'Syncing · stock');
+  const took = (ms) => (ms < 90e3 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60e3)} min`);
+  /* While a pull runs, refresh the pill every 3 s; when it ends, reload everything once. */
+  function watchSync() {
+    if (!(state.shopify || {}).running || watchSync.t) return;
+    watchSync.t = setTimeout(async () => {
+      watchSync.t = null;
+      try {
+        const set = await api('/api/settings');
+        if (set.shopify && set.shopify.running) { state.shopify = set.shopify; header(); } else await load();
+      } catch { /* next load() tries again */ }
+    }, 3000);
+  }
+  function runLine(r) {
+    const what = `${inr.format(r.stock)} stock changes · ${inr.format(r.lines)} order lines${r.kind === 'shopify' ? ` (${inr.format(r.orders)} orders)` : ''}`;
+    return `<div class="ep"><span class="muted">${dt(r.start)}</span><span>${r.kind === 'shopify' ? 'Shopify' : 'Sheet'} · ${took(r.ms)}</span><span>${what}</span>${r.error ? `<span class="st crit" title="${esc(r.error)}">Failed</span><span class="err-t">${esc(r.error)}</span>` : '<span class="st ok">OK</span>'}${(r.notes || []).map((n) => `<span class="muted">${esc(n)}</span>`).join('')}</div>`;
+  }
+  function runHistory() {
+    const list = state.runs || [], last = list[0];
+    if (!list.length) return '';
+    return `<details class="fold-in"><summary>Last ${list.length} sync${list.length === 1 ? '' : 's'} · latest ${dt(last.start)}, ${took(last.ms)}, ${last.error ? 'failed' : 'OK'}</summary><div class="log">${list.map(runLine).join('')}</div></details>`;
   }
 
   /* ---------- view-only sign-in and the settings change log (SW-029) ---------- */
@@ -448,7 +475,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings</h1></section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}</p></section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>

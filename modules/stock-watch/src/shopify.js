@@ -103,10 +103,10 @@ const vid = (gid) => String(gid || '').replace(/^gid:\/\/shopify\/ProductVariant
  * Returns stock rows for what changed, and the new last-seen map.
  */
 function diffStock(variants, lastQty, t) {
-  const rows = []; const next = {};
+  const rows = []; const next = {}; const excluded = { notActive: 0, untracked: 0 };   // counted for the run history (SW-030)
   for (const v of variants) {
-    if (v.inventoryItem && v.inventoryItem.tracked === false) continue;
-    if (v.product && v.product.status && v.product.status !== 'ACTIVE') continue;
+    if (v.inventoryItem && v.inventoryItem.tracked === false) { excluded.untracked++; continue; }
+    if (v.product && v.product.status && v.product.status !== 'ACTIVE') { excluded.notActive++; continue; }
     const id = vid(v.id); const now = Number(v.inventoryQuantity);
     if (!id || !Number.isFinite(now)) continue;
     next[id] = now;
@@ -114,7 +114,7 @@ function diffStock(variants, lastQty, t) {
     if (before === now) continue;
     rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(Number(v.inventoryItem?.unitCost?.amount) > 0 ? { cost: Number(v.inventoryItem.unitCost.amount) } : {}) });
   }
-  return { rows, lastQty: next };
+  return { rows, lastQty: next, excluded };
 }
 
 /** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */

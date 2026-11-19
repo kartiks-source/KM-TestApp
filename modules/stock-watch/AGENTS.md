@@ -31,6 +31,7 @@ Google Sheet CSV / upload ───┘
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
 | `src/access.js` | roles: admin / view password, role in the signed cookie, the 403 gate for view sessions (SW-029) |
 | `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |
+| `src/runs.js` | sync progress ("Syncing · 2,340 orders") and the last 20 runs: start, time taken, rows, error, notes (SW-030) |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |

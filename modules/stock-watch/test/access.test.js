@@ -53,9 +53,9 @@ test('access: view role refused on every write to /api, reads allowed; ingest ke
   assert.equal(A.visibleSettings({ leadDays: 14, ingestKey: 'k' }, 'admin').ingestKey, 'k');
 });
 
-test('audit: only changed settings logged, as {at, by, key, old, new}; secrets masked; newest first, capped', () => {
-  const before = { leadDays: 14, coverDays: 30, storeName: 'A', ingestKey: 'secret-old' };
-  const ch = L.diff(before, { leadDays: 14, coverDays: 45, storeName: 'B', ingestKey: 'secret-new' });
+test('audit: only changed settings logged, as {at, by, key, old, new}; ingest key masked; newest first, capped', () => {
+  const before = { leadDays: 14, coverDays: 30, storeName: 'A', ingestKey: 'key-old-123' };
+  const ch = L.diff(before, { leadDays: 14, coverDays: 45, storeName: 'B', ingestKey: 'key-new-456' });
   assert.deepEqual(ch, [{ key: 'coverDays', old: 30, new: 45 }, { key: 'storeName', old: 'A', new: 'B' }, { key: 'ingestKey', old: '(old key)', new: '(new key)' }]);
   assert.deepEqual(L.diff({ leadDays: '14' }, { leadDays: 14 }), []);   // same number, stored as text
   const db = {};
@@ -63,7 +63,7 @@ test('audit: only changed settings logged, as {at, by, key, old, new}; secrets m
   L.record(db, [{ key: 'leadDays', old: 14, new: 21 }], 'admin (script)', 2000);
   assert.deepEqual(db.settingsLog[0], { at: 2000, by: 'admin (script)', key: 'leadDays', old: 14, new: 21 });
   assert.equal(db.settingsLog.length, 4);
-  assert.ok(!JSON.stringify(db).includes('secret-'));
+  assert.ok(!JSON.stringify(db).includes('key-'));
   assert.equal(L.lastOf(db, ['coverDays', 'safetyDays']).new, 45);
   assert.equal(L.lastOf(db, ['safetyDays']), null);
   assert.deepEqual(L.record(db, [], 'admin'), []);
@@ -95,7 +95,7 @@ async function start(env) {
 }
 const basic = (pass) => ({ authorization: 'Basic ' + Buffer.from(`x:${pass}`).toString('base64') });
 async function signIn(s, pass) {
-  const r = await s.req('/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'password=' + encodeURIComponent(pass) });
+  const r = await s.req('/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ password: pass }).toString() });
   assert.equal(r.status, 303);
   return { cookie: r.headers.get('set-cookie').split(';')[0] };
 }
@@ -142,7 +142,7 @@ test('routes: admin writes are logged with who/when/old→new and shown to every
 test('routes: wrong password still 401; VIEW_PASSWORD without ADMIN_PASSWORD refuses to start', async (t) => {
   const s = await start({ ADMIN_PASSWORD: ADMIN, VIEW_PASSWORD: VIEW }); t.after(s.stop);
   assert.equal((await s.req('/api/settings', { headers: basic('wrong') })).status, 401);
-  assert.equal((await s.req('/login', { method: 'POST', body: 'password=wrong', headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status, 401);
+  assert.equal((await s.req('/login', { method: 'POST', body: new URLSearchParams({ password: 'wrong' }).toString(), headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status, 401);
   const bad = await start({ VIEW_PASSWORD: VIEW });
   assert.equal(bad.ready, false);
   assert.equal(await bad.exited, 1);
