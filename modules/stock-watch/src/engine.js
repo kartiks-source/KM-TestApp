@@ -112,7 +112,7 @@ function storeTrend(products) {
   return round(v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2, 1);
 }
 
-const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'OK'];
+const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered', 'OK'];
 /** Reorder status and quantity for one product. */
 function plan({ stock, perDay, lead, cover, safety }) {
   const have = Math.max(0, stock);
@@ -123,6 +123,31 @@ function plan({ stock, perDay, lead, cover, safety }) {
         : daysLeft <= lead + safety + 7 ? 'Order this week' : 'OK';
   const qty = Math.max(0, Math.ceil(perDay * (lead + cover + safety) - have));
   return { daysLeft, status, qty };
+}
+
+/**
+ * A purchase order already placed ("Mark ordered", LOGIC.md §6b). rec = { qty, eta, at, by }.
+ * Units received = stock increases recorded after `at`; still to come = qty − received (done at 90% received).
+ * It counts toward the plan while it's due (eta not past) and lands before the shelf empties,
+ * or no later than an order placed today could (now + lead time), a day's grace either way since dates are whole
+ * days. Past eta with units still to come = late.
+ */
+function onOrderNow(rec, changes, now, stock, perDay, lead) {
+  if (!rec || !(num(rec.qty) > 0)) return null;
+  const received = changes.reduce((s, c) => s + (c.t > num(rec.at) ? Math.max(0, num(c.now) - num(c.before)) : 0), 0);
+  const remaining = Math.max(0, Math.round(num(rec.qty) - received));
+  if (received >= 0.9 * num(rec.qty)) return null;   // received (a short shipment of up to 10% counts as complete)
+  const eta = num(rec.eta), late = eta < now;
+  const outAt = perDay > 0 ? now + (Math.max(0, stock) / perDay) * DAY : Infinity;
+  const counts = !late && eta <= Math.max(outAt, now + lead * DAY) + DAY;   // + 1 day: dates are whole days
+  return { qty: num(rec.qty), remaining, eta, at: num(rec.at) || null, by: rec.by || null, late, counts };
+}
+/** plan() with an on-order record: units that count are added to stock; if that covers the need, status is "Ordered". */
+function planWithOrder(args, oo) {
+  const base = plan(args);
+  if (!oo || !oo.counts) return base;
+  const withPo = plan({ ...args, stock: Math.max(0, args.stock) + oo.remaining });
+  return { daysLeft: base.daysLeft, status: withPo.status === 'OK' ? 'Ordered' : withPo.status, qty: withPo.qty };
 }
 
 const DEFAULT_SETTINGS = {
@@ -138,7 +163,7 @@ const DEFAULT_SETTINGS = {
 
 /**
  * The whole report.
- * opts.days = range shown (7–90), opts.now = "now" (ms).
+ * opts.days = range shown (7–90), opts.now = "now" (ms), opts.onOrder = { variantId: { qty, eta, at, by } } (§6b).
  */
 function report(stock, orders, settings = {}, opts = {}) {
   const S = { ...DEFAULT_SETTINGS, ...settings };
@@ -221,7 +246,8 @@ function report(stock, orders, settings = {}, opts = {}) {
       });
     });
 
-    const pl = p.stock == null ? null : plan({ stock: p.stock, perDay, lead: S.leadDays, cover: S.coverDays, safety: S.safetyDays });
+    const oo = p.stock == null ? null : onOrderNow((opts.onOrder || {})[p.id], p.changes, now, p.stock, perDay, S.leadDays);
+    const pl = p.stock == null ? null : planWithOrder({ stock: p.stock, perDay, lead: S.leadDays, cover: S.coverDays, safety: S.safetyDays }, oo);
     const selling = perDay > 0 && perDay >= S.minPerDay;
     const row = {
       id: p.id, name, sku: p.sku, stock: p.stock, perDay: round(perDay, 2), price: Math.round(price),
@@ -231,7 +257,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       lost: Math.round(lost), unitsLost: round(unitsLost, 1), outs, smallTopUps, repeats,
       sold: Math.round(p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty) * num(o.price), 0)),
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
-      type: p.type || '',
+      type: p.type || '', onOrder: oo,
     };
     Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price }, enumerable: false });
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
@@ -289,7 +315,8 @@ function report(stock, orders, settings = {}, opts = {}) {
     totals: {
       sold, lost, lostPct: sold + lost ? round((lost / (sold + lost)) * 100, 1) : 0,
       unitsLost: round(dailyRows.reduce((s, d) => s + d.unitsLost, 0), 0),
-      outNow: products.filter((p) => p.status === 'Out now').length,
+      outNow: products.filter((p) => p.status === 'Out now' || (p.status === 'Ordered' && p.stock <= 0)).length,
+      ordered: products.filter((p) => p.status === 'Ordered').length,
       orderNow: products.filter((p) => ['Critical', 'Order now'].includes(p.status)).length,
       orderToday: products.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
       stillOut: stockouts.filter((s) => s.open).length,
@@ -338,11 +365,11 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (let t = now - (days - 1) * DAY; t <= now; t += DAY) units[dayKey(t, S.tzOffsetMin)] = 0;
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, S.tzOffsetMin); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
-  const r = report(stock, orders, S, { now, days });
+  const r = report(stock, orders, S, { now, days, onOrder: opts.onOrder });
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,
     dailyUnits: Object.entries(units).map(([day, u]) => ({ day, units: u })),
     stockouts: r.stockouts.filter((s) => String(s.id) === String(id)).sort((a, b) => a.start - b.start) };
 }
 
 module.exports = {
-  trend, TREND_MIN_UNITS, report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  trend, TREND_MIN_UNITS, report, productDetail, episodes, demandPerDay, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

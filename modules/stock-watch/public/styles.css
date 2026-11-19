@@ -395,3 +395,25 @@ table.fixed td:first-child { max-width: none; }
   .headline .hbtn { margin-left: 0; }
   .colpick .menu { right: auto; left: 0; }
 }
+
+/* ---- "Mark ordered" (SW-012, LOGIC.md §6b): one button, one status ---- */
+.st.g-ordered { background: var(--brand-wash); color: var(--brand); }
+.po { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 600; color: var(--brand); background: var(--brand-wash2); border: 1px solid #CFE6F5; border-radius: 999px; padding: 1px 7px; white-space: nowrap; vertical-align: 1px; }
+.po.late { color: var(--lost); background: var(--lost-soft); border-color: #F5C6D0; }
+.pick { width: 15px; height: 15px; margin: 0 8px 0 0; vertical-align: -3px; accent-color: var(--brand); cursor: pointer; }
+.pick-sp { display: inline-block; width: 23px; }
+.btn.xs { padding: 3px 9px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tbl td .btn.xs { min-height: 0; }
+.bulk { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; background: var(--brand-wash); border: 1px solid #CFE6F5; border-radius: var(--r); padding: 8px 12px; font-size: 13px; }
+.bulk .btn:first-of-type { margin-left: auto; }
+.poform .porow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; }
+.poform label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.poform input { border: 1px solid var(--line-2); background: #fff; border-radius: 8px; padding: 6px 9px; font-weight: 500; width: 150px; }
+.poform #oo-qty { width: 90px; }
+.poform input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-wash); }
+.tact { margin-left: 10px; border: 0; background: none; color: #9CC7E6; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; }
+@media (max-width: 760px) {
+  .poform input, .poform #oo-qty { width: 100%; }
+  .poform label { flex: 1 1 140px; }
+  .poform .btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
+}

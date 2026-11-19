@@ -10,6 +10,7 @@
     filter: { reorder: 'today', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
+    pick: new Set(),                            // Reorder rows ticked for Mark ordered
     limit: {},                                  // rows shown per table (pages of 50)
     colW: (() => { try { return JSON.parse(localStorage.getItem('sw-colw') || '{}'); } catch { return {}; } })(),
   };
@@ -54,7 +55,11 @@
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   }
-  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600); }
+  function toast(msg, action) {
+    const t = $('#toast'); t.textContent = msg; t.hidden = false; toast._do = action ? action.run : null;
+    if (action) { const b = document.createElement('button'); b.className = 'tact'; b.id = 'toast-act'; b.textContent = action.label; t.append(' ', b); }
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; toast._do = null; }, action ? 6000 : 2600);
+  }
 
   async function reloadReport() {
     state.report = await api(`/api/report?days=${state.days}${whatQs()}`);
@@ -239,9 +244,21 @@
      Default view = the decision; detail on demand (Columns picker, More, the product drawer).
      User-facing statuses are three: Order today (out / critical / order now), This week, OK. */
   const TODAY = ['Out now', 'Critical', 'Order now'];
-  const group = (s) => (TODAY.includes(s) ? 'today' : s === 'Order this week' ? 'week' : s === 'OK' ? 'ok' : s === 'Slow seller' ? 'slow' : 'none');
-  const GROUP_LABEL = { today: 'Order today', week: 'This week', ok: 'OK', slow: 'Slow seller', none: 'No stock data' };
-  const status = (p) => { const g = group(p.status); return `<span class="st g-${g}" title="${esc(p.status === 'Critical' ? 'Order today: 3 days or less left' : p.status)}">${GROUP_LABEL[g]}</span>`; };
+  const group = (s) => (TODAY.includes(s) ? 'today' : s === 'Order this week' ? 'week' : s === 'Ordered' ? 'ordered' : s === 'OK' ? 'ok' : s === 'Slow seller' ? 'slow' : 'none');
+  const GROUP_LABEL = { today: 'Order today', week: 'This week', ordered: 'Ordered', ok: 'OK', slow: 'Slow seller', none: 'No stock data' };
+  const dateShort = (t) => { const d = local(t); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+  /* on order (LOGIC.md §6b): "Ordered · lands 25 Nov"; late or not enough → a small tag next to the status */
+  const poTag = (p) => {
+    const o = p.onOrder; if (!o || p.status === 'Ordered') return '';
+    const tip = `Ordered ${inr.format(o.qty)}${o.remaining < o.qty ? ` (${inr.format(o.remaining)} still to come)` : ''} · ${o.late ? 'was due' : 'lands'} ${dateShort(o.eta)}`;
+    if (o.late) return ` <span class="po late" title="${esc(tip)}. Past its date, so it no longer counts: chase the supplier or reorder.">Late · due ${dateShort(o.eta)}</span>`;
+    return ` <span class="po" title="${esc(tip)}${o.counts ? '. The order quantity is what’s still needed on top.' : '. Lands after the shelf empties and later than a new order could, so it doesn’t count.'}">${inr.format(o.remaining)} on order</span>`;
+  };
+  const status = (p) => {
+    const g = group(p.status);
+    if (g === 'ordered') return `<span class="st g-ordered" title="${esc(`Ordered ${inr.format(p.onOrder.qty)} pcs${p.onOrder.by ? ` by ${p.onOrder.by}` : ''}; stock + order covers the need`)}">Ordered · lands ${dateShort(p.onOrder.eta)}</span>`;
+    return `<span class="st g-${g}" title="${esc(p.status === 'Critical' ? 'Order today: 3 days or less left' : p.status)}">${GROUP_LABEL[g]}</span>${poTag(p)}`;
+  };
   const outDot = (p) => (p.stock != null && p.stock <= 0 ? '<span class="dot" title="Out of stock now"></span>' : '');
   const bestTag = (p) => (p.abc === 'A' ? '<span class="best" title="Best seller: among the products making the top 80% of sales">Best seller</span>' : '');
   const nameCell = (p, tag = true) => `${outDot(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span>${tag ? bestTag(p) : ''}`;
@@ -253,7 +270,18 @@
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
     return `<details class="colpick"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
   }
-  const dlMenu = (id, href) => `<details class="colpick"><summary class="btn ghost" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${href ? `<a href="${href}">Download CSV</a>` : `<button class="linkbtn" id="csv-${id}">Download CSV</button>`}</div></details>`;
+  const dlMenu = (id, href, extra = '') => `<details class="colpick"><summary class="btn ghost" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${extra}${href ? `<a href="${href}">Download CSV</a>` : `<button class="linkbtn" id="csv-${id}">Download CSV</button>`}</div></details>`;
+  /* "Mark ordered" (LOGIC.md §6b): one click with the suggested qty and today + lead time; edit qty/date in the drawer */
+  const orderBtn = (p) => (p.status === 'Ordered' ? `<button class="btn ghost xs" data-unorder="${esc(p.id)}" title="Remove the order mark">Undo</button>`
+    : p.onOrder ? `<button class="btn ghost xs" data-edit-order="${esc(p.id)}" title="Change the order already marked">Edit order</button>`
+      : p.orderQty > 0 ? `<button class="btn ghost xs" data-order="${esc(p.id)}" title="Mark ${inr.format(p.orderQty)} pcs ordered, landing in ${state.report.settings.leadDays} days (edit in the product panel)">Mark ordered</button>` : '');
+  const isoDay = (t) => local(t).toISOString().slice(0, 10);
+  const myName = () => { try { return localStorage.getItem('sw-name') || ''; } catch { return ''; } };
+  async function markOrdered(items, label) {
+    await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items, by: myName() }) });
+    state.pick.clear(); await reloadReport();
+    toast(label, { label: 'Undo', run: async () => { await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: items.map((i) => ({ id: i.id, clear: true })) }) }); await reloadReport(); toast('Order mark removed'); } });
+  }
 
   function daysCell(p) {
     if (p.daysLeft == null) return p.stock != null && p.stock <= 0 ? '<span class="lostv">0</span>' : '–';
@@ -303,11 +331,12 @@
   function reorder() {
     const r = state.report, t = r.totals, f = state.filter.reorder, q = state.q.reorder.toLowerCase();
     const week = r.reorder.filter((p) => p.status === 'Order this week').length;
-    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ['all', 'All', r.reorder.length]];
+    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(t.ordered ? [['ordered', 'Ordered', t.ordered]] : []), ['all', 'All', r.reorder.length]];
     const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
+    const pickable = rows.filter((p) => !p.onOrder && p.orderQty > 0);
     const cols = [
-      { k: 'name', label: 'Product', f: (p) => nameCell(p) },
-      { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
+      { k: 'name', label: 'Product', f: (p) => (!p.onOrder && p.orderQty > 0 ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : '<span class="pick-sp"></span>') + nameCell(p) },
+      { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
@@ -316,13 +345,16 @@
       { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
       { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (p) => p.trendPct ?? -999 },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
+      { k: 'act', label: '', tip: 'Placed the order? Mark it so the line leaves Order today', f: orderBtn, val: (p) => (p.onOrder ? 1 : 0) },
     ];
+    const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && !p.onOrder && p.orderQty > 0));
     return `
       <section class="headline"><h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
         <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p></section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`)}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+      ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${status(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
@@ -489,6 +521,7 @@
           <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day</span></div>
           <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
+        ${p && (p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><h2>Trend</h2><div class="trc big">${p ? spark(p, 240, 44) + trendChip(p) : ''}</div><p class="muted small">${p ? (p.weeks || []).map((w, i) => (w.units == null ? '' : `${WEEK_LABEL(i)}: ${w.units}${w.outDays ? ` (out ${n1(w.outDays)} d)` : ''}`)).filter(Boolean).reverse().slice(0, 4).join(' · ') : ''}</p></div>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
         <details class="panel fold"><summary><b>More</b> <span class="muted">units per day, every stock-out</span></summary>
@@ -496,6 +529,15 @@
         <div><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div></details>`;
       $('#drawer-close').focus();
     } catch (e) { body.innerHTML = `<p>Couldn’t load this product: ${esc(e.message)}</p>`; }
+  }
+  function orderForm(p) {
+    const o = p.onOrder, lead = state.report.settings.leadDays;
+    const facts = o ? `${o.late ? '<b class="lostv">Late</b> · was due' : 'Lands'} ${dateShort(o.eta)} · marked ${dateShort(o.at)}${o.by ? ` by ${esc(o.by)}` : ''}${o.remaining < o.qty ? ` · ${inr.format(o.qty - o.remaining)} received` : ''}` : `Suggested: ${inr.format(p.orderQty)} pcs, landing in ${lead} days`;
+    return `<div class="panel poform"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>
+      <div class="porow"><label>Pieces<input id="oo-qty" inputmode="numeric" autocomplete="off" value="${o ? o.qty : p.orderQty}"></label>
+        <label>Lands on<input id="oo-eta" type="date" min="${isoDay(Date.now())}" value="${isoDay(o ? Math.max(o.eta, Date.now()) : Date.now() + lead * 864e5)}"></label>
+        <label>Your name<input id="oo-by" autocomplete="name" placeholder="optional" value="${esc(myName())}"></label>
+        <button class="btn" id="oo-save" data-oo="${esc(p.id)}">${o ? 'Update' : 'Mark ordered'}</button>${o ? `<button class="btn ghost" id="oo-remove" data-oo="${esc(p.id)}">Remove</button>` : ''}</div></div>`;
   }
   let lastRow = null;
   const closeDrawer = () => { const was = !$('#drawer').hidden; $('#drawer').hidden = true; if (was && lastRow && document.contains(lastRow)) lastRow.focus(); };
@@ -515,6 +557,8 @@
 
   document.addEventListener('click', async (e) => {
     if (e.target.closest('.rz')) return;
+    if (e.target.matches('input.pick')) { const id = e.target.dataset.pick; if (e.target.checked) state.pick.add(id); else state.pick.delete(id); render(); return; }
+    if (e.target.id === 'toast-act' && toast._do) { const run = toast._do; $('#toast').hidden = true; toast._do = null; run().catch((err) => toast(err.message)); return; }
     const sum = e.target.closest('.plan > summary'); if (sum) { state.planOpen = !sum.parentElement.open; return; }
     const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
     if (!t) return;
@@ -537,6 +581,30 @@
     if (t.id === 'drawer-close') { closeDrawer(); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
     try {
+      if (t.dataset.order) {
+        const p = state.report.reorder.find((x) => x.id === t.dataset.order); if (!p) return;
+        t.disabled = true; const eta = isoDay(Date.now() + state.report.settings.leadDays * 864e5);
+        await markOrdered([{ id: p.id, qty: p.orderQty, eta }], `Marked ordered: ${inr.format(p.orderQty)} pcs, lands ${dateShort(Date.now() + state.report.settings.leadDays * 864e5)}`); return;
+      }
+      if (t.dataset.editOrder) { lastRow = t.closest('tr'); openProduct(t.dataset.editOrder); return; }
+      if (t.dataset.unorder) { t.disabled = true; await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: [{ id: t.dataset.unorder, clear: true }] }) }); await reloadReport(); toast('Order mark removed'); return; }
+      if (t.id === 'pick-all') { const f = state.filter.reorder, q = state.q.reorder.toLowerCase(); state.report.reorder.filter((p) => !p.onOrder && p.orderQty > 0 && (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q))).forEach((p) => state.pick.add(p.id)); render(); return; }
+      if (t.id === 'pick-clear') { state.pick.clear(); render(); return; }
+      if (t.id === 'pick-mark') {
+        const lead = state.report.settings.leadDays, eta = isoDay(Date.now() + lead * 864e5);
+        const items = state.report.reorder.filter((p) => state.pick.has(p.id) && !p.onOrder && p.orderQty > 0).map((p) => ({ id: p.id, qty: p.orderQty, eta }));
+        if (!items.length) return; t.disabled = true;
+        await markOrdered(items, `Marked ${items.length} ordered, landing ${dateShort(Date.now() + lead * 864e5)}`); return;
+      }
+      if (t.id === 'oo-save' || t.id === 'oo-remove') {
+        const id = t.dataset.oo, by = ($('#oo-by')?.value || '').trim();
+        try { localStorage.setItem('sw-name', by); } catch { /* private window */ }
+        const item = t.id === 'oo-remove' ? { id, clear: true } : { id, qty: +String($('#oo-qty').value).replace(/[,\s]/g, ''), eta: $('#oo-eta').value };
+        t.disabled = true;
+        await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: [item], by }) });
+        toast(t.id === 'oo-remove' ? 'Order mark removed' : `Marked ordered: ${inr.format(item.qty)} pcs, lands ${dateShort(Date.parse(item.eta + 'T12:00:00Z') - off())}`);
+        await reloadReport(); openProduct(id); return;
+      }
       if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
       if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
       if (t.id === 'load-demo') { t.disabled = true; await api('/api/demo', { method: 'POST' }); toast('Demo data loaded'); await load(); }

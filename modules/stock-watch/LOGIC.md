@@ -183,6 +183,36 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Why:** the right lead time or cover differs by supplier, season and cash position. Seeing "cover 30 → 20 days frees ₹X of order value" lets a brand trade working capital against stock-out risk before committing.
 
+## 6b. Already ordered ("Mark ordered")
+
+**Rule:** when someone places a purchase order they press **Mark ordered** (on the Reorder row, in the product drawer, or for several ticked rows at once) and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
+
+> received = sum of stock increases recorded after the order was marked
+> still to come = ordered qty − received; once 90% has arrived the order is treated as complete and dropped
+> it **counts** when it's not past its date **and** lands before the shelf empties, or no later than an order placed today could (today + lead time), with a day's grace because dates are whole days
+> when it counts: the plan is worked out on stock now + still to come
+
+| Result | Shown as |
+|---|---|
+| stock + on order is enough (status would be OK) | **Ordered · lands 25 Nov**, off Order today, listed under the **Ordered** tab, order qty 0 |
+| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "Ordered 50 · lands 25 Nov" under the name |
+| past the expected date and less than 90% received | back in **Order today**, in red: "Ordered 200 · was due 25 Nov" |
+| lands after the shelf empties and later than a fresh order could | doesn't count: the row stays in Order today with the order shown, so you can decide whether to chase the supplier or order elsewhere |
+
+**Days left** still uses stock on hand only, because that's when the shelf empties. A product that's out of stock but ordered still counts in "out now" and keeps losing sales until the order lands.
+
+**Why:** the plan used to look at stock on hand only, so a line ordered yesterday showed up again today with the same quantity, which invites a duplicate purchase order. Counting units only when they land in time keeps the list honest: an order that arrives after the shelf is empty doesn't stop the stock-out. Detecting arrival from stock increases means nobody has to "receive" the order in a second step.
+
+**What else we considered:**
+- **Reading purchase orders from Shopify:** Shopify has no purchase-order API for most stores, and the app is read-only (ADR-0001).
+- **Clearing the mark on any stock increase:** a return of one piece would clear a 200-piece order. Counting units received is more exact.
+
+**When it can be wrong:**
+- **Returns or manual stock corrections after the mark** count as received, so a large return can make an order look partly arrived.
+- **A short shipment of up to 10%** is treated as complete.
+- **One record per variant:** marking again replaces the previous order (add the quantities yourself if there are two open orders).
+- Overstock (§7c) doesn't count units on order.
+
 ## 7. Slow sellers
 
 **Rule:** a product selling below *Ignore below* [0.2 units a day, about 6 a month] is a **Slow seller**. Slow sellers are left out of the reorder list and alerts, but their stock-outs and ₹ lost are still counted.
@@ -301,6 +331,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - ₹ lost is an estimate of demand, and an upper bound where substitutes exist (section 4).
 - Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
+- "Mark ordered" spots arrivals from stock increases, so returns after the mark count as received; one open order per variant (section 6b).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
 - Returns and cancellations aren't netted out of sales.
