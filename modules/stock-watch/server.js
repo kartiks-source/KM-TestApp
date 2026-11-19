@@ -11,14 +11,14 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const catalog = require('./src/catalog');
+const groups = require('./src/groups');
 const store = require('./src/store');
 const engine = require('./src/engine');
 const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
-const catalog = require('./src/catalog');
-const groups = require('./src/groups');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';

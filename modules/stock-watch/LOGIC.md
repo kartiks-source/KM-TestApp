@@ -343,8 +343,8 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
 - Returns and cancellations aren't netted out of sales.
-- Group by: collection membership can be up to 24 hours old; tag and collection rows overlap, so they have no grand total (section 9a).
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
+- Group by: collection membership can be up to 24 hours old; tag and collection rows overlap, so they have no grand total (section 9a).
 
 ## 12. Differences in the Google Sheet version
 
