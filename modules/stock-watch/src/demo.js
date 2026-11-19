@@ -15,7 +15,7 @@
 const { HOUR, DAY } = require('./engine');
 const CATALOG = require('./demo-catalog.json').items;
 
-const VERSION = 'sammsara-3';           // bump to make running servers rebuild their demo data
+const VERSION = 'sammsara-5';           // bump to make running servers rebuild their demo data
 const STORE_NAME = 'Sammsara (demo)';
 
 function rng(seed) {      // mulberry32: same demo every time
@@ -55,18 +55,18 @@ function generate({ now = Date.now(), days = 60, seed = 11 } = {}) {
     const priceFactor = Math.min(1.6, Math.max(0.35, 3500 / c.price) ** 0.5);
     const perDay = Math.max(0.04, (9 / (rank + 1) ** 0.9) * priceFactor);
     const style = rank < 6 ? (['trickle', 'late', 'good'][rank % 3]) : pickStyle(r);
-    const cover = style === 'heavy' ? 70 + r() * 60 : style === 'abandoned' ? 4 + r() * 6 : 12 + r() * 22;
+    const cover = style === 'heavy' ? 110 + r() * 140 : style === 'abandoned' ? 4 + r() * 6 : 12 + r() * 22;
     return {
       id: String(4710000000 + i * 97), sku: c.sku || `SAM-${String(i + 1).padStart(4, '0')}`, product: c.product, variant: c.variant,
-      type: c.type, price: c.price, perDay, style, qty: Math.max(1, Math.round(perDay * cover)), outSince: null, trickles: 0,
+      type: c.type, price: c.price, cost: Math.round(c.price * (0.38 + r() * 0.17)), perDay, style, qty: Math.max(1, Math.round(perDay * cover)), outSince: null, trickles: 0,
     };
   });
 
   const change = (it, t, delta) => {
     const before = it.qty; it.qty = Math.max(0, it.qty + delta);
-    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price, type: it.type });
+    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price, type: it.type, cost: it.cost });
   };
-  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price, type: it.type });
+  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price, type: it.type, cost: it.cost });
 
   const sell = (it, t, q) => Math.min(it.qty, q);
   const paidFor = (it) => Math.round(it.price * (r() < 0.3 ? 0.9 : r() < 0.08 ? 0.8 : 1));

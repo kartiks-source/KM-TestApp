@@ -115,6 +115,7 @@ function report(stock, orders, settings = {}, opts = {}) {
   for (const r of stockSorted) {
     const p = get(String(r.variantId));
     p.sku = r.sku || p.sku; p.product = r.product || p.product; p.variant = r.variant || p.variant; p.type = r.type || p.type || '';
+    if (num(r.cost)) p.cost = num(r.cost);
     if (num(r.price)) p.price = num(r.price);
     p.changes.push(r); p.stock = num(r.now);
   }
@@ -177,19 +178,40 @@ function report(stock, orders, settings = {}, opts = {}) {
       id: p.id, name, sku: p.sku, stock: p.stock, perDay: round(perDay, 2), price: Math.round(price),
       daysLeft: pl && Number.isFinite(pl.daysLeft) ? round(pl.daysLeft, 1) : null,
       status: pl ? (selling ? pl.status : 'Slow seller') : 'No stock data',
-      orderQty: pl && selling ? pl.qty : 0, orderValue: pl && selling ? Math.round(pl.qty * price) : 0,
+      orderQty: pl && selling ? pl.qty : 0, orderValue: pl && selling ? Math.round(pl.qty * (p.cost || price)) : 0,   // cash to commit: unit cost when known
       lost: Math.round(lost), unitsLost: round(unitsLost, 1), outs, smallTopUps, repeats,
       sold: Math.round(p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty) * num(o.price), 0)),
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '',
     };
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
+    /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
+    row.cost = p.cost ? Math.round(p.cost) : null;
+    row.margin = p.cost && price ? round(((price - p.cost) / price) * 100, 1) : null;
+    row.lostProfit = p.cost ? Math.round(unitsLost * Math.max(0, price - p.cost)) : null;
+    /* excess stock: pieces beyond what the next lead + cover + safety days need; "overstocked" when
+       stock covers more than twice that, or the product hasn't sold at all */
+    const need = perDay * (S.leadDays + S.coverDays + S.safetyDays);
+    const have = p.stock > 0 ? p.stock : 0;
+    row.excessUnits = Math.max(0, Math.floor(have - need));
+    row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
+    row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
 
+  /* best sellers (ABC by revenue in the period): A = the products making the first 80% of sales,
+     B = the next 15%, C = the rest and anything that didn't sell */
+  const bySold = products.slice().sort((a, b) => b.sold - a.sold);
+  const allSold = bySold.reduce((s, p) => s + p.sold, 0);
+  let run = 0;
+  for (const p of bySold) {
+    const before = allSold ? run / allSold : 1; run += p.sold;
+    p.abc = !p.sold ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
+  }
+
   const rank = (s) => STATUS.indexOf(s);
-  reorder.sort((a, b) => rank(a.status) - rank(b.status) || b.lost - a.lost || b.perDay - a.perDay);
+  reorder.sort((a, b) => rank(a.status) - rank(b.status) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
   stockouts.sort((a, b) => b.lost - a.lost);
   products.sort((a, b) => b.lost - a.lost || b.sold - a.sold);
 
@@ -211,6 +233,14 @@ function report(stock, orders, settings = {}, opts = {}) {
       smallTopUps: stockouts.filter((s) => s.small).length,
       repeats: stockouts.filter((s) => s.repeat).length,
       products: products.length,
+      lostProfit: products.some((p) => p.lostProfit != null) ? products.reduce((s, p) => s + (p.lostProfit || 0), 0) : null,
+      hasCost: products.some((p) => p.cost != null),
+      bestsellers: products.filter((p) => p.abc === 'A').length,
+      bestAtRisk: products.filter((p) => p.abc === 'A' && ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
+      orderValueNow: reorder.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).reduce((s, p) => s + p.orderValue, 0),
+      orderValueAll: reorder.reduce((s, p) => s + p.orderValue, 0),
+      overstocked: products.filter((p) => p.overstock).length,
+      excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
     },
     daily: dailyRows, reorder, stockouts, products,
     data: {

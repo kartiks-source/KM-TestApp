@@ -154,13 +154,19 @@ Settings: *Lead time* [7 days], *Cover after a reorder* [30 days], *Safety stock
 
 **What else we considered:**
 - **Safety stock from demand variability** (the textbook formula using standard deviation and service level) is more precise. But it needs months of clean history per product, and brands find "3 days of extra stock" easier to reason about. It's a good next step once there's more data.
-- **Order value** = order qty × average price paid. It's a guide to the money committed, not the supplier's cost.
+- **Order value** = order qty × **unit cost** (the cash you commit to the supplier). If a product has no unit cost, the average price paid is used instead, which overstates the cash.
 
 **When it can be wrong:**
 - **Lead time is one number for the whole store.** Products from slower suppliers need a manual top-up.
 - **Minimum order quantities and case packs aren't applied.** Round up to the supplier's pack size.
 
 ---
+
+## 6a. Changing the assumptions (live)
+
+The six assumptions (lead time, cover, safety, sales history window, slow-seller cutoff, small top-up) sit in the **Assumptions** bar on Overview, Reorder and Products. Changing one recalculates every number straight away, but only for you and only until you leave or press **Reset**. **Save as default** stores them for everyone. Next to the inputs the bar shows what the change does to the cash side: order value for everything urgent, the whole reorder list, and cash in overstock.
+
+**Why:** the right lead time or cover differs by supplier, season and cash position. Seeing "cover 30 → 20 days frees ₹X of order value" lets a brand trade working capital against stock-out risk before committing.
 
 ## 7. Slow sellers
 
@@ -169,6 +175,42 @@ Settings: *Lead time* [7 days], *Cover after a reorder* [30 days], *Safety stock
 **Why:** for a product selling one unit a month, "days left" and "order quantity" swing wildly with a single order, and filling the reorder list with them hides the products that matter. It's not marked "not selling" because these products do sell, just slowly.
 
 ---
+
+## 7a. Best sellers (A / B / C)
+
+**Rule:** products are ranked by ₹ sold in the selected period. Going down that list, the products that together make the **first 80% of sales are A (best sellers)**, the next 15% are B, and the rest, plus anything that didn't sell, are C. A products show a small **A** badge everywhere.
+
+- **Best sellers at risk** = A products that are Out now, Critical or Order now.
+- The reorder list puts A products first within each status.
+
+**Why:** a stock-out on an A product costs the most and is usually the one ads are pushing. 80 / 15 / 5 is the standard ABC split in inventory management.
+
+**When it can be wrong:** a launch or a heavily discounted product can jump into A for one period. Switch the period (7 / 30 / 60 days) to see whether it holds.
+
+## 7b. Profit lost and margin
+
+**Rule:**
+
+> profit lost = units lost × (average price paid − unit cost)
+> margin = (average price paid − unit cost) ÷ average price paid
+
+**Unit cost** comes from Shopify's inventory item cost ("Cost per item", readable with `read_inventory`), or from a `cost` column in a CSV/Flow row. Products without a cost show "–" and aren't counted in profit lost. The Overview tile only appears when at least one product has a cost.
+
+**Why:** ₹ lost in sales overstates what the business lost. What it actually lost is the margin on those sales, and that's the number to weigh against the cost of holding more stock.
+
+## 7c. Excess stock and overstock (cash tied up)
+
+**Rule:**
+
+> needed = sales per day × (lead time + cover + safety days)
+> excess pieces = stock now − needed (never below 0)
+> excess ₹ = excess pieces × unit cost (× average price paid if cost is unknown)
+
+A product is **Overstocked** when its stock is more than **twice** what's needed, or it has stock but hasn't sold at all. **Cash in overstock** on the Overview adds up the excess ₹ of overstocked products only.
+
+**Why:** this is the cost-cutting side of the same maths. Money sitting in stock that won't sell for months could pay for stock that's running out. The usual moves are to stop reordering it, bundle it with a best seller, or discount it. The "twice" margin keeps a product that's only slightly over from being flagged.
+
+**When it can be wrong:** stock bought ahead of a known season or campaign will look overstocked until the demand arrives.
 
 ## 8. Restocking patterns
 
@@ -192,7 +234,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 
-Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it.
+Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them.
 
 ---
 
@@ -218,6 +260,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - ₹ lost is an estimate of demand, and an upper bound where substitutes exist (section 4).
 - Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
+- Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
 - Returns and cancellations aren't netted out of sales.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).

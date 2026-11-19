@@ -7,7 +7,7 @@
  * Order row  columns: Time, Order, Variant ID, SKU, Qty, Unit price
  */
 
-const STOCK_COLS = ['time', 'variant id', 'sku', 'product', 'variant', 'stock before', 'stock now', 'price', 'type'];
+const STOCK_COLS = ['time', 'variant id', 'sku', 'product', 'variant', 'stock before', 'stock now', 'price', 'type', 'cost'];
 const ORDER_COLS = ['time', 'order', 'variant id', 'sku', 'qty', 'unit price'];
 
 const ALIASES = {
@@ -20,6 +20,7 @@ const ALIASES = {
   'stock now': ['stock now', 'now', 'after', 'inventory', 'quantity', 'stock', 'inventory now'],
   price: ['price', 'unit price', 'selling price'],
   type: ['type', 'product type', 'category', 'collection'],
+  cost: ['cost', 'unit cost', 'cost price', 'cogs', 'cost per item'],
   order: ['order', 'order name', 'order id', 'name'],
   qty: ['qty', 'quantity', 'units'],
   'unit price': ['unit price', 'price', 'net price', 'discounted price'],
@@ -83,6 +84,8 @@ function stockFrom(cells, m) {
   };
   const type = clean(m ? (m.type != null ? cells[m.type] : '') : cells[8]);
   if (type) r.type = type;
+  const cost = Number(clean(m ? (m.cost != null ? cells[m.cost] : '') : cells[9]));
+  if (cost > 0) r.cost = cost;
   return r.variantId && Number.isFinite(r.now) ? { ...r, before: Number.isFinite(r.before) ? r.before : null } : null;
 }
 function orderFrom(cells, m) {
@@ -114,7 +117,7 @@ function fromWebhook(body, kind, stampNow = Date.now()) {
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     const k = (...names) => { for (const n of names) if (body[n] != null && body[n] !== '') return body[n]; return ''; };
     const cells = kind === 'stock'
-      ? [k('time', 'at'), k('variant_id', 'variantId', 'variant id'), k('sku'), k('product', 'title'), k('variant', 'variant_title'), k('before', 'stock_before', 'prior'), k('now', 'stock_now', 'quantity'), k('price'), k('type', 'product_type', 'category')]
+      ? [k('time', 'at'), k('variant_id', 'variantId', 'variant id'), k('sku'), k('product', 'title'), k('variant', 'variant_title'), k('before', 'stock_before', 'prior'), k('now', 'stock_now', 'quantity'), k('price'), k('type', 'product_type', 'category'), k('cost', 'unit_cost', 'cost_price')]
       : [k('time', 'created_at', 'createdAt'), k('order', 'order_name', 'name'), k('variant_id', 'variantId', 'variant id'), k('sku'), k('qty', 'quantity'), k('price', 'unit_price')];
     const r = kind === 'stock' ? stockFrom(cells) : orderFrom(cells);
     if (r && !r.t) r.t = stampNow;

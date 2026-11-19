@@ -9,7 +9,18 @@
     days: 30, view: 'overview', report: null, settings: null, source: null,
     filter: { reorder: 'all', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
+    what: {},                                   // trial values for the planning assumptions (not saved)
+    colW: (() => { try { return JSON.parse(localStorage.getItem('sw-colw') || '{}'); } catch { return {}; } })(),
   };
+  const ASSUME = [
+    ['leadDays', 'Lead time (d)', '', 1, 'Supplier order → stock sellable'],
+    ['coverDays', 'Cover (d)', '', 5, 'How long a reorder should last after it lands'],
+    ['safetyDays', 'Safety (d)', '', 1, 'Buffer for busy days or a late supplier'],
+    ['demandWindowDays', 'History (d)', '', 7, 'Days of sales used for each product’s daily rate'],
+    ['minPerDay', 'Slow below (/d)', '', 0.1, 'Products selling less than this stay off the reorder list'],
+    ['smallTopUpDays', 'Small top-up (d)', '', 1, 'Refills smaller than this many days of sales are flagged'],
+  ];
+  const whatQs = () => Object.entries(state.what).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
 
   /* ---------- formatting ---------- */
   const inr = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
@@ -43,8 +54,12 @@
   }
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600); }
 
+  async function reloadReport() {
+    state.report = await api(`/api/report?days=${state.days}${whatQs()}`);
+    header(); render();
+  }
   async function load() {
-    const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}`), api('/api/settings')]);
+    const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     header();
     render();
@@ -95,6 +110,24 @@
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
   }
 
+  /* ---------- planning assumptions: change a number, every figure updates; save when happy ---------- */
+  function planBar() {
+    const S = state.settings, R = state.report.settings, t = state.report.totals;
+    const trial = Object.keys(state.what).length > 0;
+    const fields = ASSUME.map(([k, label, unit, step, tip]) => `<label class="pf" title="${esc(tip)}"><span>${label}</span>
+        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="number" step="${step}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></label>`).join('');
+    const impact = `<div class="pimpact"><span title="Cash to commit (at unit cost) for everything Out now, Critical or Order now">Order now <b>${money(t.orderValueNow)}</b></span><span title="Order value of the whole reorder list">Full list <b>${money(t.orderValueAll)}</b></span><span title="Cash in stock beyond twice what the next order cycle needs">Overstock <b>${money(t.excessValue)}</b></span></div>`;
+    return `<details class="plan" ${(state.planOpen ?? !narrow()) ? 'open' : ''}><summary>Assumptions${trial ? ' <span class="badge demo">trying new values</span>' : ''}${impact}</summary>
+      <div class="pbody">${fields}
+        ${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
+  }
+  let whatTimer = null;
+  function setWhat(k, v) {
+    if (v === '' || !Number.isFinite(+v)) return;
+    if (+v === +state.settings[k]) delete state.what[k]; else state.what[k] = +v;
+    clearTimeout(whatTimer); whatTimer = setTimeout(() => reloadReport().catch((e) => toast(e.message)), 220);
+  }
+
   /* ---------- generic sortable table ---------- */
   /* A sortable table on wide screens; on phones the same rows as cards (card(r) → html) with a sort picker. */
   function table(id, cols, rows, empty, card) {
@@ -105,7 +138,8 @@
       rows = rows.slice().sort((a, b) => { const x = v(a), y = v(b); return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
-    const desk = `<div class="tbl desk"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.tip ? ` title="${esc(c.tip)}"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
+    const W = state.colW[id], fixed = W && cols.every((c) => W[c.k]);
+    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk;
     const cur = s ? `${s.k}|${s.dir}` : '';
@@ -182,13 +216,14 @@
         <h1>${t.lost ? `Stock-outs cost <span class="lost">${money(t.lost)}</span> in the last ${r.days} days` : `No sales lost to stock-outs in the last ${r.days} days`}</h1>
         <p>${t.lost ? `That’s ${t.lostPct}% of demand: shoppers came, the product wasn’t there. ` : ''}Sold ${money(t.sold)} in the same period.</p>
       </section>
+      ${planBar()}
       <section class="tiles">
-        <div class="tile sold"><b>${money(t.sold)}</b><span>sold</span></div>
-        <div class="tile lost"><b>${money(t.lost)}</b><span>lost to stock-outs</span></div>
-        <button class="tile lost" data-go="reorder" data-filter="Out now"><b>${t.outNow}</b><span>selling items out now</span></button>
-        <button class="tile amber" data-go="reorder" data-filter="now"><b>${t.orderNow}</b><span>to order now</span></button>
-        <button class="tile plum" data-go="stockouts" data-filter="small"><b>${t.smallTopUps}</b><span>small top-ups</span></button>
-        <button class="tile plum" data-go="stockouts" data-filter="again"><b>${t.repeats}</b><span>out again within a week</span></button>
+        <div class="tile sold" title="Sales in the period"><b>${money(t.sold)}</b><span>sold</span></div>
+        <button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost while products were out of stock"><b>${money(t.lost)}</b><span>sales lost · ${n1(t.lostPct)}% of demand</span></button>
+        ${t.hasCost ? `<div class="tile lost" title="Lost sales minus what those units would have cost (price paid − unit cost)"><b>${money(t.lostProfit)}</b><span>profit lost</span></div>` : ''}
+        <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that are out, critical or due to order now"><b>${t.bestAtRisk}<small> / ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
+        <button class="tile amber" data-go="reorder" data-filter="now" title="Cash to commit (at unit cost) for everything Out now, Critical or Order now"><b>${money(t.orderValueNow)}</b><span>to order now · ${t.orderNow + t.outNow} items</span></button>
+        <button class="tile plum" data-go="products" data-filter="over" title="Cash in stock beyond twice what the next order cycle needs: discount it, bundle it, or stop reordering"><b>${money(t.excessValue)}</b><span>cash in overstock · ${t.overstocked} items</span></button>
       </section>
       <section class="ov">
       <div class="panel chart ov-chart">
@@ -196,7 +231,7 @@
         ${dailyChart(r.daily)}
       </div>
         <div class="panel ov-order"><div class="panel-head"><h2>Order today</h2><a href="#reorder">All ${r.reorder.length}</a></div>
-          ${r.reorder.length ? `<div class="bars">${r.reorder.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(p.name)}</span>${pill(p.status)}<span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering right now.</p>'}
+          ${r.reorder.length ? `<div class="bars">${r.reorder.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${abcMark(p)}${esc(p.name)}</span>${pill(p.status)}<span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering right now.</p>'}
         </div>
         <div class="panel ov-loss"><div class="panel-head"><h2>Biggest losses</h2><a href="#products">All products</a></div>
           ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}"><span class="name">${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
@@ -227,21 +262,22 @@
     const S = state.settings;
     return `
       <section class="headline ex"><h1>Reorder before they run out</h1>
-        <p>Order quantity covers ${S.leadDays} days of lead time + ${S.coverDays} days after it lands + ${S.safetyDays} safety days, at each product’s in-stock sales rate. Change these in Data &amp; settings.</p></section>
-      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}<a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}" title="Download the reorder list as CSV">CSV</a></div>
+        <p>Order quantity covers ${S.leadDays} days of lead time + ${S.coverDays} days after it lands + ${S.safetyDays} safety days, at each product’s in-stock sales rate. Try other values in Assumptions below.</p></section>
+      ${planBar()}
+      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}<a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}${whatQs()}" title="Download the reorder list as CSV">CSV</a></div>
         <input class="search" id="q-reorder" placeholder="Search product or SKU" value="${esc(state.q.reorder)}"></div>
       ${table('reorder', [
-        { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `${abcMark(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
         { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => inr.format(p.stock) },
         { k: 'perDay', label: 'Per day', r: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
-        { k: 'orderValue', label: 'Value', r: 1, tip: 'Order quantity × average price paid', f: (p) => money(p.orderValue) },
+        { k: 'orderValue', label: 'Value', r: 1, tip: 'Cash to commit: order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
         { k: 'lost', label: 'Lost', r: 1, tip: `₹ lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
       ], rows, 'Nothing to order in this view.', (p) => `
-        <header><h3>${esc(p.name)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <header><h3>${abcMark(p)}${esc(p.name)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${pill(p.status)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}<span class="sku">${esc(p.sku)}</span></div>`)}`;
   }
 
@@ -269,14 +305,16 @@
         <div class="mfacts"><span class="${s.open ? 'bad' : ''}">out <b>${dur(s.hours)}</b></span><span>${dt(s.start)} → ${s.open ? '<span class="st open">Still out</span>' : dt(s.end)}</span>${s.topUp == null ? '' : `<span>refilled <b>${inr.format(s.topUp)}</b> (${n1(s.topUpDays)} d)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`)}`;
   }
 
-  const PRODUCT_TABS = [['all', 'All'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['OK', 'OK'], ['Slow seller', 'Slow'], ['lost', 'Lost sales']];
-  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : p.status === f);
+  const PRODUCT_TABS = [['all', 'All'], ['best', 'Best sellers'], ['bestrisk', 'Best at risk'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['over', 'Overstock'], ['Slow seller', 'Slow'], ['lost', 'Lost sales']];
+  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && ['Out now', 'Critical', 'Order now'].includes(p.status) : f === 'over' ? p.overstock : p.status === f);
+  const abcMark = (p) => (p.abc === 'A' ? '<span class="abc" title="Best seller: in the products making the top 80% of sales">A</span>' : '');
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
     return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
   }
   const PRODUCT_COLS = () => [
-    { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>`, csv: (p) => p.name },
+    { k: 'name', label: 'Product', f: (p) => `${abcMark(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>`, csv: (p) => p.name },
+    { k: 'abc', label: 'Rank', hide: 1 },
     { k: 'sku', label: 'SKU', hide: 1 },
     { k: 'type', label: 'Category', pr: 2, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
     { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => p.status },
@@ -290,6 +328,12 @@
     { k: 'lostPct', label: '% lost', r: 1, tip: 'Lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
     { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
+    { k: 'excessValue', label: 'Excess', r: 1, pr: 2, tip: 'Cash in stock beyond what the next lead + cover + safety days need (at unit cost when known)', f: (p) => (p.excessValue ? `<span class="${p.overstock ? 'plumv' : 'muted'}">${money(p.excessValue)}</span>` : '–') },
+    ...(state.report.totals.hasCost ? [
+      { k: 'lostProfit', label: 'Profit lost', r: 1, pr: 3, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
+      { k: 'margin', label: 'Margin', r: 1, pr: 3, tip: '(price paid − unit cost) ÷ price paid', f: (p) => (p.margin == null ? '–' : `${n1(p.margin)}%`) },
+      { k: 'cost', label: 'Unit cost', hide: 1 },
+    ] : []),
   ];
   function products() {
     const r = state.report, f = state.filter.products, ty = state.filter.type;
@@ -298,13 +342,14 @@
     const inType = r.products.filter((p) => !ty || p.type === ty);
     const tot = rows.reduce((a, p) => ({ sold: a.sold + p.sold, lost: a.lost + p.lost, stock: a.stock + (p.stock > 0 ? p.stock : 0) }), { sold: 0, lost: 0, stock: 0 });
     return `
-      <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock. Click one for its stock history.</p></section>
+      <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
+        <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
+      ${planBar()}
       <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
-        ${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
-        <input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></div>
+</div>
       ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
-        <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header>
-        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
+        <header><h3>${abcMark(p)}${esc(p.name)}</h3>${pill(p.status)}</header>
+        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span>${p.overstock ? `<span class="plumv">${money(p.excessValue)} excess</span>` : ''}<span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
   }
   const inShape = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function downloadProductsCsv() {
@@ -372,7 +417,7 @@
     const dr = $('#drawer'), body = $('#drawer-body');
     body.innerHTML = '<p class="muted">Loading…</p>'; dr.hidden = false;
     try {
-      const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}`);
+      const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
       const p = d.product, now = state.report.generatedAt, from = now - state.days * 864e5;
       body.innerHTML = `
         <h2 id="drawer-title">${esc(p?.name || id)}</h2>
@@ -396,11 +441,13 @@
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
     $('#view').innerHTML = (VIEWS[state.view] || overview)();
     const focusId = render._focus; render._focus = null;
-    if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+    if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch { /* number inputs */ } } }
   }
   function route() { closeDrawer(); state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', async (e) => {
+    if (e.target.closest('.rz')) return;
+    const sum = e.target.closest('.plan > summary'); if (sum) { state.planOpen = !sum.parentElement.open; return; }
     const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
     if (!t) return;
     if (t.matches('.range button')) { state.days = +t.dataset.days; await load(); return; }
@@ -409,6 +456,9 @@
     if (t.dataset.filterStockouts) { state.filter.stockouts = t.dataset.filterStockouts; render(); return; }
     if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; render(); return; }
     if (t.id === 'csv-products') { downloadProductsCsv(); return; }
+    if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
+    if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
+    if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
     if (t.matches('th[data-k]')) {
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
@@ -448,6 +498,7 @@
     } catch (err) { toast(err.message); t.disabled = false; }
   });
   document.addEventListener('input', (e) => {
+    if (e.target.dataset && e.target.dataset.what) { render._focus = e.target.id; setWhat(e.target.dataset.what, e.target.value); return; }
     const m = e.target.id && e.target.id.match(/^q-(reorder|stockouts|products)$/);
     if (m) { state.q[m[1]] = e.target.value; render._focus = e.target.id; render(); }
   });
@@ -457,6 +508,30 @@
     if (!id) return;
     const [k, dir] = e.target.value.split('|');
     state.sort[id] = k ? { k, dir: +dir } : null; render();
+  });
+  /* drag a header edge to resize, like a spreadsheet; double-click to reset that table */
+  document.addEventListener('mousedown', (e) => {
+    const h = e.target.closest('.rz'); if (!h) return;
+    e.preventDefault();
+    const th = h.closest('th'), table = th.closest('table'), id = table.dataset.table;
+    const ths = [...table.querySelectorAll('th')];
+    const W = {}; ths.forEach((x) => { W[x.dataset.k] = Math.round(x.getBoundingClientRect().width); });
+    table.classList.add('fixed'); ths.forEach((x) => { x.style.width = W[x.dataset.k] + 'px'; });
+    table.style.width = Object.values(W).reduce((a, b) => a + b, 0) + 'px';
+    const k = th.dataset.k, x0 = e.clientX, w0 = W[k];
+    document.body.classList.add('resizing');
+    const move = (ev) => { W[k] = Math.max(40, w0 + ev.clientX - x0); th.style.width = W[k] + 'px'; table.style.width = Object.values(W).reduce((a, b) => a + b, 0) + 'px'; };
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('resizing');
+      state.colW[id] = W; try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+  document.addEventListener('dblclick', (e) => {
+    const h = e.target.closest('.rz'); if (!h) return;
+    const id = h.closest('table').dataset.table; delete state.colW[id];
+    try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
+    render();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeDrawer();
