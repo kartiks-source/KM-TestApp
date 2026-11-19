@@ -109,7 +109,7 @@
     const cur = s ? `${s.k}|${s.dir}` : '';
     const opts = cols.filter((c) => c.sortable !== false).flatMap((c) => [[`${c.k}|-1`, `${c.label}: high → low`], [`${c.k}|1`, `${c.label}: low → high`]]);
     const phone = `<div class="phone">
-        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Most recent first', products: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
       </div>`;
     return desk + phone;
