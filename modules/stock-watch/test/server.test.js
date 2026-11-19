@@ -182,3 +182,25 @@ test('security headers on every response; cross-site writes → 403 (SW-016)', a
   assert.equal((await s.req('/login', { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/x-www-form-urlencoded' }, body: 'password=x' })).status, 403);
   assert.equal((await s.req('/logout', { method: 'POST', headers: { origin: 'https://evil.example' } })).status, 403);
 });
+
+test('bad input → 400, not 500; settings body capped at 64 KB (SW-018)', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: PASSWORD }); t.after(s.stop);
+  const auth = { ...basic(PASSWORD), 'content-type': 'application/json' };
+  const put = (body) => s.req('/api/settings', { method: 'PUT', headers: auth, body });
+  for (const body of ['{bad json', 'null', '[]', '42', '"text"']) {
+    const r = await put(body);
+    assert.equal(r.status, 400, body); assert.match((await r.json()).error, /JSON/, body);
+  }
+  assert.equal((await put('')).status, 200, 'empty body = no change');
+  assert.equal((await put(JSON.stringify({ storeName: 'x'.repeat(70 * 1024) }))).status, 413);
+  assert.equal((await put(JSON.stringify({ storeName: 'Fine' }))).status, 200, 'server still fine after a refused body');
+  assert.equal((await s.req('/api/product/%E0%A4%A', { headers: auth })).status, 400);
+  assert.equal((await s.req('/api/product/%ZZ', { headers: auth })).status, 400);
+  // static files stay inside public/ (encoded dots don't walk out)
+  for (const p of ['/..%2fserver.js', '/%2e%2e/server.js', '/..%5cserver.js']) {
+    const r = await s.req(p, { headers: auth });
+    assert.ok([200, 403].includes(r.status), p);
+    assert.doesNotMatch(await r.text(), /require\('node:http'\)/, p);
+  }
+  assert.doesNotMatch(s.log(), /SyntaxError|URIError|TypeError/, 'nothing reached the 500 handler');
+});

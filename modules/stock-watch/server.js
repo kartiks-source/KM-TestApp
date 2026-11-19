@@ -41,7 +41,17 @@ const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
   req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   req.on('error', reject);
 });
-const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+/* Constant-time compare: HMAC both sides with a per-process key, so neither the content nor the length leaks through timing. */
+const CMP_KEY = crypto.randomBytes(32);
+const mac = (x) => crypto.createHmac('sha256', CMP_KEY).update(String(x)).digest();
+const safeEqual = (a, b) => crypto.timingSafeEqual(mac(a), mac(b));
+const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
+/** A JSON object body, else 400 (bad JSON, null, an array or a number are refused). */
+function jsonObject(raw) {
+  let b; try { b = JSON.parse(raw || '{}'); } catch { throw badRequest('The body must be JSON'); }
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw badRequest('The body must be a JSON object');
+  return b;
+}
 
 /* ---------- login ----------
  * A sign-in page sets a signed cookie (works in every browser, including embedded ones that never
@@ -201,6 +211,7 @@ function syncShopify() {
 }
 
 /* ---------- API ---------- */
+const SETTINGS_LIMIT = 64 * 1024;   // settings bodies are tiny; anything bigger is refused (413)
 const MAX_INGEST_ROWS = 500;   // Flow sends one change per request; a leaked key can't flood the store
 let keyInUrlWarned = 0;
 async function api(req, res, url) {
@@ -235,7 +246,7 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
-    const id = decodeURIComponent(p.slice('/api/product/'.length));
+    let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
@@ -247,7 +258,7 @@ async function api(req, res, url) {
     return done.error ? fail(res, 502, done.error) : send(res, 200, { ok: true, ...done });
   }
   if (p === '/api/settings' && req.method === 'PUT') {
-    const b = JSON.parse(await readBody(req) || '{}'); const patch = {};
+    const b = jsonObject(await readBody(req, SETTINGS_LIMIT)); const patch = {};
     for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, b[k]); if (v !== undefined) patch[k] = v; }
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
@@ -287,7 +298,7 @@ function serveStatic(req, res, url) {
     return send(res, 302, '', 'text/plain', { location: '/login' });
   }
   let file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
-  if (!file.startsWith(PUBLIC)) return send(res, 403, 'Forbidden', 'text/plain');
+  if (file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'Forbidden', 'text/plain');   // not public-evil/…
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
   fs.createReadStream(file).pipe(res);
@@ -317,7 +328,8 @@ const isWrite = (req) => !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
 
 const server = http.createServer(async (req, res) => {
   securityHeaders(req, res);
-  const url = new URL(req.url, 'http://local');
+  let url;
+  try { url = new URL(req.url, 'http://local'); } catch { return fail(res, 400, 'Bad address'); }
   try {
     if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
       return fail(res, 403, 'Cross-site request refused');
@@ -344,6 +356,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
+    if (e instanceof URIError) return fail(res, 400, 'Bad address');
     if (e.status >= 400 && e.status < 500) return fail(res, e.status, e.message);
     console.error(e);
     return fail(res, 500, 'Something went wrong on the server');
