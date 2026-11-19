@@ -176,7 +176,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     const row = {
       id: p.id, name, sku: p.sku, stock: p.stock, perDay: round(perDay, 2), price: Math.round(price),
       daysLeft: pl && Number.isFinite(pl.daysLeft) ? round(pl.daysLeft, 1) : null,
-      status: pl ? (selling ? pl.status : 'Not selling') : 'No stock data',
+      status: pl ? (selling ? pl.status : 'Slow seller') : 'No stock data',
       orderQty: pl && selling ? pl.qty : 0, orderValue: pl && selling ? Math.round(pl.qty * price) : 0,
       lost: Math.round(lost), unitsLost: round(unitsLost, 1), outs, smallTopUps, repeats,
       sold: Math.round(p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty) * num(o.price), 0)),

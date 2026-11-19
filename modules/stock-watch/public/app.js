@@ -28,7 +28,8 @@
   const dayLabel = (k) => { const [, m, d] = k.split('-'); return `${+d} ${MON[+m - 1]}`; };
   const dur = (h) => (h >= 48 ? `${n1(h / 24)} days` : `${n1(h)} h`);
 
-  const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Not selling': 'ok', 'No stock data': 'ok' };
+  const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Slow seller': 'idle', 'No stock data': 'idle' };
+  const narrow = () => window.innerWidth < 760;
   const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}">${esc(s)}</span>`;
 
   /* ---------- server ---------- */
@@ -104,7 +105,7 @@
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
     const desk = `<div class="tbl desk"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}" data-k="${c.k}">${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk;
     const cur = s ? `${s.k}|${s.dir}` : '';
     const opts = cols.filter((c) => c.sortable !== false).flatMap((c) => [[`${c.k}|-1`, `${c.label}: high → low`], [`${c.k}|1`, `${c.label}: low → high`]]);
@@ -118,12 +119,12 @@
 
   /* ---------- charts (SVG, to scale) ---------- */
   function dailyChart(daily) {
-    const W = 1000, H = 280, L = 64, R = 10, T = 12, B = 34;
+    const W = narrow() ? 360 : 1000, H = narrow() ? 230 : 280, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
     const max = Math.max(1, ...daily.map((d) => d.sold + d.lost));
     const step = niceStep(max / 4); const top = Math.ceil(max / step) * step;
     const y = (v) => T + (H - T - B) * (1 - v / top);
     const bw = (W - L - R) / daily.length;
-    const every = Math.ceil(daily.length / 10);
+    const every = Math.ceil(daily.length / (narrow() ? 4 : 10));
     let g = '';
     for (let v = 0; v <= top + 1; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E7EBF2" stroke-width="1"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${esc(money(v))}</text>`;
     daily.forEach((d, i) => {
@@ -140,7 +141,7 @@
 
   function stockChart(tl, from, to) {
     if (tl.length < 2) return '<p class="muted">No stock changes recorded in this period.</p>';
-    const W = 680, H = 220, L = 46, R = 26, T = 10, B = 28;
+    const W = narrow() ? 340 : 680, H = narrow() ? 200 : 220, L = 40, R = narrow() ? 16 : 26, T = 10, B = 28;
     const max = Math.max(1, ...tl.map((p) => p.stock));
     const top = Math.ceil(max / niceStep(max / 4)) * niceStep(max / 4);
     const x = (t) => L + (W - L - R) * ((t - from) / (to - from));
@@ -153,11 +154,11 @@
     let ticks = '';
     for (let v = 0; v <= top; v += niceStep(max / 4)) ticks += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E7EBF2"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
     const days = Math.round((to - from) / 864e5); let xl = '';
-    for (let i = 0; i <= days; i += Math.max(1, Math.ceil(days / 6))) { const t = from + i * 864e5; const d = local(t); xl += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</text>`; }
+    for (let i = 0; i <= days; i += Math.max(1, Math.ceil(days / (narrow() ? 3 : 6)))) { const t = from + i * 864e5; const d = local(t); xl += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</text>`; }
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stock over time; shaded = out of stock">${bands}${ticks}<path d="${path}" fill="none" stroke="#0978BE" stroke-width="2"/>${xl}</svg>`;
   }
   function unitsChart(rows) {
-    const W = 680, H = 140, L = 46, R = 8, T = 8, B = 24;
+    const W = narrow() ? 340 : 680, H = narrow() ? 120 : 140, L = 32, R = 8, T = 8, B = 10;
     const max = Math.max(1, ...rows.map((r) => r.units));
     const bw = (W - L - R) / rows.length;
     const y = (v) => T + (H - T - B) * (1 - v / max);
@@ -172,7 +173,7 @@
     const hours = r.stockouts.reduce((s, e) => s + e.hours, 0);
     const outProducts = new Set(r.stockouts.map((s) => s.id)).size;
     const note = t.stockouts
-      ? `In the last ${r.days} days, ${outProducts} selling products ran out of stock ${t.stockouts} times, for about ${Math.round(hours)} hours in total. That cost an estimated ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand), demand the ads had already brought in. ${t.smallTopUps} times the shelf was refilled with less than ${state.settings.smallTopUpDays} days of stock, and ${t.repeats} times a product sold out again within a week.`
+      ? `In the last ${r.days} days, ${outProducts} selling products ran out of stock ${t.stockouts} times, adding up to ${hours >= 48 ? `about ${inr.format(Math.round(hours / 24))} product-days` : `about ${Math.round(hours)} product-hours`} with an empty shelf. That cost an estimated ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand), demand the ads had already brought in. ${t.smallTopUps} times the shelf was refilled with less than ${state.settings.smallTopUpDays} days of stock, and ${t.repeats} times a product sold out again within a week.`
       : `No selling product ran out of stock in the last ${r.days} days.`;
     return `
       <section class="headline">
@@ -253,11 +254,11 @@
       ${table('stockouts', [
         { k: 'name', label: 'Product', f: (s) => `<span class="pname">${esc(s.name)}</span><span class="sub mono">${esc(s.sku)}</span>` },
         { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
-        { k: 'hours', label: 'Out for', r: 1, f: (s) => dur(s.hours) },
-        { k: 'start', label: 'Went out', f: (s) => dt(s.start) },
-        { k: 'end', label: 'Back in', f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
+        { k: 'hours', label: 'Out for', r: 1, nw: 1, f: (s) => dur(s.hours) },
+        { k: 'start', label: 'Went out', nw: 1, f: (s) => dt(s.start) },
+        { k: 'end', label: 'Back in', nw: 1, f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
         { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small">Small top-up</span>' : '', s.repeat ? '<span class="st again">Out again within a week</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
-        { k: 'topUp', label: 'Refilled with', r: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
+        { k: 'topUp', label: 'Refilled with', r: 1, nw: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
         { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
       ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.', (s) => `
         <header><h3>${esc(s.name)}</h3><div class="mq"><small>Lost</small><b class="lostv">${money(s.lost)}</b></div></header>
@@ -369,7 +370,7 @@
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
   }
-  function route() { state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
+  function route() { closeDrawer(); state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
@@ -432,6 +433,8 @@
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);
+  let wasNarrow = narrow();
+  window.addEventListener('resize', () => { if (narrow() !== wasNarrow) { wasNarrow = narrow(); render(); } });
 
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); toast('Copied'); }

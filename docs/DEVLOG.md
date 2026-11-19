@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (QA pass, every page on phone + desktop)
+- Charts sized to the screen so labels are readable on phones; re-render when crossing the phone breakpoint.
+- Details panel now closes when you change page (it stayed open over other pages).
+- Stock-outs table: dates, durations and refill sizes no longer wrap.
+- "Not selling" renamed "Slow seller" (under 0.2/day; they do sell) and shown grey, not green.
+- Data page: buttons wrap instead of running off a phone screen; long variable lists wrap; tighter panel spacing.
+- Overview summary: total out-of-stock time shown as product-days with a thousands separator.
+
 ## 2026-11-19 · stock-watch (phone layout)
 - Under 760px wide, Reorder, Stock-outs and Products show cards instead of 9-column tables: the decision on top (status + order qty; ₹ lost), three key numbers below, a Sort by picker, tap for details. Desktop columns reordered so decision columns sit next to the product.
 
