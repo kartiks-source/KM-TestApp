@@ -20,6 +20,7 @@ const engine = require('./src/engine');
 const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
+const alert = require('./src/alert');
 const shopify = require('./src/shopify');
 const backup = require('./src/backup');
 const onorder = require('./src/onorder');
@@ -238,10 +239,12 @@ function syncShopify() {
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
       await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
+      alert.syncResult(true, '', { store: keys.status().store }).catch(() => {});
       return { stock, orders };
     } catch (e) {
       runs.finish(store.load(), run, e.message);
       store.setShopify({ lastTry: started, lastError: e.message });
+      alert.syncResult(false, e.message, { store: keys.status().store }).catch(() => {});
       throw e;
     } finally { shopifyRun = null; shopifyProgress = null; }
   })();

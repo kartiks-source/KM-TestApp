@@ -9,7 +9,19 @@
  * organisation, so for a brand's store the brand creates the app and shares its ID + secret.
  * A legacy custom-app admin token (shpat_…) still works if that's all there is.
  *
- *   1. Azure Key Vault (preferred)
+ *   0. Token API from the main product (DECIDED, 19 Nov 2026: Shopify Access Options, option A)
+ *        TOKEN_API_URL         https://… base of the dev team's token API
+ *        TOKEN_API_KEY         the key only this app holds (Railway variable)
+ *        TOKEN_API_HEADER      optional header name; default "Authorization" sent as "Bearer <key>",
+ *                              any other name (e.g. X-Api-Key) is sent with the raw key
+ *        SHOPIFY_STORE         <store> (the part before .myshopify.com)
+ *      GET {TOKEN_API_URL}/poc/shopify/token?store=<store>.myshopify.com
+ *        → { store, access_token, expires_at, scopes }
+ *      We NEVER refresh a token and never see the app's keys. The token is kept in memory until
+ *      5 minutes before expires_at; if Shopify rejects it we ask the API once more; if the API is
+ *      down we keep using the current token until it expires, then pulls pause and alert.
+ *
+ *   1. Azure Key Vault
  *        AZURE_KEY_VAULT_URL   https://<name>.vault.azure.net
  *        AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET   our own Azure login,
  *                              "Key Vault Secrets User" on that vault only
@@ -26,6 +38,7 @@
  */
 
 const TTL = 30 * 60e3;
+const API_SKEW = 5 * 60e3;            // stop using a token-API token 5 minutes before it expires
 const KV_API = '7.5';
 const VAULT_RE = /^https:\/\/[a-z][a-z0-9-]{1,22}[a-z0-9]\.vault\.azure\.net\/?$/i;
 const STORE_RE = /^[a-z0-9][a-z0-9-]{0,60}$/i;
@@ -41,6 +54,14 @@ const cleanShop = (s) => String(s || '').trim().toLowerCase().replace(/^https?:\
 /** Which source is configured, and what's missing. Never includes a secret. */
 function status() {
   const store = cleanShop(env('SHOPIFY_STORE'));
+  const api = env('TOKEN_API_URL');
+  if (api) {
+    const missing = [];
+    if (!/^https:\/\/[^\s/]+/i.test(api) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(api)) missing.push('TOKEN_API_URL must start with https://');
+    if (!env('TOKEN_API_KEY')) missing.push('TOKEN_API_KEY');
+    if (!STORE_RE.test(store)) missing.push('SHOPIFY_STORE');
+    return { source: 'tokenapi', store, kind: 'main product token API (hourly tokens)', ready: !missing.length, missing };
+  }
   const vault = env('AZURE_KEY_VAULT_URL');
   if (vault) {
     const missing = [];
@@ -125,12 +146,45 @@ async function exchange(shop, clientId, clientSecret) {
   return shopToken.token;
 }
 
+/** Token API (option A): the current token for this store. Never refreshes anything itself. */
+let lastApi = null;                 // last good { value, exp } from the token API, kept as a fallback
+async function fromTokenApi(s) {
+  const base = env('TOKEN_API_URL').replace(/\/+$/, '');
+  const header = env('TOKEN_API_HEADER') || 'Authorization';
+  const key = env('TOKEN_API_KEY');
+  const domain = `${s.store}.myshopify.com`;
+  let r;
+  try {
+    r = await fetch(`${base}/poc/shopify/token?store=${encodeURIComponent(domain)}`, {
+      headers: { [header]: header.toLowerCase() === 'authorization' ? `Bearer ${key}` : key, accept: 'application/json' },
+      redirect: 'error', signal: AbortSignal.timeout(10000),
+    });
+  } catch (e) { r = null; }
+  if (!r || r.status >= 500) {
+    if (lastApi && Date.now() < lastApi.exp) return lastApi;                 // API down: keep the current token until it expires
+    throw new Error('Token API is unavailable and the last token has expired: pulls are paused until it answers');
+  }
+  if (r.status === 401 || r.status === 403) throw new Error('Token API refused our key: check TOKEN_API_KEY, and that this server’s outbound IP is allow-listed');
+  if (r.status === 404) throw new Error(`Store ${domain} isn’t allow-listed on the token API`);
+  if (!r.ok) throw new Error(`Token API answered HTTP ${r.status}`);
+  const j = await r.json().catch(() => ({}));
+  if (!j.access_token || typeof j.access_token !== 'string') throw new Error('Token API gave no access_token');
+  if (j.store && cleanShop(j.store) !== s.store) throw new Error(`Token API returned a token for ${j.store}, not ${domain}`);
+  const expires = Date.parse(j.expires_at);
+  const exp = (Number.isFinite(expires) ? expires : Date.now() + 55 * 60e3) - API_SKEW;
+  if (exp <= Date.now()) throw new Error('Token API gave a token that is already expiring');
+  scopes = Array.isArray(j.scopes) ? j.scopes.join(',') : String(j.scopes || '');
+  lastApi = { value: { shop: s.store, token: j.access_token, source: 'tokenapi' }, exp };
+  return lastApi;
+}
+
 /** { shop, token, source } for the configured store. Throws in plain words if it can't. */
 async function access() {
   const s = status();
   if (!s.source) throw new Error('Shopify isn’t connected');
   if (!s.ready) throw new Error(`Missing Railway variables: ${s.missing.join(', ')}`);
   if (cache && Date.now() < cache.exp) return cache.value;
+  if (s.source === 'tokenapi') { cache = await fromTokenApi(s); return cache.value; }
   const raw = s.source === 'vault' ? await readVaultCredentials(s.store)
     : { token: env('SHOPIFY_CLIENT_ID') ? '' : env('SHOPIFY_ACCESS_TOKEN'), clientId: env('SHOPIFY_CLIENT_ID'), clientSecret: env('SHOPIFY_CLIENT_SECRET') };
   const shop = cleanShop(raw.shop) || s.store;
@@ -142,7 +196,8 @@ async function access() {
   return value;
 }
 
-function clear() { cache = null; shopToken = null; }
+/** Forget the cached token (Shopify rejected it): the next access() asks the source again. */
+function clear() { cache = null; shopToken = null; if (lastApi) lastApi = null; }
 const grantedScopes = () => scopes;
 
 module.exports = { access, status, clear, parseSecret, cleanShop, grantedScopes };

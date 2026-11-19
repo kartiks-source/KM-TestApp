@@ -65,7 +65,8 @@ Where the credentials come from (Railway variables, nothing typed into the page)
 
 | Source | Variables |
 |---|---|
-| **Azure Key Vault** (preferred) | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads `shopify-<SHOPIFY_STORE>-client-id` and `shopify-<SHOPIFY_STORE>-client-secret` (or one `shopify-<SHOPIFY_STORE>` secret with JSON). Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
+| **Token API from the main product** (decided, option A) | `TOKEN_API_URL`, `TOKEN_API_KEY`, `SHOPIFY_STORE` (optional `TOKEN_API_HEADER`). Calls `GET {TOKEN_API_URL}/poc/shopify/token?store=<store>.myshopify.com` for the current token (about an hour), keeps it in memory until 5 minutes before `expires_at`, never refreshes, asks again once if Shopify rejects it, keeps the current token if the API is briefly down. A stand-in for testing: `scripts/stand-in-token-api.js`. |
+| **Azure Key Vault** | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads `shopify-<SHOPIFY_STORE>-client-id` and `shopify-<SHOPIFY_STORE>-client-secret` (or one `shopify-<SHOPIFY_STORE>` secret with JSON). Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
 | **Railway variables** (stop-gap) | `SHOPIFY_STORE` + `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` (legacy: `SHOPIFY_ACCESS_TOKEN`). Move to Key Vault and rotate the key once the vault is ready. |
 
 `SHOPIFY_STORE` is the part before `.myshopify.com`. Once either source is set, the app won't start without `ADMIN_PASSWORD`, and demo data is turned off.

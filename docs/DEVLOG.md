@@ -3,6 +3,11 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+
+## 2026-11-19 · stock-watch · token API key source (option A decided)
+- `src/keys.js` source `tokenapi` (TOKEN_API_URL / TOKEN_API_KEY / SHOPIFY_STORE): current token from the main product's API, cached until 5 min before `expires_at`, never refreshed, re-asked once on a Shopify 401, kept while the API is briefly down, plain errors (key refused / IP not allow-listed / store not allow-listed / API down).
+- `src/alert.js`: ALERT_WEBHOOK_URL gets one message when pulls start failing, a reminder every 6 h, one on recovery; tokens scrubbed.
+- `scripts/stand-in-token-api.js` to test against the contract before the real API exists. ADR 0014; RUNBOOK "Connect the first store". 8 new tests.
 ## 2026-11-19 · Final integration · critic round 1 fixes
 stock-watch, on `main` (994817b, 201245a, 6c3ac35, de95d24 + this docs commit; not pushed, not deployed). Tests 184 → 187 pass (+ 4 browser tests pass with `PLAYWRIGHT_PATH` + `PLAYWRIGHT_CHANNEL=chrome`); `smoke.js` 20/20 (was 16/20), `roles-smoke.js` all pass. Fixed:
 - L1 (P1): Yesterday strip blank on the 1st in This month. `period.yesterdayFor` drops the page's `from`/`days` before the 2-day fallback (`src/period.js`). LOGIC §5a; test passes `{from: monthStart}`.
