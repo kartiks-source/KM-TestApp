@@ -37,12 +37,42 @@ const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+/* Login: a normal sign-in page sets a signed cookie (works in every browser, including
+ * embedded ones that never show a Basic-auth pop-up). Basic auth still works for scripts. */
+const COOKIE = 'sw_session';
+const SESSION_DAYS = 30;
+const sign = (exp) => crypto.createHmac('sha256', 'stock-watch-session|' + PASSWORD).update(String(exp)).digest('base64url');
+const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
+function sessionOk(req) {
+  const [exp, sig] = cookieOf(req, COOKIE).split('.');
+  return !!exp && +exp > Date.now() && !!sig && safeEqual(sig, sign(exp));
+}
 function authed(req) {
   if (!PASSWORD) return true;
+  if (sessionOk(req)) return true;
   const m = String(req.headers.authorization || '').match(/^Basic (.+)$/);
   if (!m) return false;
   const [, pass = ''] = Buffer.from(m[1], 'base64').toString().split(':');
   return safeEqual(pass, PASSWORD);
+}
+const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+const fails = new Map();   // ip → { n, until }: slow down password guessing
+const ipOf = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+function loginPage(error = '') {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Stock-out Watch</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{--paper:#F4EFE6;--card:#FFFDF8;--ink:#1D1B2E;--soft:#6B6577;--line:#E4DCCD;--brand:#2B2A6B;--lost:#D9623B}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--paper);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px}
+form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;width:100%;max-width:360px;display:grid;gap:14px}
+.b{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}h1{margin:0;font-size:22px}
+label{font-size:13px;font-weight:600;color:var(--soft)}input{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+button{font:inherit;font-weight:700;padding:11px;border:0;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer}.e{color:var(--lost);font-size:14px;margin:0}
+</style></head><body><form method="post" action="/login">
+<div class="b"><img src="/favicon.svg" alt="" width="28" height="28">Stock-out Watch</div><h1>Sign in</h1>
+${error ? `<p class="e" role="alert">${error}</p>` : ''}
+<div><label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="current-password" autofocus required></div>
+<button type="submit">Sign in</button></form></body></html>`;
 }
 const publicSettings = (s) => ({ ...s });
 
@@ -130,7 +160,7 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
 
-  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' }, 'application/json', { 'www-authenticate': 'Basic realm="Stock-out Watch"' });
+  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, d.settings, { days });
@@ -185,7 +215,10 @@ async function api(req, res, url) {
 
 /* ---------- static ---------- */
 function serveStatic(req, res, url) {
-  if (!authed(req)) return send(res, 401, 'Login needed', 'text/plain', { 'www-authenticate': 'Basic realm="Stock-out Watch"' });
+  if (!authed(req)) {
+    if (url.pathname === '/favicon.svg') { res.writeHead(200, { 'content-type': TYPES['.svg'] }); return fs.createReadStream(path.join(PUBLIC, 'favicon.svg')).pipe(res); }
+    return send(res, 302, '', 'text/plain', { location: '/login' });
+  }
   let file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
   if (!file.startsWith(PUBLIC)) return send(res, 403, 'Forbidden', 'text/plain');
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
@@ -197,6 +230,23 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
   try {
     if (url.pathname === '/health') return send(res, 200, { ok: true });
+    if (url.pathname === '/login' && req.method === 'GET') {
+      if (!PASSWORD || authed(req)) return send(res, 302, '', 'text/plain', { location: '/' });
+      return send(res, 200, loginPage(), 'text/html; charset=utf-8');
+    }
+    if (url.pathname === '/login' && req.method === 'POST') {
+      const ip = ipOf(req); const f = fails.get(ip);
+      if (f && f.n >= 10 && Date.now() < f.until) return send(res, 429, loginPage('Too many tries. Wait 15 minutes.'), 'text/html; charset=utf-8');
+      const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
+      if (!PASSWORD || !safeEqual(pass, PASSWORD)) {
+        const n = (f && Date.now() < f.until ? f.n : 0) + 1; fails.set(ip, { n, until: Date.now() + 15 * 60e3 });
+        return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
+      }
+      fails.delete(ip);
+      const exp = Date.now() + SESSION_DAYS * 864e5;
+      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
+    }
+    if (url.pathname === '/logout') return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {

@@ -34,6 +34,7 @@
   /* ---------- server ---------- */
   async function api(path, opt = {}) {
     const r = await fetch(path, { ...opt, headers: { ...(opt.body && typeof opt.body === 'string' && opt.json !== false ? { 'content-type': 'application/json' } : {}), ...(opt.headers || {}) } });
+    if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); }
     const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
@@ -272,7 +273,7 @@
             <dt>Stock changes</dt><dd>${inr.format(d.stockRows)} ${d.firstStock ? `· ${dt(d.firstStock)} → ${dt(d.lastStock)}` : ''}</dd>
             <dt>Order lines</dt><dd>${inr.format(d.orderRows)} ${d.firstOrder ? `· ${dt(d.firstOrder)} → ${dt(d.lastOrder)}` : ''}</dd>
             <dt>Sheet sync</dt><dd>${src.err ? `<span style="color:#D9623B">${esc(src.err)}</span>` : src.lastSync ? dt(src.lastSync) : 'not set up'}</dd></dl>
-          <div class="toolbar">${state.shopify?.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
+          <div class="toolbar">${state.shopify?.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button><a class="btn ghost" href="/logout">Sign out</a></div>
           <div id="clear-confirm"></div>
         </div>
         <div class="panel"><h2>Upload CSV</h2>

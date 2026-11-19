@@ -6,7 +6,7 @@ Read the root `AGENTS.md` first. This file is this module's working memory: keep
 
 Shows a D2C brand which products to reorder before they run out, and how many ₹ every stock-out cost in sales. The user is the brand or its agency. The question it answers: "was a bad sales day the ads, or an empty shelf?"
 
-Live: https://web-production-6dd42b8d.up.railway.app (password in Railway variable `ADMIN_PASSWORD`, any user name).
+Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; `/logout` signs out. Scripts can still use Basic auth (any user name).
 
 ## How data flows
 
