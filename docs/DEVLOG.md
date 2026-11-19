@@ -3,6 +3,15 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · B-data
+stock-watch, branch `sprint1/B-data` (not merged, not deployed):
+- SW-004 (a8d9147): only a missing store.json starts blank; a bad one is copied to `.corrupt-<ts>`, `.bak` (previous good save) used, else exit 1 with nothing written. fsync before rename; failed saves retried 5 s / 30 s / 2 min, `/health` 503 meanwhile. SIGTERM/SIGINT: stop timers, wait ≤ 25 s for a pull, save, exit. Dockerfile runs under tini; `railway.json` sets `healthcheckPath: /health`. New `test/store.test.js`.
+- SW-007 (67e2345): first real row clears the demo; `everLive` persisted, so demo never reloads at boot on a store that held real data.
+- SW-006 (e1da9e0): rows carry `src`; with Shopify connected, `/ingest/*`, `/api/sync`, `/api/import` → 409 and Sheet sync skips; clear/import → 409 during a pull. ADR-0009 accepted.
+- SW-002 (54933ca): `db.catalog` from every stock pull (stock now, price, cost, type, tags, status); engine reads stock/attributes from it; prune keeps newest row per variant + opening row of open stock-outs; archived/draft/untracked/deleted variants out of reorder + overstock, open stock-outs end when they went inactive; Data page "Excluded: N archived/draft, X pcs". Demo report unchanged. ADR-0010 accepted.
+- SW-019 (963233f): unauthed `/status` (503 when last pull > 45 min old or saves fail; size + row counts per ADR-0003); `/api/report.freshness` for the banner.
+- Open: banner UI (stream E); uptime monitor on `/status` (ops); Railway volume backups (SW-005); `/api/import` `replaceDemo` checkbox in the UI is now a no-op (store clears demo itself); five critics not run on this branch yet; shared dev log page row not added.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).
