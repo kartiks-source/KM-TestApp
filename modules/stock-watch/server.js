@@ -17,6 +17,8 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const catalog = require('./src/catalog');
+const groups = require('./src/groups');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -133,7 +135,7 @@ function syncShopify() {
       if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
       const nm = store.load().settings.storeName;
       if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
-      const s = await shopify.pullStock(store.load().shopify.lastQty);
+      const s = await shopify.pullStock(store.load().shopify.lastQty, { onVariants: catalog.setVariants });
       const stock = store.add('stock', s.rows);
       store.setShopify({ lastQty: s.lastQty });
       let orders = 0;
@@ -141,6 +143,7 @@ function syncShopify() {
         onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows).added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
       });
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
+      await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
       return { stock, orders };
     } catch (e) {
@@ -178,6 +181,15 @@ async function api(req, res, url) {
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
+  }
+  /* Group by (SW-022): ?lens=product|type|collection|tag, same period and trial values as the report.
+     No lens: which lenses the catalog can offer. */
+  if (p === '/api/groups' && req.method === 'GET') {
+    const cat = catalog.current(d.source); const lens = url.searchParams.get('lens');
+    if (!lens) return send(res, 200, { ok: true, lenses: groups.lensesFor(cat), catalog: catalog.info(cat) });
+    if (!groups.LENSES.includes(lens)) return fail(res, 400, 'Unknown group');
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
+    return send(res, 200, { ok: true, ...groups.build(r.products, cat, lens, { showAll: url.searchParams.get('all') === '1' }), catalog: catalog.info(cat) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {

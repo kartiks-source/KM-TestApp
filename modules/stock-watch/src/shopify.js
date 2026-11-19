@@ -69,7 +69,7 @@ async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
 const STOCK_Q = `query Stock($after: String) {
   productVariants(first: 250, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { title status productType } }
+    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { id title status productType tags } }
   }
 }`;
 
@@ -127,13 +127,14 @@ function orderRows(order, lines) {
   }));
 }
 
-async function pullStock(lastQty, { q = gql, now = Date.now() } = {}) {
+async function pullStock(lastQty, { q = gql, now = Date.now(), onVariants } = {}) {
   const all = []; let after = null;
   do {
     const d = await q(STOCK_Q, { after });
     all.push(...d.productVariants.nodes);
     after = d.productVariants.pageInfo.hasNextPage ? d.productVariants.pageInfo.endCursor : null;
   } while (after);
+  if (onVariants) onVariants(all, now);   // every variant node, e.g. for the Group-by catalog (src/catalog.js)
   return diffStock(all, lastQty || {}, now);
 }
 
