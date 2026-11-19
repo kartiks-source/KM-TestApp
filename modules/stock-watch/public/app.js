@@ -179,7 +179,7 @@
     const opts = cols.filter((c) => (c.r || c.val) && !['status', 'name', 'type', 'start', 'end'].includes(c.k))
       .flatMap((c) => (c.k === 'daysLeft' ? [[`${c.k}|1`, 'Days left: fewest first']] : [[`${c.k}|-1`, `${c.label}: highest first`]]));
     const phone = `<div class="phone">
-        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: ({ pause: 'Out first, then fewest days left', push: 'Most ₹ stuck first', decide: 'Biggest ₹ first' })[state.filter.products] || 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
       </div>`;
     return desk + phone + more;
@@ -386,7 +386,7 @@
     : (a, b) => (a.stock <= 0 ? -1 : a.daysLeft ?? 1e9) - (b.stock <= 0 ? -1 : b.daysLeft ?? 1e9) || b.perDay * b.price - a.perDay * a.price);
   /* SW-032: the decision cell and its buttons */
   const DECIDE_LABEL = { drop: 'Don’t reorder?', clear: 'Clear' };
-  const decideCell = (p) => { const x = decideOf().get(p.id); if (!x) return '–'; return `<span class="dec ${x.kind}" title="${x.kind === 'drop' ? 'Sells slowly and is out of stock: sales lost in the period' : 'Sells slowly and has stock: stock × unit cost (price when no cost)'}">${DECIDE_LABEL[x.kind]} <b>${money(x.value)}</b>${x.kind === 'drop' ? ' lost' : ' at cost'}</span>`; };
+  const decideCell = (p) => { const x = decideOf().get(p.id); if (!x) return '–'; return `<span class="dec ${x.kind}" title="${x.kind === 'drop' ? 'Sells slowly and is out of stock: sales lost in the period' : 'Sells slowly and has stock: stock × unit cost (price when no cost)'}">${DECIDE_LABEL[x.kind]}${x.value ? ` <b>${money(x.value)}</b>${x.kind === 'drop' ? ' lost' : ' at cost'}` : ''}</span>`; };
   const decideBtns = (p) => { const x = decideOf().get(p.id); if (!x) return ''; return `<span class="decb">${['keep', x.kind === 'drop' ? 'drop' : 'clear', ...(x.kind === 'clear' ? ['drop'] : [])].map((d) => `<button class="btn ghost xs" data-decide="${esc(p.id)}|${d}" title="${esc(DECIDE_TIP[d])}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</span>`; };
   const DECIDE_TIP = { keep: 'Keep selling and reordering as now', drop: 'Stop reordering it', clear: 'Sell off the stock (discount, bundle)' };
   /* SW-026: the Pause / Push action bar: counts, copy SKUs, CSV */

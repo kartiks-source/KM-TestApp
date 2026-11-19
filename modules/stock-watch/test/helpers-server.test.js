@@ -64,3 +64,15 @@ test('decide: store, hide, undo; bad input → 400 / 404', async () => {
   assert.equal((await fetch(base + '/api/decide', { method: 'POST', body: '{nope' })).status, 400);
   assert.equal((await post('/api/decide', { decision: 'keep' })).status, 404);
 });
+
+test('decide: trial values never bring a decided item back; loading demo data wipes decisions', async () => {
+  const r = await (await get('/api/report?days=30')).json();
+  for (const x of r.decide) assert.equal((await post('/api/decide', { id: x.id, decision: 'keep' })).status, 200);
+  for (const w of [7, 90]) {
+    const t = await (await get(`/api/report?days=30&demandWindowDays=${w}`)).json();
+    assert.equal(t.decide.filter((y) => r.decide.some((x) => x.id === y.id)).length, 0, `trial window ${w} d: decisions checked on saved-settings rates`);
+  }
+  assert.ok(Object.keys(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8'))).length > 0);
+  assert.equal((await post('/api/demo', {})).status, 200);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8')), {});
+});

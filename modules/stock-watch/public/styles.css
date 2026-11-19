@@ -399,6 +399,7 @@ table.fixed td:first-child { max-width: none; }
 /* Sprint 2 · D-helpers: why sentence (SW-024), Pause / Push bar (SW-026), slow-seller Decide (SW-032) */
 .why { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-size: 13px; color: var(--ink-2); }
 .why.out { color: var(--lost); font-weight: 500; }
+.why.crit { color: var(--lost); }
 .tbl td .why { max-width: 380px; }
 .mfacts .why, .dwhy .why { white-space: normal; }
 .dwhy { margin: 2px 0 12px; font-size: 14px; }
@@ -415,5 +416,5 @@ table.fixed td:first-child { max-width: none; }
 .decided .bar-row .name { color: var(--ink-2); }
 @media (max-width: 760px) {
   .wrap > .toolbar .mktbar { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
-  .btn.xs { min-height: 36px; padding: 6px 12px; }
+  .btn.xs { min-height: 44px; padding: 6px 12px; }
 }

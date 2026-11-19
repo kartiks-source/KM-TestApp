@@ -113,6 +113,7 @@ async function syncSheet() {
 function loadDemo() {
   const g = demo.generate({ now: Date.now() });
   store.replaceAll(g.stock, g.orders, 'demo');
+  decide.clear();   // SW-032: decisions belong to the data they were made on
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(['Demo Store', '', null, undefined].includes(s.storeName) || /\(demo\)$/.test(s.storeName) ? { storeName: demo.STORE_NAME } : {}) });
   return g;
@@ -173,10 +174,13 @@ async function api(req, res, url) {
 
   if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
 
-  const dc = await decide.handle(req, p, readBody, (id) => engine.report(d.stock, d.orders, d.settings, { days: 30 }).products.find((x) => String(x.id) === id)?.perDay);   // SW-032
+  /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
+  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30 }).products.map((x) => [String(x.id), x.perDay]));
+  const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
   if (p === '/api/report' && req.method === 'GET') {
-    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days }), { decisions: decide.all() });
+    const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
+    const r = helpers.enrich(engine.report(d.stock, d.orders, S, { days }), { decisions: decide.all(), rates: trial ? savedRates() : null });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
@@ -203,7 +207,7 @@ async function api(req, res, url) {
   if (p === '/api/import' && req.method === 'POST') {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     const parsed = rows.fromCsv(await readBody(req), kind);
-    if (d.source === 'demo' && url.searchParams.get('replaceDemo') === '1') store.replaceAll([], [], 'empty');
+    if (d.source === 'demo' && url.searchParams.get('replaceDemo') === '1') { store.replaceAll([], [], 'empty'); decide.clear(); }
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows);
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
   }

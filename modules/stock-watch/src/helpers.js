@@ -25,6 +25,8 @@ function money(x) {
 
 const local = (t, offMin) => new Date(t + offMin * 60e3);
 const localDay = (t, offMin) => local(t, offMin).toISOString().slice(0, 10);
+/** Midnight at the start of the store day after t (ms). */
+const nextDayStart = (t, offMin) => (Math.floor((t + offMin * 60e3) / DAY) + 1) * DAY - offMin * 60e3;
 /** "Fri 22 Nov" in store time. */
 function dayName(t, offMin = 330) { const d = local(t, offMin); return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
 /** "25 Nov" in store time. */
@@ -43,8 +45,10 @@ const tabOf = (s) => (ORDER_TODAY.includes(s) ? 'today' : s === 'Order this week
  * SW-024: why a row is where it is, in one plain sentence, plus the dates behind it.
  *   p: a product row from engine.report(); S: settings; now: ms; outSince: start of the open stock-out (ms) or null.
  * Returns { why, runsOut, orderBy, outSince, costPerDay }.
- *   runsOut  = now + days left; orderBy = runsOut − (lead + safety) days, never before now ("today").
+ *   runsOut  = now + days left; orderBy = runsOut − (lead + safety) days, following the status (LOGIC.md §13a):
+ *   Order today rows (Out now / Critical / Order now) → now ("today"); any other row → the next store day at the earliest.
  *   costPerDay (out of stock only) = sales per day × average price paid.
+ *   outLost = this open stock-out's ₹ lost; without it the sentence leaves ₹ out (the Sales lost column has the period's).
  */
 function why(p, S, now, outSince = null, outLost = null) {
   const off = S.tzOffsetMin ?? 330, lead = +S.leadDays || 0, safety = +S.safetyDays || 0;
@@ -57,14 +61,13 @@ function why(p, S, now, outSince = null, outLost = null) {
     res.costPerDay = Math.round((+p.perDay || 0) * (+p.price || 0));
     const h = outSince != null ? Math.max(0, now - outSince) / HOUR : null;
     const len = h == null ? '' : Math.round(h) < 24 ? ` ${Math.max(1, Math.round(h))} h` : ` ${Math.round(h / 24)} d`;
-    const lost = outLost != null ? outLost : p.lost;
-    res.why = `Out${len}${lost > 0 ? ` · lost ${money(lost)}` : ''}`;
+    res.why = `Out${len}${outLost > 0 ? ` · lost ${money(outLost)} this stock-out` : ''}`;
     return res;
   }
   if (!(p.perDay > 0) || p.daysLeft == null) { res.why = 'No sales lately'; return res; }
   if (p.daysLeft > 365) { res.why = 'Over a year of stock'; return res; }
   res.runsOut = now + p.daysLeft * DAY;
-  res.orderBy = Math.max(now, res.runsOut - (lead + safety) * DAY);
+  res.orderBy = ORDER_TODAY.includes(p.status) ? now : Math.max(nextDayStart(now, off), res.runsOut - (lead + safety) * DAY);
   const when = (t) => (localDay(t, off) === localDay(now, off) ? 'today' : dayName(t, off));
   res.why = `Runs out ${when(res.runsOut)} · order by ${when(res.orderBy)} · supplier takes ${lead} d`;
   return res;
@@ -87,6 +90,7 @@ function mktList(p, S) {
 function backIn(p, S, now) {
   const off = S.tzOffsetMin ?? 330;
   if (p.onOrder && p.onOrder.eta) return p.onOrder.late ? `Late · was due ${dateShort(p.onOrder.eta, off)}` : `Lands ${dateShort(p.onOrder.eta, off)}`;
+  if (p.status === 'Slow seller' && !(p.orderQty > 0)) return 'Slow seller · not reordered';   // not on the reorder list, so no date
   return `Not ordered · earliest ${dateShort(now + (+S.leadDays || 0) * DAY, off)}`;
 }
 
@@ -112,8 +116,10 @@ const DECISIONS = ['keep', 'drop', 'clear'];
  *   totals: stillOutPerDay, pause, pauseReorder, pauseSlow, push, pushValue, decide, decided
  *   report.decide: [{ id, kind, value, decision }] slow sellers still to decide (hidden ones left out), biggest ₹ first
  *   report.decided: the hidden ones, so a decision can be undone
+ *   rates: Map id → sales per day on the saved settings, for the hide check while trial values are on (LOGIC.md §13d);
+ *          null → the report's own rates
  */
-function enrich(r, { decisions = {} } = {}) {
+function enrich(r, { decisions = {}, rates = null } = {}) {
   const S = r.settings, now = r.generatedAt;
   const open = new Map();
   for (const s of r.stockouts || []) if (s.open) open.set(String(s.id), s);
@@ -131,7 +137,7 @@ function enrich(r, { decisions = {} } = {}) {
     const k = decideKind(p); if (!k) continue;
     const rec = decisions[String(p.id)];
     const item = { id: p.id, ...k, decision: rec && DECISIONS.includes(rec.d) ? rec.d : null };
-    if (item.decision && !salesChanged(rec.base, p.perDay)) decided.push(item); else decide.push(item);
+    if (item.decision && !salesChanged(rec.base, rates ? rates.get(String(p.id)) : p.perDay)) decided.push(item); else decide.push(item);
   }
   decide.sort((a, b) => b.value - a.value); decided.sort((a, b) => b.value - a.value);
   Object.assign(r.totals, {

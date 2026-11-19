@@ -324,13 +324,13 @@ One plain sentence per row, the same text in the Reorder table, the phone card a
 
 | Row | Sentence | Rule |
 |---|---|---|
-| Out of stock | "Out 3 d · lost ₹18.7k" | time since the open stock-out began (hours under a day, else days, rounded); ₹ lost = this stock-out's ₹ lost inside the selected period (section 4), not the row's whole-period Sales lost |
-| Has stock and sells | "Runs out Fri 22 Nov · order by today · supplier takes 7 d" | **runs out** = now + days left; **order by** = runs out − (lead time + buffer) days, never before today; "supplier takes" = lead time |
+| Out of stock | "Out 3 d · lost ₹18.7k this stock-out" | time since the open stock-out began (hours under a day, else days, rounded); ₹ lost = this stock-out's ₹ lost inside the selected period (section 4), not the row's whole-period Sales lost (hence "this stock-out"). No open stock-out found → just "Out" (the Sales lost column already has the period's ₹) |
+| Has stock and sells | "Runs out Fri 22 Nov · order by today · supplier takes 7 d" | **runs out** = now + days left; **order by** = runs out − (lead time + buffer) days, then set by the status: *Order today* rows → today; any other row → tomorrow (store time) at the earliest; "supplier takes" = lead time |
 | Marked ordered (SW-012) | "Ordered · lands 25 Nov" | the order's ETA |
 | No sales in the window | "No sales lately" | no rate, so no date |
 | More than a year of stock | "Over a year of stock" | a date that far out means nothing |
 
-**Why order by = runs out − (lead + buffer):** that is the day the status turns *Order now* (section 6), so the date and the status always agree: *Order now*/*Critical* rows say "order by today", *Order this week* rows give a date within 7 days.
+**Why order by = runs out − (lead + buffer):** that is the day the status turns *Order now* (section 6). The status decides the edge cases so the date and the status always agree: *Out now*/*Critical*/*Order now* rows say "order by today" (a Critical row with a short lead time too); every other row says tomorrow or later. Example: 10.04 days left, lead + buffer 10 → still *Order this week*, and the raw date (in an hour) is today; it shows tomorrow, and the row moves to *Order today* when the status turns *Order now* later today. Ordering then uses up to a day of the buffer.
 
 **Status column:** on the Reorder tabs *Order today* and *This week* every row has the same status, so the column is replaced by the Why cell. *All* keeps both.
 
@@ -355,7 +355,7 @@ Two chips on Products, each with a count line, **Copy SKUs** (one per line; vari
 | **Pause promotion** | stock ≤ 0, or days left < lead time (it can't be refilled before it runs out) | out now first, then fewest days left, then most ₹ a day | "42 to reorder · 14 slow": on the list with an order quantity / slow sellers |
 | **Push these** | overstocked (section 7c) | most ₹ stuck first | "₹2.60 L stuck" |
 
-Archived/untracked and no-stock-data rows are on neither. **Back in stock** on the Pause list = the marked order's ETA (SW-012), "Late · was due …" past it, else "Not ordered · earliest <today + lead time>". Push replaces the old *Overstock* chip (same products); *Overstock* moves to More….
+Archived/untracked and no-stock-data rows are on neither. **Back in stock** on the Pause list = the marked order's ETA (SW-012), "Late · was due …" past it, a slow seller with no order quantity "Slow seller · not reordered" (it is off the reorder list, section 7, so an earliest date means nothing), else "Not ordered · earliest <today + lead time>". Push replaces the old *Overstock* chip (same products); *Overstock* moves to More….
 
 **Why days left < lead time (not ≤ lead + buffer):** promotion spend should stop only when the shelf will empty before any new stock can land; the buffer is for ordering, not for ads.
 
@@ -365,9 +365,11 @@ Products → More… → *Slow sellers to decide*: every **Slow seller** (sectio
 
 | Case | Shows | ₹ |
 |---|---|---|
-| slow + out of stock | "Don't reorder? ₹X lost" | ₹ lost in the period |
+| slow + out of stock | "Don't reorder? ₹X lost" (just "Don't reorder?" when ₹X is 0) | ₹ lost in the period |
 | slow + has stock | "Clear ₹X at cost" | stock × unit cost (price when no cost) |
 
-One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop) in `DATA_DIR/decisions.json` with the product's sales per day at that moment (`base`, taken from the server's report, not the page). The item is hidden until **|rate now − base| > 50% × max(base, 0.1/day)**; then it comes back showing the earlier decision. The 0.1/day floor stops one stray sale on a product that sold nothing from bringing it back (it needs about 2 sales in 4 weeks). Decided items are listed under the table with **Undo**. Decisions don't change any number or status; Clear all data wipes them.
+One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop) in `DATA_DIR/decisions.json` with the product's sales per day at that moment (`base`, taken from the server's report, not the page). The item is hidden until **|rate now − base| > 50% × max(base, 0.1/day)**; then it comes back showing the earlier decision. The 0.1/day floor stops one stray sale on a product that sold nothing from bringing it back (it needs about 2 sales in 4 weeks). Decided items are listed under the table with **Undo**. Decisions don't change any number or status; Clear all data, loading demo data and replacing demo data with an import wipe them (they belong to the data they were made on).
 
-**When it can be wrong:** the base is the rate on the saved *Sales history to use* window; changing that window moves rates and can bring items back.
+**Saved settings only:** the base and the hide check both use the sales rate on the **saved** settings. Trial values (the what-if fields, e.g. a different *Sales history to use* window) change the report but never hide or bring back a decided item.
+
+**When it can be wrong:** saving a different *Sales history to use* window moves rates and can bring items back.

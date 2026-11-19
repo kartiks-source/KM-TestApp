@@ -27,12 +27,12 @@ test('dates are in store time', () => {
 test('SW-024 why: out of stock → how long and ₹ lost; cost per day', () => {
   const p = { stock: 0, perDay: 5, price: 1000, lost: 99999, daysLeft: null, status: 'Out now' };
   const w = H.why(p, S, now, now - 3 * D, 18700);
-  assert.equal(w.why, 'Out 3 d · lost ₹18.7k');
+  assert.equal(w.why, 'Out 3 d · lost ₹18.7k this stock-out', '₹ named so it is not read as the Sales lost column');
   assert.equal(w.costPerDay, 5000);
   assert.equal(w.outSince, now - 3 * D);
   assert.equal(H.why(p, S, now, now - 5 * HR, 0).why, 'Out 5 h');
   assert.equal(H.why(p, S, now, now - 23.6 * HR, 0).why, 'Out 1 d', '23.6 h rounds to a day, never "24 h"');
-  assert.equal(H.why(p, S, now, null, null).why, 'Out · lost ₹100k', 'no open episode: falls back to the row’s ₹ lost');
+  assert.equal(H.why(p, S, now, null, null).why, 'Out', 'no open episode: no ₹ (the Sales lost column already has the period’s)');
 });
 
 test('SW-024 why: runs out, order by (lead + buffer before), supplier lead', () => {
@@ -47,6 +47,14 @@ test('SW-024 why: runs out, order by (lead + buffer before), supplier lead', () 
   assert.equal(n.why, 'Runs out Fri 27 Nov · order by today · supplier takes 7 d');
   assert.match(H.why({ stock: 1, perDay: 4, daysLeft: 0.25, status: 'Critical' }, S, now).why, /^Runs out today · order by today/);
   assert.equal(H.why({ stock: 5, perDay: 0, daysLeft: null, status: 'Slow seller' }, S, now).why, 'No sales lately');
+  /* date follows the status: a This week row right at the line (10.0 days, lead + buffer 10) is never "order by today" */
+  const edge = H.why({ stock: 20, perDay: 2, daysLeft: 10, status: 'Order this week' }, S, now);
+  assert.equal(edge.why, 'Runs out Sun 29 Nov · order by Fri 20 Nov · supplier takes 7 d');
+  assert.equal(edge.orderBy, Date.parse('2026-11-19T18:30:00Z'), 'midnight starting the next store day');
+  const late = Date.parse('2026-11-19T18:00:00Z');   // 23:30 in India: runs-out − 10 d is still "today" in store time
+  assert.match(H.why({ stock: 21, perDay: 2, daysLeft: 10.4, status: 'Order this week' }, S, late).why, /order by Fri 20 Nov/);
+  /* Critical with a short lead time: still "order by today" (it is on Order today) */
+  assert.match(H.why({ stock: 6, perDay: 2, daysLeft: 3, status: 'Critical' }, { ...S, leadDays: 1, safetyDays: 0 }, now).why, /order by today/);
   assert.equal(H.why({ stock: null, status: 'No stock data' }, S, now).why, 'No stock data');
   assert.equal(H.why({ stock: 9, status: 'Ordered', onOrder: { eta: now + 6 * D } }, S, now).why, 'Ordered · lands 25 Nov');
 });
@@ -78,7 +86,7 @@ test('SW-024 enrich: why on every row; still-out cost per day = Σ sales/day × 
   const a = row(r, 'A'), b = row(r, 'B');
   assert.match(a.why, /^Out 2 d · lost ₹/);
   const open = r.stockouts.find((s) => s.id === 'A' && s.open);
-  assert.equal(a.why, `Out 2 d · lost ${H.money(open.lost)}`);
+  assert.equal(a.why, `Out 2 d · lost ${H.money(open.lost)} this stock-out`);
   assert.match(b.why, /^Runs out .* · order by today · supplier takes 7 d$/);
   const out = r.products.filter((p) => p.stock <= 0);
   assert.equal(r.totals.stillOutPerDay, out.reduce((s, p) => s + Math.round(p.perDay * p.price), 0));
@@ -103,6 +111,8 @@ test('SW-026 Pause / Push lists', () => {
   assert.match(row(r, 'A').backIn, /^Not ordered · earliest 26 Nov$/);
   assert.equal(H.backIn({ onOrder: { eta: now + 4 * D } }, S, now), 'Lands 23 Nov');
   assert.equal(H.backIn({ onOrder: { eta: now - D, late: true } }, S, now), 'Late · was due 18 Nov');
+  assert.equal(row(r, 'Z').backIn, 'Slow seller · not reordered', 'slow sellers are off the reorder list: no "earliest" date');
+  assert.match(H.backIn({ status: 'Slow seller', orderQty: 4 }, S, now), /^Not ordered · earliest/, 'a slow best seller that gets an order quantity keeps the date');
   /* order: out now first, then fewest days left; push by ₹ stuck */
   const sorted = H.mktSort([{ id: 1, stock: 5, daysLeft: 4, perDay: 1, price: 1 }, { id: 2, stock: 0, daysLeft: null, perDay: 1, price: 1 }, { id: 3, stock: 5, daysLeft: 2, perDay: 1, price: 1 }], 'pause');
   assert.deepEqual(sorted.map((p) => p.id), [2, 3, 1]);
@@ -128,6 +138,11 @@ test('SW-032 Decide: a decision hides the item until sales change by more than h
   const back = rep({ Y: { d: 'clear', base: y.perDay * 3, at: now } });
   assert.equal(back.decide.find((x) => x.id === 'Y').decision, 'clear', 'sales moved > 50%: back on the list, decision shown');
   assert.equal(rep({ Y: { d: 'nonsense', base: y.perDay } }).decide.some((x) => x.id === 'Y'), true, 'unknown decision ignored');
+  /* trial values on: the hide check uses the saved settings' rates passed in, not the trial report's */
+  const r3 = H.enrich(E.report(store().stock, store().orders, S, { now, days: 30 }), { decisions: { Y: { d: 'clear', base: y.perDay, at: now } }, rates: new Map([['Y', y.perDay * 3]]) });
+  assert.equal(r3.decide.some((x) => x.id === 'Y'), true, 'rates map wins over the report row');
+  const r4 = H.enrich(E.report(store().stock, store().orders, S, { now, days: 30 }), { decisions: { Y: { d: 'clear', base: y.perDay * 3, at: now } }, rates: new Map([['Y', y.perDay * 3]]) });
+  assert.equal(r4.decide.some((x) => x.id === 'Y'), false);
   /* the rule itself: > 50% of the base, with a 0.1/day floor */
   assert.equal(H.salesChanged(1, 1.5), false);
   assert.equal(H.salesChanged(1, 1.51), true);
