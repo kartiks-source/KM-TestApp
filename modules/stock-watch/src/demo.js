@@ -15,7 +15,7 @@
 const { HOUR, DAY } = require('./engine');
 const CATALOG = require('./demo-catalog.json').items;
 
-const VERSION = 'sammsara-2';           // bump to make running servers rebuild their demo data
+const VERSION = 'sammsara-3';           // bump to make running servers rebuild their demo data
 const STORE_NAME = 'Sammsara (demo)';
 
 function rng(seed) {      // mulberry32: same demo every time
@@ -64,9 +64,9 @@ function generate({ now = Date.now(), days = 60, seed = 11 } = {}) {
 
   const change = (it, t, delta) => {
     const before = it.qty; it.qty = Math.max(0, it.qty + delta);
-    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price });
+    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price, type: it.type });
   };
-  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price });
+  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price, type: it.type });
 
   const sell = (it, t, q) => Math.min(it.qty, q);
   const paidFor = (it) => Math.round(it.price * (r() < 0.3 ? 0.9 : r() < 0.08 ? 0.8 : 1));

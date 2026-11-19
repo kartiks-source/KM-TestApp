@@ -11,6 +11,7 @@ Stock-out Watch with no server and no API key. The store's Shopify Flow writes e
 | File | Role |
 |---|---|
 | `StockWatch.gs` | paste into the sheet: Extensions → Apps Script |
+| `LOGIC.md` | how its numbers differ from the web app's, and why |
 | `SETUP.md` | 15-minute setup for a brand: sheet, two Flow workflows, settings |
 
 ## Relation to the web app

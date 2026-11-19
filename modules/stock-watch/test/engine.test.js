@@ -82,3 +82,15 @@ test('rows: CSV with header, Flow line without header, JSON webhook', () => {
   const noTime = R.fromWebhook(',42,S1,Serum,,3,2,499', 'stock', 123);
   assert.equal(noTime[0].t, 123);
 });
+
+test('stock rows carry an optional category; products report it with units sold and % lost', () => {
+  const csv = 'Time,Variant ID,SKU,Product,Variant,Stock before,Stock now,Price,Product type\n2026-11-01T10:00:00+05:30,9,S9,Lamp,,5,4,1000,Lamps';
+  const { rows } = R.fromCsv(csv, 'stock');
+  assert.equal(rows[0].type, 'Lamps');
+  assert.equal(R.fromCsv('Time,Variant ID,SKU,Product,Variant,Stock before,Stock now,Price\n2026-11-01T10:00:00+05:30,9,S9,Lamp,,5,4,1000', 'stock').rows[0].type, undefined);
+  const now = Date.parse('2026-11-10T00:00:00Z');
+  const r = E.report([{ t: now - 5 * D, variantId: '9', sku: 'S9', product: 'Lamp', before: 5, now: 4, price: 1000, type: 'Lamps' }],
+    [{ t: now - 5 * D, order: '#1', variantId: '9', sku: 'S9', qty: 1, price: 1000 }], {}, { days: 30, now });
+  const p = r.products[0];
+  assert.equal(p.type, 'Lamps'); assert.equal(p.unitsSold, 1); assert.equal(p.lostPct, 0);
+});

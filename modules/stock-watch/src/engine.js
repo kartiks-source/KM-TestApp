@@ -114,7 +114,7 @@ function report(stock, orders, settings = {}, opts = {}) {
   const stockSorted = stock.slice().sort((a, b) => a.t - b.t);
   for (const r of stockSorted) {
     const p = get(String(r.variantId));
-    p.sku = r.sku || p.sku; p.product = r.product || p.product; p.variant = r.variant || p.variant;
+    p.sku = r.sku || p.sku; p.product = r.product || p.product; p.variant = r.variant || p.variant; p.type = r.type || p.type || '';
     if (num(r.price)) p.price = num(r.price);
     p.changes.push(r); p.stock = num(r.now);
   }
@@ -180,7 +180,10 @@ function report(stock, orders, settings = {}, opts = {}) {
       orderQty: pl && selling ? pl.qty : 0, orderValue: pl && selling ? Math.round(pl.qty * price) : 0,
       lost: Math.round(lost), unitsLost: round(unitsLost, 1), outs, smallTopUps, repeats,
       sold: Math.round(p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty) * num(o.price), 0)),
+      unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
+      type: p.type || '',
     };
+    row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }

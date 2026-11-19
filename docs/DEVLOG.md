@@ -3,6 +3,11 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (Products page + logic docs)
+- Products: status tabs with counts (All, Out now, Critical, Order now, This week, OK, Slow sellers, Lost sales), category filter, CSV of what's shown, new columns (category, days left, units, % lost, order qty). Category comes from the product type (Shopify `productType`, CSV/Flow `type`, demo catalog).
+- Product column pinned while tables scroll sideways; long names/categories cut with … (full text on hover).
+- Added `LOGIC.md` per module: every number's rule, reason, alternatives and limits, with a worked example. Rule added to AGENTS.md: change LOGIC.md with the rule.
+
 ## 2026-11-19 · stock-watch (density pass: no wasted space)
 - Full-width content; compact KPI cards, panels and tables (rows about 37px, SKU beside the name).
 - Overview: chart beside Order today (10 items); Biggest losses (10) beside a new "Out of stock right now" list and the client note.

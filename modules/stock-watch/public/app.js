@@ -7,7 +7,7 @@
 
   const state = {
     days: 30, view: 'overview', report: null, settings: null, source: null,
-    filter: { reorder: 'all', stockouts: 'all' }, q: { reorder: '', stockouts: '', products: '' },
+    filter: { reorder: 'all', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
   };
 
@@ -227,10 +227,10 @@
     return `
       <section class="headline ex"><h1>Reorder before they run out</h1>
         <p>Order quantity covers ${S.leadDays} days of lead time + ${S.coverDays} days after it lands + ${S.safetyDays} safety days, at each product’s in-stock sales rate. Change these in Data &amp; settings.</p></section>
-      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}<a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}">Download CSV</a></div>
+      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}<a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}" title="Download the reorder list as CSV">CSV</a></div>
         <input class="search" id="q-reorder" placeholder="Search product or SKU" value="${esc(state.q.reorder)}"></div>
       ${table('reorder', [
-        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
         { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
@@ -255,7 +255,7 @@
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
       ${table('stockouts', [
-        { k: 'name', label: 'Product', f: (s) => `<span class="pname">${esc(s.name)}</span><span class="sku">${esc(s.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (s) => `<span class="pname" title="${esc(s.name)}">${esc(s.name)}</span><span class="sku">${esc(s.sku)}</span>` },
         { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
         { k: 'hours', label: 'Out for', r: 1, nw: 1, f: (s) => dur(s.hours) },
         { k: 'start', label: 'Went out', nw: 1, f: (s) => dt(s.start) },
@@ -268,24 +268,51 @@
         <div class="mfacts"><span class="${s.open ? 'bad' : ''}">out <b>${dur(s.hours)}</b></span><span>${dt(s.start)} → ${s.open ? '<span class="st open">Still out</span>' : dt(s.end)}</span>${s.topUp == null ? '' : `<span>refilled <b>${inr.format(s.topUp)}</b> (${n1(s.topUpDays)} d)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`)}`;
   }
 
+  const PRODUCT_TABS = [['all', 'All'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['OK', 'OK'], ['Slow seller', 'Slow sellers'], ['lost', 'Lost sales']];
+  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : p.status === f);
+  function productRows() {
+    const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
+    return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
+  }
+  const PRODUCT_COLS = () => [
+    { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>`, csv: (p) => p.name },
+    { k: 'sku', label: 'SKU', hide: 1 },
+    { k: 'type', label: 'Category', f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
+    { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => p.status },
+    { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
+    { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1, csv: (p) => p.daysLeft ?? '' },
+    { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
+    { k: 'unitsSold', label: `Units (${state.days} d)`, r: 1, f: (p) => inr.format(p.unitsSold || 0) },
+    { k: 'price', label: 'Avg price', r: 1, f: (p) => moneyFull(p.price) },
+    { k: 'sold', label: `Sold (${state.days} d)`, r: 1, f: (p) => money(p.sold) },
+    { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
+    { k: 'lostPct', label: '% lost', r: 1, f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
+    { k: 'outs', label: 'Outs', r: 1 },
+    { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
+  ];
   function products() {
-    const r = state.report, q = state.q.products.toLowerCase();
-    const rows = r.products.filter((p) => !q || `${p.name} ${p.sku}`.toLowerCase().includes(q));
+    const r = state.report, f = state.filter.products, ty = state.filter.type;
+    const rows = productRows();
+    const types = [...new Set(r.products.map((p) => p.type).filter(Boolean))].sort();
+    const inType = r.products.filter((p) => !ty || p.type === ty);
+    const tot = rows.reduce((a, p) => ({ sold: a.sold + p.sold, lost: a.lost + p.lost, stock: a.stock + (p.stock > 0 ? p.stock : 0) }), { sold: 0, lost: 0, stock: 0 });
     return `
-      <section class="headline ex"><h1>Products</h1><p>Every product seen in stock changes or orders. Click one for its stock history.</p></section>
-      <div class="toolbar"><input class="search" id="q-products" placeholder="Search product or SKU" value="${esc(state.q.products)}"></div>
-      ${table('products', [
-        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
-        { k: 'status', label: 'Status', f: (p) => pill(p.status) },
-        { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
-        { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
-        { k: 'price', label: 'Avg price', r: 1, f: (p) => moneyFull(p.price) },
-        { k: 'sold', label: `Sold (${state.days} d)`, r: 1, f: (p) => money(p.sold) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
-        { k: 'outs', label: 'Stock-outs', r: 1 },
-      ], rows, 'No products yet.', (p) => `
+      <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock. Click one for its stock history.</p></section>
+      <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
+        ${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
+        <input class="search" id="q-products" placeholder="Search name, SKU, category" value="${esc(state.q.products)}"></div>
+      ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
         <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header>
-        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost · ${p.outs} out</span>` : ''}</div>`)}`;
+        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
+  }
+  const inShape = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
+  function downloadProductsCsv() {
+    const cols = PRODUCT_COLS();
+    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+    const lines = [cols.map((c) => c.label), ...productRows().map((p) => cols.map((c) => (c.csv ? c.csv(p) : p[c.k])))].map((l) => l.map(q).join(','));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }));
+    a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
 
   function dataView() {
@@ -379,6 +406,8 @@
     if (t.dataset.go) { const v = t.dataset.go; state.filter[v] = t.dataset.filter; location.hash = v; return; }
     if (t.dataset.filterReorder) { state.filter.reorder = t.dataset.filterReorder; render(); return; }
     if (t.dataset.filterStockouts) { state.filter.stockouts = t.dataset.filterStockouts; render(); return; }
+    if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; render(); return; }
+    if (t.id === 'csv-products') { downloadProductsCsv(); return; }
     if (t.matches('th[data-k]')) {
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
@@ -422,6 +451,7 @@
     if (m) { state.q[m[1]] = e.target.value; render._focus = e.target.id; render(); }
   });
   document.addEventListener('change', (e) => {
+    if (e.target.id === 'f-type') { state.filter.type = e.target.value; render(); return; }
     const id = e.target.dataset && e.target.dataset.msort;
     if (!id) return;
     const [k, dir] = e.target.value.split('|');

@@ -24,6 +24,7 @@ Google Sheet CSV / upload ───┘
 
 | File | Role |
 |---|---|
+| `LOGIC.md` | how every number is worked out and why; read it before changing `src/engine.js` |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows |

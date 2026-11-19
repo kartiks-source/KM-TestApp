@@ -66,7 +66,7 @@ async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
 const STOCK_Q = `query Stock($after: String) {
   productVariants(first: 250, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id sku title price inventoryQuantity inventoryItem { tracked } product { title status } }
+    nodes { id sku title price inventoryQuantity inventoryItem { tracked } product { title status productType } }
   }
 }`;
 
@@ -108,7 +108,7 @@ function diffStock(variants, lastQty, t) {
     next[id] = now;
     const before = Object.prototype.hasOwnProperty.call(lastQty, id) ? lastQty[id] : null;
     if (before === now) continue;
-    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0 });
+    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}) });
   }
   return { rows, lastQty: next };
 }
