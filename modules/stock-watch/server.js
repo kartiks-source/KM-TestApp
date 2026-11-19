@@ -201,19 +201,27 @@ function syncShopify() {
 }
 
 /* ---------- API ---------- */
+const MAX_INGEST_ROWS = 500;   // Flow sends one change per request; a leaked key can't flood the store
+let keyInUrlWarned = 0;
 async function api(req, res, url) {
   const p = url.pathname;
   const d = store.load();
   const days = Number(url.searchParams.get('days')) || 30;
 
-  /* Shopify Flow → "Send HTTP request" (no login; protected by the ingest key) */
+  /* Shopify Flow → "Send HTTP request" (no login; protected by the X-Ingest-Key header) */
   const ingest = p.match(/^\/ingest\/(stock|order)$/);
   if (ingest && req.method === 'POST') {
-    const key = url.searchParams.get('key') || req.headers['x-ingest-key'];
+    let key = req.headers['x-ingest-key'];
+    if (!key && url.searchParams.has('key')) {   // old URLs: still accepted, but the key ends up in proxy and Flow logs
+      key = url.searchParams.get('key');
+      if (Date.now() - keyInUrlWarned > 3600e3) { keyInUrlWarned = Date.now(); console.warn('ingest: key in the URL (?key=) is deprecated, send the X-Ingest-Key header instead'); }
+    }
     if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
     const raw = await readBody(req, 2e6);
     let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
+    if (Array.isArray(body) && body.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
     const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1], { tzOffsetMin: d.settings.tzOffsetMin }));
+    if (list.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
     const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list);
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
@@ -243,7 +251,7 @@ async function api(req, res, url) {
     for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, b[k]); if (v !== undefined) patch[k] = v; }
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
-    if (b.newIngestKey === true) patch.ingestKey = crypto.randomBytes(16).toString('hex');
+    if (b.newIngestKey === true) { patch.ingestKey = crypto.randomBytes(16).toString('hex'); patch.ingestKeyAt = Date.now(); }
     return send(res, 200, { ok: true, settings: store.setSettings(patch) });
   }
   if (p === '/api/import' && req.method === 'POST') {

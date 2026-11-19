@@ -80,11 +80,11 @@ Where the credentials come from (Railway variables, nothing typed into the page)
 3. Paste both links under **Data & settings → Google Sheet**. The app syncs every 15 minutes.
 
 ### B. Shopify Flow → this app directly
-Use Flow's **Send HTTP request** action (POST) to the URLs shown under Data & settings:
-- `/ingest/stock?key=…`
-- `/ingest/order?key=…`
+Use Flow's **Send HTTP request** action (POST) to the URLs shown under Data & settings, with the header `X-Ingest-Key: <key>` (the key is under Data & settings → Shopify Flow, masked until you press Show key):
+- `/ingest/stock`
+- `/ingest/order`
 
-The body is the same comma-separated row as below, or JSON with the same fields. Check that the store's Shopify plan includes this action.
+Never put the key in the URL: URLs end up in proxy and Flow logs. Old `?key=` URLs still work for now but are logged as deprecated; move them to the header and press **New key**. The body is the same comma-separated row as below, or JSON with the same fields (an array of at most 500 rows; more → 413). Check that the store's Shopify plan includes this action.
 
 ### C. CSV upload
 Upload a CSV of either kind under **Data & settings**, with these columns and a header row.

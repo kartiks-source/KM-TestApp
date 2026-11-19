@@ -445,10 +445,11 @@
         <div class="field"><label for="sheet-order">“Order log” CSV link</label><input id="sheet-order" value="${esc(s.sheetOrderCsv)}" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?gid=…&output=csv"></div>
         <div class="toolbar"><button class="btn" id="sheet-save">Save and sync now</button></div></details>
       <details class="panel fold"><summary><b>Shopify Flow</b> <span class="muted">sends each change straight here</span></summary>
-        <p class="muted">In Shopify Flow use the action <b>Send HTTP request</b> (POST), body = the same comma-separated line as the sheet, or JSON. One workflow per URL:</p>
-        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base)}/ingest/stock?key=${esc(s.ingestKey)}</div></div>
-        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base)}/ingest/order?key=${esc(s.ingestKey)}</div></div>
-        <div class="toolbar"><button class="btn ghost" data-copy="u-stock">Copy stock URL</button><button class="btn ghost" data-copy="u-order">Copy order URL</button><button class="btn ghost" id="new-key">New key</button></div></details>
+        <p class="muted">In Shopify Flow use the action <b>Send HTTP request</b> (POST) with the header <span class="mono">X-Ingest-Key</span> set to the key below; body = the same comma-separated line as the sheet, or JSON. One workflow per URL. Keep the key out of the URL.</p>
+        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base)}/ingest/stock</div></div>
+        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base)}/ingest/order</div></div>
+        <div class="field"><label>Header <span class="mono">X-Ingest-Key</span></label><div class="code" id="u-key">${maskKey(s.ingestKey)}</div><small>${s.ingestKeyAt ? `Last changed ${dt(s.ingestKeyAt)}` : 'Not changed since setup'}</small></div>
+        <div class="toolbar"><button class="btn ghost" data-copy="u-stock">Copy stock URL</button><button class="btn ghost" data-copy="u-order">Copy order URL</button><button class="btn ghost" id="show-key">Show key</button><button class="btn ghost" id="copy-key">Copy key</button><button class="btn ghost" id="new-key">New key</button></div></details>
       <details class="panel fold"><summary><b>Upload a CSV</b> <span class="muted">one-off history</span></summary>
         <p class="muted">Columns, with a header row. Stock: <span class="mono">Time, Variant ID, SKU, Product, Variant, Stock before, Stock now, Price</span>. Orders: <span class="mono">Time, Order, Variant ID, SKU, Qty, Unit price</span>. Dates day first: <span class="mono">15/11/2026 10:30</span> or <span class="mono">2026-11-15 10:30</span>.</p>
         <div class="form"><div class="field"><label for="imp-kind">File holds</label><select id="imp-kind"><option value="stock">Stock changes</option><option value="order">Order lines</option></select></div>
@@ -472,6 +473,7 @@
       <form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`;
   }
 
+  const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
   const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" type="${type}" step="any" value="${esc(v)}"><small>${esc(hint)}</small></div>`;
 
@@ -538,6 +540,8 @@
     if (t.matches('tr[data-id], .mcard[data-id]')) { lastRow = t; openProduct(t.dataset.id); return; }
     if (t.id === 'drawer-close') { closeDrawer(); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
+    if (t.id === 'copy-key') { copy(state.settings.ingestKey); return; }
+    if (t.id === 'show-key') { const shown = t.textContent === 'Hide key'; $('#u-key').innerHTML = shown ? maskKey(state.settings.ingestKey) : esc(state.settings.ingestKey); t.textContent = shown ? 'Show key' : 'Hide key'; return; }
     try {
       if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
       if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
@@ -563,7 +567,7 @@
         const j = await api('/api/shopify/sync', { method: 'POST' });
         toast(j.running ? 'Still pulling in the background (the first pull can take a while)' : `Read from Shopify: ${j.stock} stock changes, ${j.orders} order lines new`); await load();
       }
-      if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update the Flow URLs'); await load(); }
+      if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update X-Ingest-Key in both Flow workflows'); await load(); }
       if (t.id === 'save-settings') {
         const patch = {}; $$('[data-setting]').forEach((i) => { patch[i.dataset.setting] = i.value; });
         await api('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }); toast('Settings saved'); await load();

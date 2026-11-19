@@ -128,3 +128,28 @@ test('production never runs open: no or short ADMIN_PASSWORD → exit 1 (SW-008)
   assert.equal((await ok.req('/api/settings')).status, 401);
   await ok.stop();
 });
+
+test('ingest: X-Ingest-Key header; ?key= still works but logged as deprecated; > 500 rows → 413 (SW-009)', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: PASSWORD }); t.after(s.stop);
+  const auth = basic(PASSWORD);
+  const key = (await (await s.req('/api/settings', { headers: auth })).json()).settings.ingestKey;
+  const row = (i) => ({ variant_id: 5000 + i, sku: 'S' + i, now: 3, before: 4, price: 100, time: new Date(Date.now() - i * 1000).toISOString() });
+  const post = (body, headers = {}, q = '') => s.req('/ingest/stock' + q, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  assert.equal((await post(row(1))).status, 401);
+  assert.equal((await post(row(1), { 'x-ingest-key': 'nope' })).status, 401);
+  const ok = await post(row(1), { 'x-ingest-key': key });
+  assert.equal(ok.status, 200); assert.equal((await ok.json()).added, 1);
+  assert.equal((await post(row(2), {}, '?key=' + key)).status, 200);
+  assert.match(s.log(), /\?key=\) is deprecated/);
+  assert.doesNotMatch(s.log(), new RegExp(key), 'the key is never logged');
+  assert.equal((await post(Array.from({ length: 500 }, (_, i) => row(i + 10)), { 'x-ingest-key': key })).status, 200);
+  const big = await post(Array.from({ length: 501 }, (_, i) => row(i + 1000)), { 'x-ingest-key': key });
+  assert.equal(big.status, 413);
+  const csv501 = Array.from({ length: 501 }, (_, i) => `,${9000 + i},S,P,,4,3,100`).join('\n');
+  assert.equal((await s.req('/ingest/stock', { method: 'POST', headers: { 'x-ingest-key': key }, body: csv501 })).status, 413);
+  // rotating the key records when
+  const before = Date.now();
+  const st = (await (await s.req('/api/settings', { method: 'PUT', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ newIngestKey: true }) })).json()).settings;
+  assert.notEqual(st.ingestKey, key); assert.ok(st.ingestKeyAt >= before);
+  assert.equal((await post(row(3), { 'x-ingest-key': key })).status, 401, 'old key stops working');
+});
