@@ -298,13 +298,21 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 
 ## 11. Known limits, in one place
 
+**Whatever the source:**
 - ₹ lost is an estimate of demand, and an upper bound where substitutes exist (section 4).
-- Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
-- Returns and cancellations aren't netted out of sales.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
+
+**By source** (what counts as a sale is in section 1):
+
+| | Shopify pull | Flow / Google Sheet / CSV |
+|---|---|---|
+| Stock-out timing | to within 15 minutes; a stock-out that starts and ends between two reads is missed | to the minute (Flow), or as precise as the file |
+| Cancellations, refunds, removed items | netted: cancelled orders left out, units are Shopify's `currentQuantity`, later edits re-read | **not netted**: counted as sent; a later cancellation or refund isn't picked up |
+| Discounts | price after line and order-level discounts | as sent |
+| Test orders | left out | counted unless the Flow condition excludes them |
 
 ## 12. Differences in the Google Sheet version
 

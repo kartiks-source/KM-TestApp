@@ -32,31 +32,58 @@ orca agent read <id>      # what an agent said
 
 Keep tasks touching the same file in one agent.
 
-## The three critics (every dev cycle)
+## The five critics (every dev cycle)
 
-Every change gets three reviews from agents that didn't write it. Point them at the diff and the rules, not at the builder's explanation, so their read isn't anchored. Run them in parallel, each in its own worktree:
+Every change gets five reviews from agents that didn't write it (AGENTS.md rule 10). Point them at the diff and the rules, not at the builder's explanation, so their read isn't anchored. Run them in parallel, each in its own worktree.
+
+Give each critic only the diff of the paths it judges, from where the branch left `main`, not `git log -p` (which pulls in unrelated history and costs tens of thousands of tokens):
 
 ```bash
-# 1. Logic critic: the numbers
-orca worktree create --repo name:Stock-Watch --name critic-logic --agent codex \
-  --prompt "You are the logic critic. Read AGENTS.md and modules/<module>/LOGIC.md, then the diff (git log -p -3). Run npm test and load src/engine.js in node to check numbers. Report, most serious first, CONFIRMED vs SUSPECTED with file:line: formulas that don't match LOGIC.md, wrong windows, cost vs price mix-ups, NaN/edge cases, anything that would mislead a decision. Don't fix anything."
-
-# 2. UI critic: the running app
-orca worktree create --repo name:Stock-Watch --name critic-ui --agent claude \
-  --prompt "You are the UI critic. Run the app (cd modules/stock-watch && DATA_DIR=\$(mktemp -d) PORT=4640 node server.js). Screenshot every page at 1280, 1440, 1920 and 390x844 (playwright cli). Report: wasted space, sideways scroll, unclear labels, decision number not prominent, Performity inconsistency, touch targets, accessibility. Page + viewport + fix for each. Don't fix anything."
-
-# 3. Cross-module critic: same rule, same answer
-orca worktree create --repo name:Stock-Watch --name critic-modules --agent codex \
-  --prompt "You are the cross-module critic. Compare every business rule across modules/* (and LOGIC.md files, DECISIONS.md), and against the client's existing tools where known. Report rule differences, undocumented ones, doc/code drift, and what should become shared code so modules don't fork. file:line both sides. Don't fix anything."
+BASE=$(git merge-base main HEAD)
+git diff $BASE..HEAD -- <role paths>
 ```
 
-# 4. Simplicity critic: is it easy for anyone?
-orca worktree create --repo name:Stock-Watch --name critic-simple --agent claude \
-  --prompt "You are the simplicity critic. Run the app and look at every screen. For each: its one job, the number that should dominate, what competes with it, concepts a user must learn, jargon. Propose what to cut, merge or hide behind More, with plain wording, and a default-vs-detailed spec per screen. Don't fix anything."
+| Critic | Role paths |
+|---|---|
+| Logic | `modules/*/src modules/*/LOGIC.md modules/stock-watch-sheets/StockWatch.gs` |
+| UI | `modules/stock-watch/public` |
+| Cross-module | `modules docs/DECISIONS.md docs/adr` |
+| Simplicity | `modules/stock-watch/public` |
+| Mobile | `modules/stock-watch/public` |
 
-# 5. Mobile critic and fixer: works in its own worktree, the builder merges
+**1. Logic critic: the numbers**
+
+```bash
+orca worktree create --repo name:Stock-Watch --name critic-logic --agent codex \
+  --prompt "You are the logic critic. Read AGENTS.md and modules/<module>/LOGIC.md, then the diff: BASE=\$(git merge-base main HEAD); git diff \$BASE..HEAD -- modules/*/src modules/*/LOGIC.md modules/stock-watch-sheets/StockWatch.gs. Run npm test and load src/engine.js in node to check numbers. Report, most serious first, CONFIRMED vs SUSPECTED with file:line: formulas that don't match LOGIC.md, wrong windows, cost vs price mix-ups, NaN/edge cases, anything that would mislead a decision. Don't fix anything."
+```
+
+**2. UI critic: the running app**
+
+```bash
+orca worktree create --repo name:Stock-Watch --name critic-ui --agent claude \
+  --prompt "You are the UI critic. Read the diff: BASE=\$(git merge-base main HEAD); git diff \$BASE..HEAD -- modules/stock-watch/public. Run the app (cd modules/stock-watch && DATA_DIR=\$(mktemp -d) PORT=4640 node server.js). Screenshot every page at 1280, 1440, 1920 and 390x844 (playwright cli; node modules/stock-watch/test/smoke/smoke.js covers the basics). Report: wasted space, sideways scroll, unclear labels, decision number not prominent, Performity inconsistency, touch targets, accessibility. Page + viewport + fix for each. Don't fix anything."
+```
+
+**3. Cross-module critic: same rule, same answer**
+
+```bash
+orca worktree create --repo name:Stock-Watch --name critic-modules --agent codex \
+  --prompt "You are the cross-module critic. Read the diff: BASE=\$(git merge-base main HEAD); git diff \$BASE..HEAD -- modules docs/DECISIONS.md docs/adr. Compare every business rule across modules/* (and LOGIC.md files, DECISIONS.md), and against the client's existing tools where known. modules/stock-watch/test/parity.test.js checks the Sheet against the web app; the differences allowed are listed in modules/stock-watch-sheets/LOGIC.md. Report rule differences, undocumented ones, doc/code drift, and what should become shared code so modules don't fork. file:line both sides. Don't fix anything."
+```
+
+**4. Simplicity critic: is it easy for anyone?**
+
+```bash
+orca worktree create --repo name:Stock-Watch --name critic-simple --agent claude \
+  --prompt "You are the simplicity critic. Read the diff: BASE=\$(git merge-base main HEAD); git diff \$BASE..HEAD -- modules/stock-watch/public. Run the app and look at every screen. For each: its one job, the number that should dominate, what competes with it, concepts a user must learn, jargon. Propose what to cut, merge or hide behind More, with plain wording, and a default-vs-detailed spec per screen. Don't fix anything."
+```
+
+**5. Mobile critic and fixer: works in its own worktree, the builder merges**
+
+```bash
 orca worktree create --repo name:Stock-Watch --name mobile-fix --agent claude \
-  --prompt "You are the mobile critic and fixer. Run the app at 390x844 (and 360x740). Find what's hard on a phone: decision not first, tiny touch targets (<44px), crowded rows, sideways scroll, long lists, text that needs zooming. Fix them in this worktree (public/app.js, public/styles.css), keep desktop unchanged (check 1280 and 1440 still have no sideways scroll), run npm test, commit on this branch with a summary of each fix."
+  --prompt "You are the mobile critic and fixer. Read the diff: BASE=\$(git merge-base main HEAD); git diff \$BASE..HEAD -- modules/stock-watch/public. Run the app at 390x844 (and 360x740). Find what's hard on a phone: decision not first, tiny touch targets (<44px), crowded rows, sideways scroll, long lists, text that needs zooming. Fix them in this worktree (public/app.js, public/styles.css), keep desktop unchanged (check 1280 and 1440 still have no sideways scroll), run npm test, commit on this branch with a summary of each fix."
 ```
 
 The builder fixes what holds up and notes anything rejected (and why) in `docs/DEVLOG.md`.
@@ -64,5 +91,6 @@ The builder fixes what holds up and notes anything rejected (and why) in `docs/D
 ## Finishing
 
 1. Each agent runs `npm test` and updates the module `AGENTS.md` and `docs/DEVLOG.md`.
-2. Review the diff in Orca, merge to `main`, push. Railway deploys `main`.
-3. Remove the worktree: `orca worktree rm <name>`.
+2. Review the diff in Orca, merge to `main`, push, and wait for CI (GitHub Actions "test") to go green.
+3. Deploy is manual (ADR-0012): from a clean, green `main`, run `railway up` at the repo root, then check `/health` and record the SHA in `docs/DEVLOG.md`. Steps and rollback: `docs/RUNBOOK.md`. Pushing to `main` does not deploy.
+4. Remove the worktree: `orca worktree rm <name>`.
