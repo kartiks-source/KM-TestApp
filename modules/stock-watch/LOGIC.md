@@ -301,7 +301,7 @@ Each group row adds up its variants' rows, with the same rules as the Products p
 | Overstock ₹ | cash beyond need, overstocked variants only (section 7c) |
 | Trend | the variants' sales per in-stock day added up, last 14 days vs the 14 before (the halves of section 7d), from each variant's weekly blocks. A variant without data in both halves, or with under 3 in-stock days in either, is left out; under 6 units in all: no trend |
 
-**Totals.** Parent products and categories add up to the report totals (sales, lost, order ₹, overstock ₹, profit lost; tested). Collections and tags overlap: a product with two tags counts in both rows, so there is **no grand total**, only a footnote with the distinct store total (each variant once).
+**Totals.** Parent products and categories add up to the report totals (sales, lost, order ₹, overstock ₹, profit lost; tested). Collections and tags overlap: a product with two tags counts in both rows, so there is **no grand total**: the headline shows only the number of groups ("13 tags"), and a footnote gives the distinct store total (each variant once). "Products" counts variants everywhere (the Products page rows); the parent-product lens says "parent products" for its groups.
 
 **Catch-all collections are hidden by default.** A collection holding 80% or more of the products in the report ("All products", "Home page") tells you nothing and would top every list; a button shows them. Products only in hidden collections fall into "Not in any other collection".
 

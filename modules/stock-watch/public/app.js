@@ -417,8 +417,8 @@
   /* Group by (SW-022): "View: Products ▾" rolls the rows up by parent product, category, collection or tag
      (src/groups.js, LOGIC.md §9a). A group row opens Products filtered to it, with a removable chip. */
   const LENS = [['', 'Products'], ['product', 'Parent products'], ['type', 'Categories'], ['collection', 'Collections'], ['tag', 'Tags']];
-  const LENS_ONE = { product: 'Product', type: 'Category', collection: 'Collection', tag: 'Tag' };
-  const LENS_MANY = { product: 'products', type: 'categories', collection: 'collections', tag: 'tags' };
+  const LENS_ONE = { product: 'Parent product', type: 'Category', collection: 'Collection', tag: 'Tag' };
+  const LENS_MANY = { product: 'parent products', type: 'categories', collection: 'collections', tag: 'tags' };
   function viewSelect() {
     if (!state.lenses) {
       state.lenses = ['product', 'type'];
@@ -460,15 +460,16 @@
     const fresh = ci.demo ? 'Demo tags and collections, made up from the product types.'
       : lens === 'collection' ? (ci.reading ? 'Reading collections from Shopify…' : ci.collectionsAt ? `Collections read from Shopify ${dt(ci.collectionsAt)}, re-read daily.` : 'Collections not read yet.') : '';
     const note = d.overlap
-      ? `A product in two ${LENS_MANY[lens]} counts in both rows, so the rows don’t add up. Store total, each product once: ${inr.format(t.n)} products · ${money(t.sold)} sold · ${money(t.lost)} lost · order ${money(t.orderValue)} today.`
+      ? `A product in two ${LENS_MANY[lens]} counts in both rows, so the rows don’t add up. Store total, each product once: ${inr.format(t.n)} products · ${money(t.sold)} sold · ${money(t.lost)} lost · ${inr.format(t.needOrder)} to order today (${money(t.orderValue)}).`
       : 'Every product is in one row, so the rows add up to the store total.';
     const allBtn = state.allColl ? '<button class="chip on" id="g-all">Showing all-products collections<span aria-hidden="true">×</span></button>'
       : d.hidden.length ? `<button class="chip" id="g-all" title="Collections holding 80% or more of products are hidden">Show ${d.hidden.length === 1 ? `“${esc(d.hidden[0].label)}”` : `${d.hidden.length} all-products collections`}</button>` : '';
-    return `${head(`${inr.format(rows.length)} ${LENS_MANY[lens]} · <b>${inr.format(t.needOrder)}</b> to order today · ${money(t.sold)} sold · <span class="lostv">${money(t.lost)} lost</span>`)}
+    const sub = `${inr.format(rows.length)} ${LENS_MANY[lens]}`;   // overlap lenses: no grand total, only the footnote
+    return `${head(d.overlap ? sub : `${sub} · <b>${inr.format(t.needOrder)}</b> to order today · ${money(t.sold)} sold · <span class="lostv">${money(t.lost)} lost</span>`)}
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
         <header><h3><span class="pname">${esc(g.label)}</span></h3><div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
-        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
+        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
       <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
   }
   function openGroup(key) {

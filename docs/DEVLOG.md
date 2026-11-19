@@ -9,8 +9,9 @@ stock-watch · SW-022 group by product / category / collection / tag (branch `sp
 - `src/catalog.js` (new): `STOCK_Q` now reads `product { id tags }` (same line as Sprint 1 B-data); `pullStock` hands variant nodes over (`onVariants`); collections + members via two read-only queries through `gql`, cached 24 h, saved per page so a restart resumes, 400 pages per run. Own file `DATA_DIR/catalog.json`.
 - Demo: product IDs, tags (Furniture/Decor, finish, motif, Diwali gifting, price band) and 10 collections incl. an "All products" catch-all, derived from the Sammsara catalog types and names.
 - UI: "View: Products ▾" replaces the Category select (one control, no tab). Group rows: Products · Need order (x of n) · Sold · Sales lost · Profit lost · Order ₹ · Overstock ₹ · Trend; click / Enter → Products filtered with a removable chip. Checked at 1280 / 1440 / 1920 / 390×844, no sideways scroll.
-- `GET /api/groups?lens=…` (new route). LOGIC.md §9a, §9b, §10, §11. Tests: `test/groups.test.js`, `test/catalog.test.js`.
-- Open: five critics not run on this branch; merge with Sprint 1: `server.js` syncShopify line (pullStock call) will conflict with B-data's `setCatalog` line, keep both; then point `catalog.current()` variants at `store.catalog`. Shared dev log page not updated (no publishing from this workstream).
+- `GET /api/groups?lens=…` (new route). LOGIC.md §9a, §9b, §10, §11. Tests: `test/groups.test.js`, `test/catalog.test.js`, `test/groups-api.test.js` (route: lens list, 400 on unknown lens, all=1, login, click ids = Products rows).
+- Review fixes: tag/collection headline shows only the count ("13 tags"), store total only in the footnote; parent-product lens says "parent products" ("Products" = variant rows everywhere else); phone card "x of n to order". Commits e2664e3..cc738a5 + review-fix commit.
+- Open: five critics not run on this branch (one reviewer pass done, findings fixed); touch targets 36 px on phone for View select and chips, app-wide 36 px chip rule, left to SW-023; merge with Sprint 1: `server.js` syncShopify line (pullStock call) will conflict with B-data's `setCatalog` line, keep both; then point `catalog.current()` variants at `store.catalog`. Shared dev log page not updated (no publishing from this workstream).
 
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
