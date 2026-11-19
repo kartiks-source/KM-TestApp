@@ -269,6 +269,9 @@ function report(stock, orders, settings = {}, opts = {}) {
     }
   }
 
+  /* an order quantity only where an order is due (Order today / This week); "OK" never asks you to order */
+  for (const p of products) if (!['Out now', 'Critical', 'Order now', 'Order this week'].includes(p.status)) { p.orderQty = 0; p.orderValue = 0; }
+
   const rank = (s) => STATUS.indexOf(s);
   reorder.sort((a, b) => rank(a.status) - rank(b.status) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
   stockouts.sort((a, b) => b.lost - a.lost);
@@ -288,6 +291,8 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsLost: round(dailyRows.reduce((s, d) => s + d.unitsLost, 0), 0),
       outNow: products.filter((p) => p.status === 'Out now').length,
       orderNow: products.filter((p) => ['Critical', 'Order now'].includes(p.status)).length,
+      orderToday: products.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
+      stillOut: stockouts.filter((s) => s.open).length,
       orderWeek: products.filter((p) => p.status === 'Order this week').length,
       stockouts: stockouts.length,
       smallTopUps: stockouts.filter((s) => s.small).length,

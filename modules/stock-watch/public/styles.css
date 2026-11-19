@@ -357,3 +357,41 @@ table.fixed td:first-child { max-width: none; }
   .chart text { font-size: 10.5px; }
   .headline p { font-size: 12.5px; }
 }
+
+/* ---- simplified screens (19 Nov): three statuses, out-of-stock dot, best-seller tag, folds ---- */
+.st.g-today { background: var(--lost); color: #fff; }
+.st.g-week { background: #EEF2F7; color: #3A5573; }
+.st.g-ok { background: var(--ok-soft); color: var(--ok); }
+.st.g-slow, .st.g-none { background: #EEF1F5; color: var(--soft); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--lost); margin-right: 7px; vertical-align: 1px; }
+.best { display: inline-block; margin-left: 8px; font-size: 10.5px; font-weight: 600; color: #8A5A00; background: #FFF4D6; border-radius: 4px; padding: 1px 6px; vertical-align: 1px; white-space: nowrap; }
+.amberv { color: var(--amber); }
+.tiles.t4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.headline .hbtn { margin-left: auto; align-self: center; }
+.rlabel { font-size: 12px; color: var(--faint); margin-right: -6px; white-space: nowrap; }
+.colpick { position: relative; }
+.colpick > summary { list-style: none; cursor: pointer; }
+.colpick > summary::-webkit-details-marker { display: none; }
+.colpick .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; background: var(--card); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 30px -12px rgba(14,22,38,.3); padding: 8px; display: grid; gap: 2px; min-width: 210px; }
+.colpick .menu label, .colpick .menu a, .linkbtn { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 6px; font-size: 13px; color: var(--ink-2); text-decoration: none; background: none; border: 0; cursor: pointer; text-align: left; }
+.colpick .menu label:hover, .colpick .menu a:hover, .linkbtn:hover { background: var(--brand-wash2); }
+.chip.sel { appearance: auto; padding-right: 6px; }
+.sect { font-size: 14px; font-weight: 600; color: var(--soft); margin: 6px 0 -4px; }
+.fold > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "▸"; color: var(--faint); }
+.fold[open] > summary::before { content: "▾"; }
+.fold > .panel { border: 0; box-shadow: none; padding: 8px 0 0; }
+.fold-in > summary { cursor: pointer; color: var(--brand); font-size: 13px; margin: 6px 0; }
+.danger > summary b { color: var(--lost); }
+.how > summary { cursor: pointer; color: var(--brand); font-size: 12.5px; list-style: none; }
+.how > summary::-webkit-details-marker { display: none; }
+.how p { margin: 4px 0 0; color: var(--soft); font-size: 13px; max-width: 90ch; }
+.phone-only { display: none; }
+@media (max-width: 760px) {
+  .phone-only { display: block; }
+  .tiles.t4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rlabel { display: none; }
+  .headline .hbtn { margin-left: 0; }
+  .colpick .menu { right: auto; left: 0; }
+}
