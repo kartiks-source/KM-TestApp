@@ -33,11 +33,12 @@ Google Sheet CSV / upload ───┘
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
+| `src/backup.js` | backups of `store.json` in `/data/backups` (daily + before every replace/clear, 14 each), restore from `/data/restore.json` on start, `GET /api/export/backup.json`. Restore steps: `docs/RUNBOOK.md` |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
-| `test/` | `node --test`: `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s) |
+| `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store`, `backup`, `docs`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
 
 ## Shopify access (decided 19 Nov 2026)
 

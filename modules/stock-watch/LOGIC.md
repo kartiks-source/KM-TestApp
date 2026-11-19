@@ -343,16 +343,22 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 
 ## 11. Known limits, in one place
 
+**Whatever the source:**
 - ₹ lost is an estimate of demand, and an upper bound where substitutes exist (section 4).
-- Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
-- Returns and cancellations aren't netted out of sales.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
+
+**By source** (what counts as a sale is in section 1):
+
+| | Shopify pull | Flow / Google Sheet / CSV |
+|---|---|---|
+| Stock-out timing | to within 15 minutes; a stock-out that starts and ends between two reads is missed | to the minute (Flow), or as precise as the file |
+| Cancellations, refunds, removed items | netted: cancelled orders left out, units are Shopify's `currentQuantity`, later edits re-read | **not netted**: counted as sent; a later cancellation or refund isn't picked up |
+| Discounts | price after line and order-level discounts | as sent |
+| Test orders | left out | counted unless the Flow condition excludes them |
 
 ## 12. Differences in the Google Sheet version
 
-`modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds, with two differences:
-- **It values every hour of a stock-out equally** (no hour-of-day weighting, section 4a). Its ₹ lost can differ from the web app's for stock-outs mostly at night or mostly in the evening; over whole days the two agree.
-- **It uses a fixed 30-day window** and counts a stock-out that started before it in full, where the web app counts only the hours inside the selected period.
+`modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds. Every difference is listed in one place, [`../stock-watch-sheets/LOGIC.md`](../stock-watch-sheets/LOGIC.md), so this section doesn't repeat them. `test/parity.test.js` runs the same fixtures through both and fails `npm test` on any difference that isn't on that list (same status and order quantity, ₹ lost within 2%).

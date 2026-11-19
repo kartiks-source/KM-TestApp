@@ -10,6 +10,9 @@ CLAUDE.md                 imports this file for Claude Code
 docs/DEVLOG.md            what changed, when, and why (newest first)
 docs/DECISIONS.md         decisions that apply across modules
 docs/ORCA.md              how to run several agents in parallel with Orca
+docs/RUNBOOK.md           deploy, rollback, backups, restore, what to do when something breaks
+SECURITY.md               every secret, where it lives, how to rotate it; auth model; destructive endpoints
+.github/workflows/test.yml  CI: npm test on every push and PR
 modules/<name>/           one folder per module, with its own AGENTS.md
   AGENTS.md               the module's context: purpose, data flow, files, status, next steps
   LOGIC.md                how every number is worked out and why: rule, reason, alternatives, limits
@@ -44,7 +47,7 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 
 ## Deploy
 
-- `main` deploys to Railway (project `stock-watch`, service `web`): https://web-production-6dd42b8d.up.railway.app
+- Deploy is manual: from a clean, pushed `main` with CI green, run `railway up` at the repo root (Railway project `stock-watch`, service `web`): https://web-production-6dd42b8d.up.railway.app. Pushing to `main` does **not** deploy (ADR-0012). Steps, rollback, backups and restore: `docs/RUNBOOK.md`. Secrets and auth: `SECURITY.md`.
 - Railway builds the root `Dockerfile`, which copies `modules/stock-watch`.
 - Variables are listed in `modules/stock-watch/AGENTS.md`.
 

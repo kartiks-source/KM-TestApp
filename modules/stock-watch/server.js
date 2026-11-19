@@ -18,6 +18,7 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const backup = require('./src/backup');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -269,6 +270,7 @@ async function api(req, res, url) {
   const a = auth(req);
   if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
   if (a !== 'ok') return send(res, 401, { ok: false, error: 'Login needed' });
+  if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
@@ -418,6 +420,7 @@ if (require.main === module) {
     console.error(`Refusing to start: NODE_ENV=production needs ADMIN_PASSWORD set, at least ${MIN_PASSWORD} characters.`);
     process.exit(1);
   }
+  backup.start();   // before the store loads: applies a pending restore, then daily + before-replace backups
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
