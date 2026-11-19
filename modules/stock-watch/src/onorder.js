@@ -1,0 +1,83 @@
+'use strict';
+/*
+ * "Mark ordered": purchase orders already placed, one record per variant (LOGIC.md §6b).
+ * Kept in its own file, DATA_DIR/onorder.json, so it never touches store.json.
+ *   { [variantId]: { qty, eta, at, by } }   qty = units ordered, eta = expected landing (ms), at = when marked (ms)
+ * The engine works out what's still to come (stock increases after `at` count as received).
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+
+const DAY = 864e5;
+const MAX_ITEMS = 500;
+const dir = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const file = () => path.join(dir(), 'onorder.json');
+
+let data = null;
+
+function all() {
+  if (data) return data;
+  try { data = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.warn('onorder.json unreadable, starting empty:', e.message); data = {}; }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+  return data;
+}
+
+function save() {
+  fs.mkdirSync(dir(), { recursive: true });
+  const tmp = file() + '.tmp';
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeSync(fd, JSON.stringify(data)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file());
+}
+
+/** ETA from "YYYY-MM-DD" (end of that day, store time) or ms. Must be within −1 … +365 days of now. */
+function parseEta(v, now, offMin = 330) {
+  let t = NaN;
+  if (typeof v === 'number') t = v;
+  else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) t = Date.parse(v + 'T23:59:00Z') - offMin * 60e3;
+  if (!Number.isFinite(t) || t < now - DAY || t > now + 365 * DAY) return null;
+  return t;
+}
+
+/**
+ * Validate and store a batch. items: [{ id, qty, eta }]; qty 0 (or clear: true) removes the record.
+ * Returns { ok, saved, removed } or { ok: false, error }.
+ */
+function mark(items, { by = null, now = Date.now(), offMin = 330 } = {}) {
+  if (!Array.isArray(items) || !items.length) return { ok: false, error: 'Nothing to mark' };
+  if (items.length > MAX_ITEMS) return { ok: false, error: `At most ${MAX_ITEMS} products at a time` };
+  const d = all(), next = {};
+  for (const it of items) {
+    const id = ['string', 'number'].includes(typeof it?.id) ? String(it.id).trim().slice(0, 100) : '';
+    if (!id) return { ok: false, error: 'Each item needs a product id' };
+    if (it.clear === true || +it.qty === 0) { next[id] = null; continue; }
+    const qty = Math.round(+it.qty);
+    if (!Number.isFinite(qty) || qty < 1 || qty > 1e6) return { ok: false, error: 'Quantity must be a whole number from 1 to 1,000,000' };
+    const eta = parseEta(it.eta, now, offMin);
+    if (eta == null) return { ok: false, error: 'Expected date must be a date (YYYY-MM-DD) within the next year' };
+    next[id] = { qty, eta, at: now, by: typeof by === 'string' && by.trim() ? by.trim().slice(0, 40) : null };
+  }
+  let saved = 0, removed = 0;
+  for (const [id, rec] of Object.entries(next)) {
+    if (rec) { d[id] = rec; saved++; } else if (d[id]) { delete d[id]; removed++; }
+  }
+  /* old records go: anything due more than 60 days ago */
+  for (const [id, rec] of Object.entries(d)) if (rec.eta < now - 60 * DAY) delete d[id];
+  save();
+  return { ok: true, saved, removed };
+}
+
+function clear() { data = {}; save(); }
+
+/** HTTP: GET /api/onorder, POST /api/onorder { items, by }. Returns { code, body } or null when the path isn't ours. */
+async function handle(req, p, readBody, offMin) {
+  if (p !== '/api/onorder') return null;
+  if (req.method === 'GET') return { code: 200, body: { ok: true, onOrder: all() } };
+  if (req.method !== 'POST') return { code: 405, body: { ok: false, error: 'Use GET or POST' } };
+  let b;
+  try { b = JSON.parse(await readBody(req, 256e3) || '{}'); } catch { return { code: 400, body: { ok: false, error: 'Body must be JSON' } }; }
+  const r = mark(b && b.items, { by: b && b.by, offMin });
+  return r.ok ? { code: 200, body: r } : { code: 400, body: r };
+}
+
+module.exports = { all, mark, clear, handle, parseEta };

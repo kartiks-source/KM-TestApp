@@ -10,6 +10,7 @@
     filter: { reorder: 'today', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
+    pick: new Set(),                            // Reorder rows ticked for Mark ordered
     limit: {},                                  // rows shown per table (pages of 50)
     colW: (() => { try { return JSON.parse(localStorage.getItem('sw-colw') || '{}'); } catch { return {}; } })(),
   };
@@ -54,7 +55,11 @@
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   }
-  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600); }
+  function toast(msg, action) {
+    const t = $('#toast'); t.textContent = msg; t.hidden = false; toast._do = action ? action.run : null;
+    if (action) { const b = document.createElement('button'); b.className = 'tact'; b.id = 'toast-act'; b.textContent = action.label; t.append(' ', b); }
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; toast._do = null; }, action ? 6000 : 2600);
+  }
 
   async function reloadReport() {
     state.report = await api(`/api/report?days=${state.days}${whatQs()}`);
@@ -65,7 +70,33 @@
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     header();
     render._animate = true; render();
+    freshness();
   }
+
+  /* ---------- stale-data banner (SW-019): "Data is X h old" when the last Shopify pull is over 45 minutes old ----------
+     Reads the unauthed GET /status when the server has it, else the Shopify lastSync that came with the report. */
+  const STALE_MIN = 45;
+  const asTime = (v) => (typeof v === 'number' && v > 1e12 ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
+  const ageText = (min) => (min < 90 ? `${Math.round(min)} min` : min < 48 * 60 ? `${n1(min / 60)} h` : `${n1(min / 1440)} days`);
+  async function freshness() {
+    let st = null;
+    try {
+      const r = await fetch('/status', { cache: 'no-store', credentials: 'same-origin' });
+      if ((r.headers.get('content-type') || '').includes('json')) st = await r.json();
+    } catch { /* no /status: use the report */ }
+    const sh = state.shopify || {};
+    const fromStatus = st && (asTime(st.lastSync) ?? asTime(st.shopify?.lastSync) ?? asTime(st.lastPull) ?? (Number.isFinite(st.ageMin) ? Date.now() - st.ageMin * 60e3 : null));
+    const last = fromStatus ?? asTime(sh.lastSync);
+    const connected = !!sh.source || st?.stale === true;
+    const age = last ? (Date.now() - last) / 60e3 : null;
+    const stale = connected && (st?.stale === true || (age != null && age > STALE_MIN));
+    const el = $('#stale');
+    if (!stale) { el.hidden = true; return; }
+    const err = sh.lastError || st?.lastError || st?.shopify?.lastError;
+    el.innerHTML = `<b>${age != null ? `Data is ${ageText(age)} old.` : 'Data may be out of date.'}</b> <span>${last ? `Last Shopify pull ${dt(last)}` : 'No Shopify pull yet'}${err ? ` · ${esc(err)}` : ''}${sh.running ? ' · pulling now…' : ''}. Numbers may not show the latest stock and orders.</span> <a href="#data">Data &amp; settings</a>`;
+    el.hidden = false;
+  }
+  setInterval(() => { if (state.report) freshness(); }, 60e3);
 
   function header() {
     const r = state.report, s = state.settings;
@@ -120,8 +151,8 @@
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
         <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
-    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span><span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</summary>
-      <div class="pbody">${fields}</div></details>`;
+    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span>' : ''}</summary>
+      <div class="pbody">${fields}${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
   }
   let whatTimer = null;
   function setWhat(k, v) {
@@ -131,16 +162,24 @@
   }
 
   /* ---------- trend: 8 weekly bars (units), rose base where the product was out of stock that week ---------- */
-  const WEEK_LABEL = (i) => (i === 7 ? 'last 7 days' : `${7 - i} week${7 - i > 1 ? 's' : ''} before`);
+  /* week i of 8 (oldest first) = the 7 days ending (7 − i) weeks before the report time; labelled by the 7 calendar
+     days it ends on ("13–19 Nov" for the last block, which ends now) */
+  const weekEnd = (i) => state.report.generatedAt - (7 - i) * 7 * 864e5 - 1;
+  const weekStart = (i) => weekEnd(i) - 6 * 864e5;
+  const WEEK_LABEL = (i) => {
+    const a = local(weekStart(i)), b = local(weekEnd(i));
+    return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}` : `${a.getUTCDate()} ${MON[a.getUTCMonth()]}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}`;
+  };
+  const weekTip = (x, i) => (x.units == null ? `${WEEK_LABEL(i)}: no data yet` : `${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out ${n1(x.outDays)} d` : ''}`);
   function spark(p, w = 64, h = 20) {
     const wk = p.weeks || []; if (!wk.length) return '';
-    const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length;
+    const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length, gap = bw > 6 ? 1 : 0.5;
     const bars = wk.map((x, i) => {
-      if (x.units == null) return `<g><title>${WEEK_LABEL(i)}: no data yet</title><rect class="nd" x="${i * bw + 1}" y="${h - 3}" width="${bw - 2}" height="1"/></g>`;
+      if (x.units == null) return `<g><title>${weekTip(x, i)}</title><rect class="nd" x="${i * bw + gap}" y="${h - 3}" width="${bw - 2 * gap}" height="1"/><rect class="hit" x="${i * bw}" y="0" width="${bw}" height="${h}"/></g>`;
       const bh = x.units ? Math.max(2, (x.units / max) * (h - 4)) : 0;
-      const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + 1}" y="${h - 2}" width="${bw - 2}" height="2"/>` : '';
-      return `<g><title>${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out of stock ${n1(x.outDays)} d` : ''}</title>`
-        + `<rect class="sb${i === wk.length - 1 ? ' last' : ''}" style="animation-delay:${i * 35}ms" x="${i * bw + 1}" y="${h - 3 - bh}" width="${bw - 2}" height="${bh}" rx="1"/>${out}</g>`;
+      const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + gap}" y="${h - 2}" width="${bw - 2 * gap}" height="2"/>` : '';
+      return `<g><title>${weekTip(x, i)}</title><rect class="hit" x="${i * bw}" y="0" width="${bw}" height="${h}"/>`
+        + `<rect class="sb${i === wk.length - 1 ? ' last' : ''}" style="animation-delay:${i * 35}ms" x="${i * bw + gap}" y="${h - 3 - bh}" width="${bw - 2 * gap}" height="${bh}" rx="${bw > 6 ? 1 : 0.5}"/>${out}</g>`;
     }).join('');
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Weekly units, last 8 weeks">${bars}</svg>`;
   }
@@ -152,7 +191,7 @@
   }
 
   /* which priority columns the CSS shows at this width (mirrors the @media rules in styles.css) */
-  const colVisible = (c) => !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
+  const colVisible = (c) => !(c.pr === 'w' && innerWidth < 1400) && !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
   const tier = () => (innerWidth > 1700 ? 'xl' : innerWidth > 1400 ? 'l' : innerWidth > 1180 ? 'm' : 's');
   const colKey = (id) => `${id}@${tier()}`;                 // widths are remembered per screen size
   const tableRoom = () => (document.querySelector('.wrap')?.clientWidth || innerWidth) - 46;
@@ -239,12 +278,28 @@
      Default view = the decision; detail on demand (Columns picker, More, the product drawer).
      User-facing statuses are three: Order today (out / critical / order now), This week, OK. */
   const TODAY = ['Out now', 'Critical', 'Order now'];
-  const group = (s) => (TODAY.includes(s) ? 'today' : s === 'Order this week' ? 'week' : s === 'OK' ? 'ok' : s === 'Slow seller' ? 'slow' : 'none');
-  const GROUP_LABEL = { today: 'Order today', week: 'This week', ok: 'OK', slow: 'Slow seller', none: 'No stock data' };
-  const status = (p) => { const g = group(p.status); return `<span class="st g-${g}" title="${esc(p.status === 'Critical' ? 'Order today: 3 days or less left' : p.status)}">${GROUP_LABEL[g]}</span>`; };
+  const group = (s) => (TODAY.includes(s) ? 'today' : s === 'Order this week' ? 'week' : s === 'Ordered' ? 'ordered' : s === 'OK' ? 'ok' : s === 'Slow seller' ? 'slow' : 'none');
+  const GROUP_LABEL = { today: 'Order today', week: 'This week', ordered: 'Ordered', ok: 'OK', slow: 'Slow seller', none: 'No stock data' };
+  const dateShort = (t) => { const d = local(t); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+  /* on order (LOGIC.md §6b): "Ordered · lands 25 Nov"; late or not enough → a small tag next to the status */
+  const poTag = (p) => {
+    const o = p.onOrder; if (!o || p.status === 'Ordered') return '';
+    const tip = `Ordered ${inr.format(o.qty)}${o.remaining < o.qty ? ` (${inr.format(o.remaining)} still to come)` : ''} · ${o.late ? 'was due' : 'lands'} ${dateShort(o.eta)}`;
+    if (o.late) return ` <span class="po late" title="${esc(tip)}. Past its date, so it no longer counts: chase the supplier or reorder.">Late · due ${dateShort(o.eta)}</span>`;
+    return ` <span class="po" title="${esc(tip)}${o.counts ? '. The order quantity is what’s still needed on top.' : '. Lands after the shelf empties and later than a new order could, so it doesn’t count.'}">${inr.format(o.remaining)} on order</span>`;
+  };
+  const status = (p) => {
+    const g = group(p.status);
+    if (g === 'ordered') return `<span class="st g-ordered" title="${esc(`Ordered ${inr.format(p.onOrder.qty)} pcs${p.onOrder.by ? ` by ${p.onOrder.by}` : ''}; stock + order covers the need`)}">Ordered · lands ${dateShort(p.onOrder.eta)}</span>`;
+    return `<span class="st g-${g}" title="${esc(p.status === 'Critical' ? 'Order today: 3 days or less left' : p.status)}">${GROUP_LABEL[g]}</span>${poTag(p)}`;
+  };
   const outDot = (p) => (p.stock != null && p.stock <= 0 ? '<span class="dot" title="Out of stock now"></span>' : '');
   const bestTag = (p) => (p.abc === 'A' ? '<span class="best" title="Best seller: among the products making the top 80% of sales">Best seller</span>' : '');
-  const nameCell = (p, tag = true) => `${outDot(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span>${tag ? bestTag(p) : ''}`;
+  const nameCell = (p, tag = true, sp = false) => `${sp ? `<span class="ispark">${spark(p, 40, 12)}</span>` : ''}${outDot(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span>${tag ? bestTag(p) : ''}`;
+  /* SW-021: trend in the decision rows. ≥ 1400 px: its own cell (48×16 spark + chip); narrower: a 40×12 spark at the
+     start of the name cell (no extra column; at the start so a long name's … never hides it, and the sparks line up) */
+  const trendCell = (p) => `<span class="trc">${spark(p, 48, 16)}${trendOnly(p)}</span>`;
+  const mspark = (p) => `<span class="mspark">${spark(p, 48, 16)}</span>`;
 
   /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
   const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
@@ -253,7 +308,18 @@
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
     return `<details class="colpick"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
   }
-  const dlMenu = (id, href) => `<details class="colpick"><summary class="btn ghost" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${href ? `<a href="${href}">Download CSV</a>` : `<button class="linkbtn" id="csv-${id}">Download CSV</button>`}</div></details>`;
+  const dlMenu = (id, href, extra = '') => `<details class="colpick"><summary class="btn ghost" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${extra}${href ? `<a href="${href}">Download CSV</a>` : `<button class="linkbtn" id="csv-${id}">Download CSV</button>`}</div></details>`;
+  /* "Mark ordered" (LOGIC.md §6b): one click with the suggested qty and today + lead time; edit qty/date in the drawer */
+  const orderBtn = (p) => (p.status === 'Ordered' ? `<button class="btn ghost xs" data-unorder="${esc(p.id)}" title="Remove the order mark">Undo</button>`
+    : p.onOrder ? `<button class="btn ghost xs" data-edit-order="${esc(p.id)}" title="Change the order already marked">Edit order</button>`
+      : p.orderQty > 0 ? `<button class="btn ghost xs" data-order="${esc(p.id)}" title="Mark ${inr.format(p.orderQty)} pcs ordered, landing in ${state.report.settings.leadDays} days (edit in the product panel)">Mark ordered</button>` : '');
+  const isoDay = (t) => local(t).toISOString().slice(0, 10);
+  const myName = () => { try { return localStorage.getItem('sw-name') || ''; } catch { return ''; } };
+  async function markOrdered(items, label) {
+    await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items, by: myName() }) });
+    state.pick.clear(); await reloadReport();
+    toast(label, { label: 'Undo', run: async () => { await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: items.map((i) => ({ id: i.id, clear: true })) }) }); await reloadReport(); toast('Order mark removed'); } });
+  }
 
   function daysCell(p) {
     if (p.daysLeft == null) return p.stock != null && p.stock <= 0 ? '<span class="lostv">0</span>' : '–';
@@ -286,13 +352,14 @@
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that need ordering today"><b>${t.bestAtRisk}<small> of ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
         <button class="tile plum" data-go="products" data-filter="over" title="Cash in stock beyond what lead time + days to last + buffer need, for overstocked products: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
       </section>
-      <section class="grid2">
+      <section class="grid2 grid3">
         <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder" data-go="reorder" data-filter="today">All ${t.orderToday}</a></div>
           ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
         </div>
         <div class="panel"><div class="panel-head"><h2>Biggest losses</h2><a href="#products" data-go="products" data-filter="lost">All</a></div>
           ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
         </div>
+        ${moving()}
       </section>
       <section class="panel chart">
         <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
@@ -300,31 +367,46 @@
       </section>`;
   }
 
+  /* Overview "Moving" (SW-021): top 3 up and down by ₹ effect = change in daily rate × avg price × 30 (LOGIC.md §7d) */
+  function moving() {
+    const ps = state.report.products.filter((p) => p.trendValue);
+    const up = ps.filter((p) => p.trendValue > 0).sort((a, b) => b.trendValue - a.trendValue).slice(0, 3);
+    const down = ps.filter((p) => p.trendValue < 0).sort((a, b) => a.trendValue - b.trendValue).slice(0, 3);
+    const row = (p) => `<div class="mv-row" data-product="${esc(p.id)}" title="${esc(p.name)}"><span class="name">${outDot(p)}${esc(p.name)}</span>${spark(p, 40, 12)}${trendOnly(p)}<span class="mv-v ${p.trendValue > 0 ? 'up' : 'down'}">${p.trendValue > 0 ? '+' : '−'}${money(Math.abs(p.trendValue))}</span></div>`;
+    const list = (h, l) => (l.length ? `<h3 class="mv-h">${h}</h3>${l.map(row).join('')}` : '');
+    return `<div class="panel"><div class="panel-head"><h2>Moving</h2><span class="muted small" title="Change in sales per in-stock day (last 14 days vs the 14 before) × average price × 30">₹ a month at the new pace</span></div>
+      ${up.length || down.length ? `<div class="mv">${list('Selling faster', up)}${list('Selling slower', down)}</div>` : '<p class="muted">Not enough sales yet to call a trend.</p>'}</div>`;
+  }
+
   function reorder() {
     const r = state.report, t = r.totals, f = state.filter.reorder, q = state.q.reorder.toLowerCase();
     const week = r.reorder.filter((p) => p.status === 'Order this week').length;
-    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ['all', 'All', r.reorder.length]];
+    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(t.ordered ? [['ordered', 'Ordered', t.ordered]] : []), ['all', 'All', r.reorder.length]];
     const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
+    const pickable = rows.filter((p) => !p.onOrder && p.orderQty > 0);
     const cols = [
-      { k: 'name', label: 'Product', f: (p) => nameCell(p) },
-      { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
+      { k: 'name', label: 'Product', f: (p) => (!p.onOrder && p.orderQty > 0 ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : '<span class="pick-sp"></span>') + nameCell(p, true, true) },
+      { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
       { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
-      { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (p) => p.trendPct ?? -999 },
+      { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
+      { k: 'act', label: '', tip: 'Placed the order? Mark it so the line leaves Order today', f: orderBtn, val: (p) => (p.onOrder ? 1 : 0) },
     ];
+    const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && !p.onOrder && p.orderQty > 0));
     return `
       <section class="headline"><h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
         <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p></section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`)}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+      ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${status(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
   }
 
@@ -372,7 +454,7 @@
     return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
   }
   const PRODUCT_COLS = () => [
-    { k: 'name', label: 'Product', f: (p) => nameCell(p), csv: (p) => p.name },
+    { k: 'name', label: 'Product', f: (p) => nameCell(p, true, true), csv: (p) => p.name },
     { k: 'sku', label: 'SKU', hide: 1 },
     { k: 'abc', label: 'Rank (A = best seller)', hide: 1 },
     { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => GROUP_LABEL[group(p.status)] },
@@ -382,7 +464,7 @@
     { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
-    { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before (stock-out days left out)', f: trendOnly, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
+    { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
     { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
@@ -395,6 +477,10 @@
     ] : []),
     { k: 'price', label: 'Avg price', hide: 1 },
   ];
+  const baseChip = () => {
+    const b = state.report.totals.storeTrendPct; if (b == null) return '';
+    return `<span class="base" title="Typical product: the median trend of all products (sales per in-stock day, last 14 days vs the 14 before). Read each product’s trend against it: after a season peak almost everything falls.">Typical product ${b > 0 ? '+' : ''}${n1(b)}%</span>`;
+  };
   const countIn = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function products() {
     const r = state.report, f = state.filter.products, ty = state.filter.type;
@@ -409,9 +495,9 @@
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}">${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
-        ${colPicker('products', cols)}${dlMenu('products')}</div>
+        ${baseChip()}${colPicker('products', cols)}${dlMenu('products')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3>${status(p)}</header>
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${status(p)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>`)}`;
   }
   function downloadProductsCsv() {
@@ -493,13 +579,24 @@
           <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day</span></div>
           <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
-        <div class="panel"><h2>Trend</h2><div class="trc big">${p ? spark(p, 240, 44) + trendChip(p) : ''}</div><p class="muted small">${p ? (p.weeks || []).map((w, i) => (w.units == null ? '' : `${WEEK_LABEL(i)}: ${w.units}${w.outDays ? ` (out ${n1(w.outDays)} d)` : ''}`)).filter(Boolean).reverse().slice(0, 4).join(' · ') : ''}</p></div>
+        ${p && (p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
+        <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>
+          <p class="muted small">Units sold per week, week starting on the date shown; rose = out of stock part of that week.</p>` : ''}</div>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
         <details class="panel fold"><summary><b>More</b> <span class="muted">units per day, every stock-out</span></summary>
         <div class="chart"><h2>Units sold per day</h2>${unitsChart(d.dailyUnits)}</div>
         <div><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div></details>`;
       $('#drawer-close').focus();
     } catch (e) { body.innerHTML = `<p>Couldn’t load this product: ${esc(e.message)}</p>`; }
+  }
+  function orderForm(p) {
+    const o = p.onOrder, lead = state.report.settings.leadDays;
+    const facts = o ? `${o.late ? '<b class="lostv">Late</b> · was due' : 'Lands'} ${dateShort(o.eta)} · marked ${dateShort(o.at)}${o.by ? ` by ${esc(o.by)}` : ''}${o.remaining < o.qty ? ` · ${inr.format(o.qty - o.remaining)} received` : ''}` : `Suggested: ${inr.format(p.orderQty)} pcs, landing in ${lead} days`;
+    return `<div class="panel poform"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>
+      <div class="porow"><label>Pieces<input id="oo-qty" inputmode="numeric" autocomplete="off" value="${o ? o.qty : p.orderQty}"></label>
+        <label>Lands on<input id="oo-eta" type="date" min="${isoDay(Date.now())}" value="${isoDay(o ? Math.max(o.eta, Date.now()) : Date.now() + lead * 864e5)}"></label>
+        <label>Your name<input id="oo-by" autocomplete="name" placeholder="optional" value="${esc(myName())}"></label>
+        <button class="btn" id="oo-save" data-oo="${esc(p.id)}">${o ? 'Update' : 'Mark ordered'}</button>${o ? `<button class="btn ghost" id="oo-remove" data-oo="${esc(p.id)}">Remove</button>` : ''}</div></div>`;
   }
   let lastRow = null;
   const closeDrawer = () => { const was = !$('#drawer').hidden; $('#drawer').hidden = true; if (was && lastRow && document.contains(lastRow)) lastRow.focus(); };
@@ -519,6 +616,8 @@
 
   document.addEventListener('click', async (e) => {
     if (e.target.closest('.rz')) return;
+    if (e.target.matches('input.pick')) { const id = e.target.dataset.pick; if (e.target.checked) state.pick.add(id); else state.pick.delete(id); render(); return; }
+    if (e.target.id === 'toast-act' && toast._do) { const run = toast._do; $('#toast').hidden = true; toast._do = null; run().catch((err) => toast(err.message)); return; }
     const sum = e.target.closest('.plan > summary'); if (sum) { state.planOpen = !sum.parentElement.open; return; }
     const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
     if (!t) return;
@@ -543,6 +642,30 @@
     if (t.id === 'copy-key') { copy(state.settings.ingestKey); return; }
     if (t.id === 'show-key') { const shown = t.textContent === 'Hide key'; $('#u-key').innerHTML = shown ? maskKey(state.settings.ingestKey) : esc(state.settings.ingestKey); t.textContent = shown ? 'Show key' : 'Hide key'; return; }
     try {
+      if (t.dataset.order) {
+        const p = state.report.reorder.find((x) => x.id === t.dataset.order); if (!p) return;
+        t.disabled = true; const eta = isoDay(Date.now() + state.report.settings.leadDays * 864e5);
+        await markOrdered([{ id: p.id, qty: p.orderQty, eta }], `Marked ordered: ${inr.format(p.orderQty)} pcs, lands ${dateShort(Date.now() + state.report.settings.leadDays * 864e5)}`); return;
+      }
+      if (t.dataset.editOrder) { lastRow = t.closest('tr'); openProduct(t.dataset.editOrder); return; }
+      if (t.dataset.unorder) { t.disabled = true; await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: [{ id: t.dataset.unorder, clear: true }] }) }); await reloadReport(); toast('Order mark removed'); return; }
+      if (t.id === 'pick-all') { const f = state.filter.reorder, q = state.q.reorder.toLowerCase(); state.report.reorder.filter((p) => !p.onOrder && p.orderQty > 0 && (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q))).forEach((p) => state.pick.add(p.id)); render(); return; }
+      if (t.id === 'pick-clear') { state.pick.clear(); render(); return; }
+      if (t.id === 'pick-mark') {
+        const lead = state.report.settings.leadDays, eta = isoDay(Date.now() + lead * 864e5);
+        const items = state.report.reorder.filter((p) => state.pick.has(p.id) && !p.onOrder && p.orderQty > 0).map((p) => ({ id: p.id, qty: p.orderQty, eta }));
+        if (!items.length) return; t.disabled = true;
+        await markOrdered(items, `Marked ${items.length} ordered, landing ${dateShort(Date.now() + lead * 864e5)}`); return;
+      }
+      if (t.id === 'oo-save' || t.id === 'oo-remove') {
+        const id = t.dataset.oo, by = ($('#oo-by')?.value || '').trim();
+        try { localStorage.setItem('sw-name', by); } catch { /* private window */ }
+        const item = t.id === 'oo-remove' ? { id, clear: true } : { id, qty: +String($('#oo-qty').value).replace(/[,\s]/g, ''), eta: $('#oo-eta').value };
+        t.disabled = true;
+        await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: [item], by }) });
+        toast(t.id === 'oo-remove' ? 'Order mark removed' : `Marked ordered: ${inr.format(item.qty)} pcs, lands ${dateShort(Date.parse(item.eta + 'T12:00:00Z') - off())}`);
+        await reloadReport(); openProduct(id); return;
+      }
       if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
       if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
       if (t.id === 'load-demo') { t.disabled = true; await api('/api/demo', { method: 'POST' }); toast('Demo data loaded'); await load(); }

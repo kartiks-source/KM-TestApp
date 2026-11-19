@@ -254,7 +254,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .pm:hover { background: var(--brand-wash); color: var(--brand); }
 .pimpact { display: inline-flex; gap: 14px; margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--soft); flex-wrap: wrap; }
 .pimpact b { color: var(--ink); }
-.pact { display: inline-flex; gap: 6px; margin-left: 6px; }
+.pact { display: inline-flex; gap: 6px; margin-left: auto; }
 .pact .btn { padding: 5px 12px; }
 
 /* resizable columns */
@@ -397,3 +397,63 @@ table.fixed td:first-child { max-width: none; }
   .headline .hbtn { margin-left: 0; }
   .colpick .menu { right: auto; left: 0; }
 }
+
+/* ---- "Mark ordered" (SW-012, LOGIC.md §6b): one button, one status ---- */
+.st.g-ordered { background: var(--brand-wash); color: var(--brand); }
+.po { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 600; color: var(--brand); background: var(--brand-wash2); border: 1px solid #CFE6F5; border-radius: 999px; padding: 1px 7px; white-space: nowrap; vertical-align: 1px; }
+.po.late { color: var(--lost); background: var(--lost-soft); border-color: #F5C6D0; }
+.pick { width: 15px; height: 15px; margin: 0 8px 0 0; vertical-align: -3px; accent-color: var(--brand); cursor: pointer; }
+.pick-sp { display: inline-block; width: 23px; }
+.btn.xs { padding: 3px 9px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tbl td .btn.xs { min-height: 0; }
+.bulk { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; background: var(--brand-wash); border: 1px solid #CFE6F5; border-radius: var(--r); padding: 8px 12px; font-size: 13px; }
+.bulk .btn:first-of-type { margin-left: auto; }
+.poform .porow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; }
+.poform label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.poform input { border: 1px solid var(--line-2); background: #fff; border-radius: 8px; padding: 6px 9px; font-weight: 500; width: 150px; }
+.poform #oo-qty { width: 90px; }
+.poform input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-wash); }
+.tact { margin-left: 10px; border: 0; background: none; color: #9CC7E6; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; }
+@media (max-width: 760px) {
+  .poform input, .poform #oo-qty { width: 100%; }
+  .poform label { flex: 1 1 140px; }
+  .poform .btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
+}
+
+/* ---- trend in the decision rows (SW-021) ---- */
+.spark .hit { fill: transparent; }
+.ispark { display: none; margin-right: 8px; vertical-align: middle; }
+.ispark .spark { display: inline-block; vertical-align: middle; }
+@media (max-width: 1399.98px) { .tbl .pw { display: none; } .tbl .ispark { display: inline-flex; } }
+.tbl .trc .tr { min-width: 46px; }
+.mspark { flex: none; margin-left: auto; align-self: center; }
+.mcard header .mspark + .mq, .mcard header .mspark + .st { margin-left: 0; }
+.base { align-self: center; }
+/* overview: three panels across on wide screens */
+.grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid3 > :last-child { grid-column: 1 / -1; } }
+@media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } }
+.mv { display: flex; flex-direction: column; gap: 6px; }
+.mv-h { margin: 2px 0 0; font-size: 12px; font-weight: 600; color: var(--soft); }
+.mv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto minmax(60px, auto); gap: 8px; align-items: center; cursor: pointer; }
+.mv-row .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--brand); }
+.mv-row .tr { min-width: 50px; text-align: right; }
+.mv-v { text-align: right; white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mv-v.up { color: #15803D; } .mv-v.down { color: var(--lost); }
+/* drawer: the 8 weekly numbers under the spark */
+.wk { width: 320px; max-width: 100%; }
+.wk .spark { width: 100%; height: auto; }
+.wknums { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); text-align: center; margin-top: 4px; }
+.wknums span { display: flex; flex-direction: column; line-height: 1.2; }
+.wknums b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wknums small { font-size: 10px; color: var(--faint); white-space: nowrap; }
+.wknums .wo b { color: var(--lost); }
+.mcard h3 { min-width: 0; }
+#drawer-title { padding-right: 36px; }
+
+/* stale-data banner (SW-019) */
+.stale { margin: 12px 22px 0; padding: 8px 14px; border-radius: var(--r); background: var(--lost-soft); border: 1px solid #F5C6D0; color: var(--ink); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.stale[hidden] { display: none; }
+.stale b { color: var(--lost); }
+.stale a { margin-left: auto; font-weight: 600; white-space: nowrap; }
+@media (max-width: 760px) { .stale { margin: 10px 10px 0; } .stale a { margin-left: 0; } }

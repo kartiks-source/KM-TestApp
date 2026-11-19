@@ -49,6 +49,8 @@ Without Shopify (Flow, Sheet, CSV), there's no catalog: stock now is the newest 
 
 **Is the data fresh?** With Shopify connected, the data counts as **stale when the last good pull is more than 45 minutes old** (three missed 15-minute pulls), or when there has been no good pull within 45 minutes of the app starting. Stale data turns the unauthenticated `/status` to 503 for the uptime monitor, and `/api/report` carries `freshness {lastPull, ageMin, stale}` for the "Data is X h old" banner. Without Shopify nothing is ever stale, because Flow, Sheet and CSV data arrive whenever the brand sends them.
 
+**Stale banner:** when Shopify is connected and the data is stale, a red banner above every page says "Data is X h old" with the time of the last pull and any error, and links to Data & settings. It reads the server's `/status` when available, else the pull time sent with the report; re-checked every 60 s; never shown on demo data.
+
 **Times without a time zone** (in a CSV, Sheet or Flow row) are read in the store's time zone (setting *Time zone*, India by default).
 
 ### 1a. CSV, Sheet and Flow rows: what's accepted and what's refused
@@ -222,6 +224,36 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Why:** the right lead time or cover differs by supplier, season and cash position. Seeing "cover 30 → 20 days frees ₹X of order value" lets a brand trade working capital against stock-out risk before committing.
 
+## 6b. Already ordered ("Mark ordered")
+
+**Rule:** when someone places a purchase order they press **Mark ordered** (on the Reorder row, in the product drawer, or for several ticked rows at once) and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
+
+> received = sum of stock increases recorded after the order was marked
+> still to come = ordered qty − received; once 90% has arrived the order is treated as complete and dropped
+> it **counts** when it's not past its date **and** lands before the shelf empties, or no later than an order placed today could (today + lead time), with a day's grace because dates are whole days
+> when it counts: the plan is worked out on stock now + still to come
+
+| Result | Shown as |
+|---|---|
+| stock + on order is enough (status would be OK) | **Ordered · lands 25 Nov**, off Order today, listed under the **Ordered** tab, order qty 0 |
+| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "Ordered 50 · lands 25 Nov" under the name |
+| past the expected date and less than 90% received | back in **Order today**, in red: "Ordered 200 · was due 25 Nov" |
+| lands after the shelf empties and later than a fresh order could | doesn't count: the row stays in Order today with the order shown, so you can decide whether to chase the supplier or order elsewhere |
+
+**Days left** still uses stock on hand only, because that's when the shelf empties. A product that's out of stock but ordered still counts in "out now" and keeps losing sales until the order lands.
+
+**Why:** the plan used to look at stock on hand only, so a line ordered yesterday showed up again today with the same quantity, which invites a duplicate purchase order. Counting units only when they land in time keeps the list honest: an order that arrives after the shelf is empty doesn't stop the stock-out. Detecting arrival from stock increases means nobody has to "receive" the order in a second step.
+
+**What else we considered:**
+- **Reading purchase orders from Shopify:** Shopify has no purchase-order API for most stores, and the app is read-only (ADR-0001).
+- **Clearing the mark on any stock increase:** a return of one piece would clear a 200-piece order. Counting units received is more exact.
+
+**When it can be wrong:**
+- **Returns or manual stock corrections after the mark** count as received, so a large return can make an order look partly arrived.
+- **A short shipment of up to 10%** is treated as complete.
+- **One record per variant:** marking again replaces the previous order (add the quantities yourself if there are two open orders).
+- Overstock (§7c) doesn't count units on order.
+
 ## 7. Slow sellers
 
 **Rule:** a product selling below *Ignore below* [0.2 units a day, about 6 a month] is a **Slow seller**. Slow sellers are left out of the reorder list and alerts, but their stock-outs and ₹ lost are still counted.
@@ -277,7 +309,8 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 ## 7d. Trend (sparkline and % change)
 
 **Rule:**
-- **Bars:** units sold in each of the last 8 rolling 7-day blocks ending now, oldest on the left, scaled to that product's best week. A **rose mark** under a bar means the product was out of stock for part of that week (hover a bar for units and days out).
+- **Bars:** units sold in each of the last 8 rolling 7-day blocks ending now, oldest on the left, scaled to that product's best week. A **rose mark** under a bar means the product was out of stock for part of that week. Hovering a bar gives the dates, units and days out ("13–19 Nov: 54 sold, out 2.3 d"); a block is labelled by the 7 calendar days it ends on, so the last one ends today.
+- **Where it shows:** in the decision rows, not only the drawer. On Products and Reorder, screens 1400 px and wider get a Trend cell (bars + % chip); narrower screens get small bars inside the product name cell (no extra column); phone cards show the bars at the right of the card header. The drawer shows the 8 weekly numbers under the bars, with the date each week starts.
 - **% change** = sales per **in-stock** day in the last 14 days vs the 14 days before:
 
   > rate = units sold ÷ days in stock (in that 14-day half)
@@ -285,7 +318,13 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 
   ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = in stock for at least 7 days of the earlier half with no sales, and 3 or more sold since. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
 - **Only time we have data for counts.** Days before a product's first record are "no data" (an empty bar), never "in stock, sold 0". Without this, a store with 20 days of history showed every product at +133%.
-- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown next to the Products tabs and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
+- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown once in the Products toolbar ("Typical product −38%") and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
+
+- **₹ effect (Overview "Moving" card):** what the trend is worth, so the card ranks by money rather than by %:
+
+  > ₹ effect = (recent rate − earlier rate) × average price paid × 30
+
+  i.e. ₹ a month of sales at the new pace, with the rates as above (sales per in-stock day, last 14 days vs the 14 before). It's set only where there's a trend to call (a % or **New**; for New the earlier rate is 0). The card lists the top 3 up and the top 3 down by this number. A +200% on a ₹300 candle matters less than +20% on a ₹40,000 sofa; ranking by ₹ shows that.
 
 **Why it's built this way (and what's wrong with plain week-on-week, as in the DAWBU sheet):**
 - **Stock-outs aren't demand.** A product out for half of last week shows −50% week-on-week, though shoppers wanted it as much as ever. Dividing by in-stock days removes that. It's the same principle as section 3.
@@ -297,6 +336,7 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 **When it can be wrong:**
 - **Promotions in either half** distort it, and so do price changes.
 - **Gifting and decor seasons,** where the store baseline helps but doesn't remove the effect entirely.
+- **₹ effect** assumes the new pace holds for a month and uses today's average price; read it as a size, not a forecast.
 
 ## 8. Restocking patterns
 
@@ -319,6 +359,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
+| Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
 Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them.
 
@@ -346,6 +387,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 **Whatever the source:**
 - ₹ lost is an estimate of demand, and an upper bound where substitutes exist (section 4).
 - One lead time for all products; no supplier minimums or case packs (section 6).
+- "Mark ordered" spots arrivals from stock increases, so returns after the mark count as received; one open order per variant (section 6b).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).

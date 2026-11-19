@@ -34,6 +34,7 @@ Google Sheet CSV / upload ───┘
 | `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
 | `src/backup.js` | backups of `store.json` in `/data/backups` (daily + before every replace/clear, 14 each), restore from `/data/restore.json` on start, `GET /api/export/backup.json`. Restore steps: `docs/RUNBOOK.md` |
+| `src/onorder.js` | "Mark ordered" records (`DATA_DIR/onorder.json`, one per variant: qty, eta, at, by) + `GET/POST /api/onorder`; the engine counts them (LOGIC.md §6b) |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
@@ -73,6 +74,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
 - Sprint 1 security (SW-008/009/010/016/017/018): login limiter + prod password check, session secret in `DATA_DIR/secret`, POST logout, ingest key in the `X-Ingest-Key` header only (≤ 500 rows/request), strict CSV import, security headers + same-origin writes, CSV formula guard, 400s for bad input.
 - Before the next deploy: Railway `ADMIN_PASSWORD` must be ≥ 12 characters (the Dockerfile sets `NODE_ENV=production`, so a shorter one stops the app starting). Flow workflows using `?key=` keep working but should move to the header.
+- Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" on Reorder rows, ticked rows and the drawer, with an Ordered tab (SW-012); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next

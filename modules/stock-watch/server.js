@@ -19,6 +19,7 @@ const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
 const backup = require('./src/backup');
+const onorder = require('./src/onorder');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -271,14 +272,16 @@ async function api(req, res, url) {
   if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
   if (a !== 'ok') return send(res, 401, { ok: false, error: 'Login needed' });
   if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
+  const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
+  if (oo) return send(res, oo.code, oo.body);
 
   if (p === '/api/report' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
-    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog }) });
+    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() }) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
@@ -314,9 +317,9 @@ async function api(req, res, url) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() });
     const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
     const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(rows.csvCell).join(',')).join('\n');
     return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
