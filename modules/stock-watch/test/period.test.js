@@ -82,6 +82,9 @@ test('yesterday when the period starts today (1st of the month): worked out from
   const y = P.yesterdayFor(stock, orders, { tzOffsetMin: IST }, r);
   assert.equal(y.day, '2026-10-31');
   assert.equal(y.sold, 1400);
+  /* the server passes the page's own options (incl. from = month start); they must not undo the 2-day window */
+  const y2 = P.yesterdayFor(stock, orders, { tzOffsetMin: IST }, r, { from: P.monthStart(first, IST), period: 'month', onOrder: {} });
+  assert.deepEqual(y2, y);
 });
 
 test('asOf drops rows after the cut', () => {

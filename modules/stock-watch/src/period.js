@@ -50,10 +50,13 @@ function yesterday(r, offMin) {
   return { day: key, sold: d.sold, lost: d.lost, ranOut: ranOut.size, back: back.size };
 }
 
-/** Yesterday for any report: uses it when it covers yesterday, else works out a 2-day report. */
+/** Yesterday for any report: uses it when it covers yesterday, else works out a 2-day report.
+ *  The page's own period (from / days) is dropped from `extra`: `from` would override days: 2 (engine) and
+ *  bring back the same window that didn't reach yesterday (This month on the 1st). */
 function yesterdayFor(stock, orders, settings, r, extra = {}) {
   const off = r.settings.tzOffsetMin;
-  return yesterday(r, off) || yesterday(report(stock, orders, settings, { ...extra, now: r.generatedAt, days: 2 }), off);
+  const { from, days, period, ...rest } = extra;
+  return yesterday(r, off) || yesterday(report(stock, orders, settings, { ...rest, now: r.generatedAt, days: 2 }), off);
 }
 
 module.exports = { monthStart, dayStart, range, asOf, yesterday, yesterdayFor };

@@ -212,12 +212,15 @@ function onOrderNow(rec, changes, now, stock, perDay, lead) {
   const counts = !late && eta <= Math.max(outAt, now + lead * DAY) + DAY;   // + 1 day: dates are whole days
   return { qty: num(rec.qty), remaining, eta, at: num(rec.at) || null, by: rec.by || null, late, counts };
 }
-/** plan() with an on-order record: units that count are added to stock; if that covers the need, status is "Ordered". */
+/** plan() with an on-order record: units that count are added to stock; if that covers the need, status is "Ordered".
+ *  An empty shelf stays "Out now" (Order today, counted in out now) until the order covers the need: units on the
+ *  way don't stop today's lost sales (LOGIC.md §6b); the order qty is only the extra still needed. */
 function planWithOrder(args, oo) {
   const base = plan(args);
   if (!oo || !oo.counts) return base;
   const withPo = plan({ ...args, stock: Math.max(0, args.stock) + oo.remaining });
-  return { daysLeft: base.daysLeft, status: withPo.status === 'OK' ? 'Ordered' : withPo.status, qty: withPo.qty };
+  const status = withPo.status === 'OK' ? 'Ordered' : args.stock <= 0 ? 'Out now' : withPo.status;
+  return { daysLeft: base.daysLeft, status, qty: withPo.qty };
 }
 
 const DEFAULT_SETTINGS = {

@@ -53,8 +53,28 @@ test('a date picked as "today + lead time" (end of that day) still counts', () =
 
 test('ordered too little: stays in Order today for the rest only', () => {
   const p = run(fixture(), { v1: { qty: 50, eta: now + 5 * D, at: now } });
-  assert.equal(p.status, 'Order now');                               // 50 pcs = 10 days ≤ lead 7 + buffer 3
+  assert.equal(p.status, 'Out now');                                 // shelf empty: still Out now (was "Order now")
   assert.equal(p.orderQty, 150);                                     // 200 − 50 already on order
+});
+
+test('out of stock with a part-filled order: stays Out now in Order today and in out now, whatever the shortfall', () => {
+  /* critic L2: 2/day, stock 0, PO landing in 3 days. 10 pcs → was "Order now", 25 pcs → "Order this week" (left
+     Order today with the shelf empty); 50 pcs covers the need → Ordered, still counted in out now. */
+  const stock = [{ t: now - 28 * D, variantId: 'v2', sku: 'S2', product: 'Vase', before: 60, now: 56, price: 500 }, { t: now - D, variantId: 'v2', before: 2, now: 0 }];
+  const orders = [];
+  for (let i = 0; i < 27; i++) orders.push({ t: now - 28 * D + i * D, order: '#' + i, variantId: 'v2', sku: 'S2', qty: 2, price: 500 });
+  const at = (qty) => E.report(stock, orders, {}, { now, onOrder: { v2: { qty, eta: now + 3 * D, at: now } } });
+  for (const qty of [10, 25]) {
+    const r = at(qty), p = r.products[0];
+    assert.equal(p.status, 'Out now', `PO ${qty}`);
+    assert.equal(p.orderQty, 80 - qty, `PO ${qty}: only the extra`);   // 2 × 40 − on order
+    assert.equal(r.totals.outNow, 1);
+    assert.equal(r.totals.orderToday, 1);
+  }
+  const full = at(80);
+  assert.equal(full.products[0].status, 'Ordered');
+  assert.equal(full.totals.outNow, 1);
+  assert.equal(full.totals.orderToday, 0);
 });
 
 test('past the expected date with nothing received: back in Order today, flagged late', () => {

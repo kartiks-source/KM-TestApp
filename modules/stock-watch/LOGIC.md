@@ -193,7 +193,7 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 - **Yesterday strip** (one line under the Overview headline): `Yesterday: ₹X sold · ₹Y lost · N ran out · M back`.
   - *Sold* and *lost* are yesterday's store-time calendar day, exactly the numbers on that day's bar in the daily chart (same rules as section 5, including the hour-of-day weighting for lost).
   - *Ran out* = products where a stock-out started yesterday; *back* = products where a stock-out ended yesterday (stock came back above 0). A product that ran out twice counts once.
-  - When the period doesn't reach back to yesterday (This month on the 1st), the strip is worked out from a separate 2-day report with the same settings.
+  - When the period doesn't reach back to yesterday (This month on the 1st), the strip is worked out from a separate 2-day report with the same settings. That report drops the page's own period (`from`), which would otherwise override the 2 days and leave the strip blank on the 1st (critic L1; `test/period.test.js`).
 - Why: the owner checks "how did yesterday go" every morning; a fixed rolling 30 days hides it, and month-to-date matches how targets and budgets are set (DAWBU sheet).
 - Considered: a "Yesterday" button in the picker (a one-day period). Rejected: one line answers the question without changing every other number on the screen.
 - When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
@@ -248,7 +248,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 | Result | Shown as |
 |---|---|
 | stock + on order is enough (status would be OK) | **Ordered · lands 25 Nov**, off Order today, listed under the **Ordered** tab, order qty 0 |
-| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "Ordered 50 · lands 25 Nov" under the name |
+| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "50 on order" next to the status. With the shelf empty it stays **Out now** however close the order gets (critic L2: a part-filled order used to move an empty shelf to *Order now* or even *This week*, off Order today and out of "out now") |
 | past the expected date and less than 90% received | back in **Order today**, in red: "Ordered 200 · was due 25 Nov" |
 | lands after the shelf empties and later than a fresh order could | doesn't count: the row stays in Order today with the order shown, so you can decide whether to chase the supplier or order elsewhere |
 
