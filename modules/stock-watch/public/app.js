@@ -469,7 +469,7 @@
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
         <div class="toolbar">${sh.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
         <div id="clear-confirm"></div></details>
-      <p class="phone-only"><a class="btn ghost" href="/logout">Sign out</a></p>`;
+      <form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`;
   }
 
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };

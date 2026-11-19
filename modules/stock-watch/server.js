@@ -3,7 +3,8 @@
  * Catalys · Stock-out Watch — server. Plain Node, no dependencies.
  *
  *   npm start            → http://localhost:4400
- *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected.
+ *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected,
+ *                          and with NODE_ENV=production (at least 12 characters).
  *   PORT, DATA_DIR       → optional
  *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
  */
@@ -20,6 +21,9 @@ const shopify = require('./src/shopify');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
+const PROD = process.env.NODE_ENV === 'production';
+const MIN_PASSWORD = 12;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // same folder as src/store.js
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
 const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
@@ -38,27 +42,69 @@ const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
-/* Login: a normal sign-in page sets a signed cookie (works in every browser, including
- * embedded ones that never show a Basic-auth pop-up). Basic auth still works for scripts. */
+
+/* ---------- login ----------
+ * A sign-in page sets a signed cookie (works in every browser, including embedded ones that never
+ * show a Basic-auth pop-up). Basic auth still works for scripts. One limiter covers both.
+ * Session cookies are signed with a key made from a random secret in DATA_DIR/secret (mode 600)
+ * plus a fingerprint of the password, so changing ADMIN_PASSWORD signs everyone out. */
 const COOKIE = 'sw_session';
 const SESSION_DAYS = 30;
-const sign = (exp) => crypto.createHmac('sha256', 'stock-watch-session|' + PASSWORD).update(String(exp)).digest('base64url');
+function loadSecret() {
+  const file = path.join(DATA_DIR, 'secret');
+  try { const v = fs.readFileSync(file, 'utf8').trim(); if (v.length >= 32) { try { fs.chmodSync(file, 0o600); } catch { /* read-only volume: still usable */ } return v; } }
+  catch (e) { if (e.code !== 'ENOENT') console.warn('session secret unreadable, making a new one:', e.code || e.message); }
+  const v = crypto.randomBytes(32).toString('hex');
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(file, v + '\n', { mode: 0o600 }); }
+  catch (e) { console.warn('session secret not saved (sign-ins end on restart):', e.code || e.message); }
+  return v;
+}
+let sessionKey = null;
+const keyOf = () => sessionKey || (sessionKey = crypto.createHmac('sha256', loadSecret()).update('password|' + crypto.createHash('sha256').update(PASSWORD).digest('hex')).digest());
+const sign = (exp) => crypto.createHmac('sha256', keyOf()).update('session|' + exp).digest('base64url');
 const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
 function sessionOk(req) {
   const [exp, sig] = cookieOf(req, COOKIE).split('.');
   return !!exp && +exp > Date.now() && !!sig && safeEqual(sig, sign(exp));
 }
-function authed(req) {
-  if (!PASSWORD) return true;
-  if (sessionOk(req)) return true;
-  const m = String(req.headers.authorization || '').match(/^Basic (.+)$/);
-  if (!m) return false;
-  const [, pass = ''] = Buffer.from(m[1], 'base64').toString().split(':');
-  return safeEqual(pass, PASSWORD);
-}
 const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
-const fails = new Map();   // ip → { n, until }: slow down password guessing
-const ipOf = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+/** Client IP: the last X-Forwarded-For hop (added by Railway's proxy; earlier hops are whatever the client sent), else the socket. */
+const ipOf = (req) => { const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); return hops.length ? hops[hops.length - 1] : String(req.socket.remoteAddress || ''); };
+
+/* Wrong-password limiter for the sign-in form and Basic auth: 10 per IP per 15 minutes, 100 across all IPs. */
+const LIMIT = { window: 15 * 60e3, perIp: 10, global: 100, maxIps: 10000 };
+const fails = new Map();   // ip → { n, until }
+let globalFails = [];      // times of the latest wrong passwords (at most LIMIT.global)
+let lastSweep = 0;
+const limiter = {
+  blocked(ip, now = Date.now()) {
+    if (now - lastSweep > 60e3) { lastSweep = now; for (const [k, f] of fails) if (now >= f.until) fails.delete(k); }
+    globalFails = globalFails.filter((t) => now - t < LIMIT.window);
+    const f = fails.get(ip);
+    return (!!f && f.n >= LIMIT.perIp && now < f.until) || globalFails.length >= LIMIT.global;
+  },
+  fail(ip, now = Date.now()) {
+    const f = fails.get(ip); const n = (f && now < f.until ? f.n : 0) + 1;
+    fails.delete(ip); fails.set(ip, { n, until: now + LIMIT.window });
+    while (fails.size > LIMIT.maxIps) fails.delete(fails.keys().next().value);   // oldest first
+    globalFails.push(now); if (globalFails.length > LIMIT.global) globalFails.shift();
+  },
+  ok(ip) { fails.delete(ip); },
+};
+/** 'ok' | 'none' (no credentials) | 'bad' (wrong password) | 'limited' (too many wrong tries). */
+function auth(req) {
+  if (!PASSWORD) return 'ok';
+  if (sessionOk(req)) return 'ok';
+  const m = String(req.headers.authorization || '').match(/^Basic\s+(\S+)$/i);
+  if (!m) return 'none';
+  const ip = ipOf(req);
+  if (limiter.blocked(ip)) return 'limited';
+  const raw = Buffer.from(m[1], 'base64').toString('utf8'); const i = raw.indexOf(':');
+  const pass = i >= 0 ? raw.slice(i + 1) : '';   // everything after the first ":" (passwords may contain ":")
+  if (safeEqual(pass, PASSWORD)) { limiter.ok(ip); return 'ok'; }
+  limiter.fail(ip); return 'bad';
+}
+const TOO_MANY = 'Too many wrong passwords. Wait 15 minutes.';
 function loginPage(error = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Stock-out Watch</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -172,7 +218,9 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
 
-  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
+  const a = auth(req);
+  if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
+  if (a !== 'ok') return send(res, 401, { ok: false, error: 'Login needed' });
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
@@ -226,7 +274,7 @@ async function api(req, res, url) {
 
 /* ---------- static ---------- */
 function serveStatic(req, res, url) {
-  if (!authed(req)) {
+  if (auth(req) !== 'ok') {
     if (url.pathname === '/favicon.svg') { res.writeHead(200, { 'content-type': TYPES['.svg'] }); return fs.createReadStream(path.join(PUBLIC, 'favicon.svg')).pipe(res); }
     return send(res, 302, '', 'text/plain', { location: '/login' });
   }
@@ -242,22 +290,23 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     if (url.pathname === '/login' && req.method === 'GET') {
-      if (!PASSWORD || authed(req)) return send(res, 302, '', 'text/plain', { location: '/' });
+      if (auth(req) === 'ok') return send(res, 302, '', 'text/plain', { location: '/' });
       return send(res, 200, loginPage(), 'text/html; charset=utf-8');
     }
     if (url.pathname === '/login' && req.method === 'POST') {
-      const ip = ipOf(req); const f = fails.get(ip);
-      if (f && f.n >= 10 && Date.now() < f.until) return send(res, 429, loginPage('Too many tries. Wait 15 minutes.'), 'text/html; charset=utf-8');
+      if (!PASSWORD) return send(res, 303, '', 'text/plain', { location: '/' });
+      const ip = ipOf(req);
+      if (limiter.blocked(ip)) return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
-      if (!PASSWORD || !safeEqual(pass, PASSWORD)) {
-        const n = (f && Date.now() < f.until ? f.n : 0) + 1; fails.set(ip, { n, until: Date.now() + 15 * 60e3 });
-        return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
-      }
-      fails.delete(ip);
+      if (!safeEqual(pass, PASSWORD)) { limiter.fail(ip); return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8'); }
+      limiter.ok(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
       return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
     }
-    if (url.pathname === '/logout') return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
+    if (url.pathname === '/logout') {   // POST only, so a link or image elsewhere can't sign people out
+      if (req.method !== 'POST') return send(res, 303, '', 'text/plain', { location: '/' });
+      return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
+    }
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
@@ -268,6 +317,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  if (PROD && PASSWORD.length < MIN_PASSWORD) {
+    console.error(`Refusing to start: NODE_ENV=production needs ADMIN_PASSWORD set, at least ${MIN_PASSWORD} characters.`);
+    process.exit(1);
+  }
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);

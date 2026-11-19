@@ -6,7 +6,9 @@ Read the root `AGENTS.md` first. This file is this module's working memory: keep
 
 Shows a D2C brand which products to reorder before they run out, and how many ₹ every stock-out cost in sales. The user is the brand or its agency. The question it answers: "was a bad sales day the ads, or an empty shelf?"
 
-Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; `/logout` signs out. Scripts can still use Basic auth (any user name).
+Live: https://web-production-6dd42b8d.up.railway.app. Opens a sign-in page; the password is the Railway variable `ADMIN_PASSWORD`. A signed cookie keeps you in for 30 days; Sign out is a POST to `/logout`. Scripts can still use Basic auth (any user name; the password may contain `:`).
+
+Login hardening (ADR-0011, SW-008): one limiter for the form and Basic auth, 10 wrong passwords per IP (last `X-Forwarded-For` hop, else the socket) and 100 across all IPs per 15 minutes → 429. With `NODE_ENV=production` (set in the Dockerfile) the app refuses to start unless `ADMIN_PASSWORD` is at least 12 characters. Cookies are signed with a random secret in `DATA_DIR/secret` (mode 600) plus a password fingerprint: changing the password signs everyone out; deleting the file does too.
 
 ## How data flows
 
