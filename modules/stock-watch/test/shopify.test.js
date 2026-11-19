@@ -81,13 +81,41 @@ test('keys: which source is set up, and what is missing', () => {
   try {
     for (const k of Object.keys(process.env)) if (/^(AZURE_|SHOPIFY_)/.test(k)) delete process.env[k];
     assert.equal(K.status().source, null);
-    Object.assign(process.env, { SHOPIFY_STORE: 'brand', SHOPIFY_ACCESS_TOKEN: 'shpat_x' });
-    assert.deepEqual([K.status().source, K.status().ready], ['variables', true]);
+    Object.assign(process.env, { SHOPIFY_STORE: 'brand', SHOPIFY_CLIENT_ID: 'cid' });
+    assert.deepEqual(K.status().missing, ['SHOPIFY_CLIENT_SECRET']);           // client ID without its secret
+    process.env.SHOPIFY_CLIENT_SECRET = 'sec';
+    assert.deepEqual([K.status().source, K.status().ready, K.status().kind], ['variables', true, 'client ID + secret']);
+    delete process.env.SHOPIFY_CLIENT_ID; delete process.env.SHOPIFY_CLIENT_SECRET;
+    process.env.SHOPIFY_ACCESS_TOKEN = 'shpat_x';
+    assert.deepEqual([K.status().ready, K.status().kind], [true, 'legacy token']);
     Object.assign(process.env, { AZURE_KEY_VAULT_URL: 'https://brand-kv.vault.azure.net', AZURE_TENANT_ID: 't' });
     const v = K.status();
-    assert.equal(v.source, 'vault'); assert.equal(v.secretName, 'shopify-brand'); assert.equal(v.ready, false);
+    assert.equal(v.source, 'vault'); assert.match(v.secretName, /shopify-brand-client-id/); assert.equal(v.ready, false);
     assert.deepEqual(v.missing, ['AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET']);
     process.env.AZURE_KEY_VAULT_URL = 'https://evil.example.com';
     assert.match(K.status().missing[0], /vault\.azure\.net/);
   } finally { process.env = keep; }
+});
+
+test('keys: client ID + secret are swapped for a 24-hour token, reused until near expiry; clear errors', async () => {
+  const keep = { ...process.env }, realFetch = global.fetch;
+  try {
+    for (const k of Object.keys(process.env)) if (/^(AZURE_|SHOPIFY_)/.test(k)) delete process.env[k];
+    Object.assign(process.env, { SHOPIFY_STORE: 'brand', SHOPIFY_CLIENT_ID: 'cid', SHOPIFY_CLIENT_SECRET: 'sec' });
+    let calls = 0, body = '';
+    global.fetch = async (url, opt) => {
+      calls++; body = String(opt.body);
+      assert.equal(url, 'https://brand.myshopify.com/admin/oauth/access_token');
+      return new Response(JSON.stringify({ access_token: 'tok1', scope: 'read_products,read_inventory,read_orders', expires_in: 86399 }), { status: 200 });
+    };
+    K.clear();
+    const a = await K.access();
+    assert.deepEqual([a.shop, a.token], ['brand', 'tok1']);
+    assert.match(body, /grant_type=client_credentials/); assert.match(body, /client_id=cid/);
+    await K.access(); assert.equal(calls, 1);                                   // cached
+    assert.match(K.grantedScopes(), /read_inventory/);
+    global.fetch = async () => new Response(JSON.stringify({ error: 'shop_not_permitted' }), { status: 400 });
+    K.clear();
+    await assert.rejects(K.access(), /same Shopify organisation/);
+  } finally { process.env = keep; global.fetch = realFetch; K.clear(); }
 });

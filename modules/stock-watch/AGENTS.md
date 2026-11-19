@@ -38,8 +38,9 @@ Google Sheet CSV / upload ───┘
 ## Shopify access (decided 19 Nov 2026)
 
 - Pull straight from Shopify into our own storage. **No connection to the dev team's database.**
-- Key source 1: **Azure Key Vault**, a dedicated vault with secret `shopify-<store>`. Variables: `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`.
-- Key source 2 (stop-gap): `SHOPIFY_STORE` + `SHOPIFY_ACCESS_TOKEN`.
+- Shopify credentials are the app's **client ID + client secret** (Dev Dashboard app, same Shopify organisation as the store); `src/keys.js` swaps them for a 24-hour token (client credentials grant) and renews it. A legacy `shpat_` token still works.
+- Key source 1: **Azure Key Vault**, secrets `shopify-<store>-client-id` and `shopify-<store>-client-secret` (or one `shopify-<store>` JSON secret). Variables: `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`.
+- Key source 2 (stop-gap): `SHOPIFY_STORE` + `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`.
 - Fallback if tokens can't be shared: our own read-only Shopify app (not built).
 - Scopes needed: `read_products`, `read_inventory`, `read_orders`.
 - Once a key source is set, the app refuses to start without `ADMIN_PASSWORD`, and demo data is turned off.
@@ -53,7 +54,7 @@ Google Sheet CSV / upload ───┘
 ```bash
 npm start          # http://localhost:4400 (demo data on first run)
 npm test
-ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_ACCESS_TOKEN=shpat_… npm start
+ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET=… npm start
 ```
 
 ## Status

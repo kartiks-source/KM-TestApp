@@ -3,16 +3,23 @@
  * Where the Shopify key comes from. The sync never knows; it calls access() and gets
  * { shop, token, source }. Swapping the source is a Railway variable change, not a code change.
  *
+ * Shopify credentials are normally an app's CLIENT ID + CLIENT SECRET (apps made in Shopify's Dev
+ * Dashboard). We swap them for a 24-hour access token (client credentials grant) and get a new one
+ * before it runs out. Shopify only allows this when the app and the store are in the same Shopify
+ * organisation, so for a brand's store the brand creates the app and shares its ID + secret.
+ * A legacy custom-app admin token (shpat_…) still works if that's all there is.
+ *
  *   1. Azure Key Vault (preferred)
  *        AZURE_KEY_VAULT_URL   https://<name>.vault.azure.net
  *        AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET   our own Azure login,
  *                              "Key Vault Secrets User" on that vault only
- *        SHOPIFY_STORE         <store> → reads the secret named shopify-<store>
- *      The secret holds the store's admin token (shpat_…), or JSON such as
- *      {"shop":"brand.myshopify.com","accessToken":"shpat_…"} or {"clientId":"…","clientSecret":"…"}.
+ *        SHOPIFY_STORE         <store>
+ *      Reads either two secrets, shopify-<store>-client-id and shopify-<store>-client-secret,
+ *      or one secret shopify-<store> holding JSON {"clientId":"…","clientSecret":"…"}
+ *      (or a legacy shpat_… token).
  *
  *   2. Railway variables (stop-gap)
- *        SHOPIFY_STORE + SHOPIFY_ACCESS_TOKEN, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
+ *        SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET   (legacy: SHOPIFY_ACCESS_TOKEN)
  *
  * Keys live in memory only (30 minutes), never on disk, in logs or in the browser.
  * clear() forgets them, so a token Shopify rejects is read again straight away.
@@ -25,7 +32,8 @@ const STORE_RE = /^[a-z0-9][a-z0-9-]{0,60}$/i;
 
 let cache = null;                   // { value, exp }
 let aad = null;                     // { token, exp }
-let shopToken = null;               // { token, exp } from a client-credentials exchange
+let shopToken = null;               // { token, exp } from a client-credentials exchange (24 h)
+let scopes = '';                    // scopes Shopify granted, from the last exchange
 
 const env = (k) => String(process.env[k] || '').trim();
 const cleanShop = (s) => String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.myshopify\.com$/, '');
@@ -39,13 +47,13 @@ function status() {
     if (!VAULT_RE.test(vault)) missing.push('AZURE_KEY_VAULT_URL must look like https://<name>.vault.azure.net');
     for (const k of ['AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET']) if (!env(k)) missing.push(k);
     if (!STORE_RE.test(store)) missing.push('SHOPIFY_STORE');
-    return { source: 'vault', store, secretName: `shopify-${store}`, ready: !missing.length, missing };
+    return { source: 'vault', store, secretName: `shopify-${store}-client-id / -client-secret (or shopify-${store})`, ready: !missing.length, missing };
   }
-  if (env('SHOPIFY_ACCESS_TOKEN') || env('SHOPIFY_CLIENT_ID')) {
+  if (env('SHOPIFY_CLIENT_ID') || env('SHOPIFY_CLIENT_SECRET') || env('SHOPIFY_ACCESS_TOKEN')) {
     const missing = [];
     if (!STORE_RE.test(store)) missing.push('SHOPIFY_STORE');
-    if (!env('SHOPIFY_ACCESS_TOKEN') && !env('SHOPIFY_CLIENT_SECRET')) missing.push('SHOPIFY_CLIENT_SECRET');
-    return { source: 'variables', store, ready: !missing.length, missing };
+    if (!env('SHOPIFY_ACCESS_TOKEN')) for (const k of ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET']) if (!env(k)) missing.push(k);
+    return { source: 'variables', store, ready: !missing.length, missing, kind: env('SHOPIFY_ACCESS_TOKEN') && !env('SHOPIFY_CLIENT_ID') ? 'legacy token' : 'client ID + secret' };
   }
   return { source: null, store, ready: false, missing: [] };
 }
@@ -73,6 +81,17 @@ async function readVaultSecret(name) {
   return String(j.value).trim();
 }
 
+/** Vault: shopify-<store>-client-id + shopify-<store>-client-secret, else one shopify-<store> secret. */
+async function readVaultCredentials(store) {
+  try {
+    const [clientId, clientSecret] = await Promise.all([readVaultSecret(`shopify-${store}-client-id`), readVaultSecret(`shopify-${store}-client-secret`)]);
+    return { clientId, clientSecret };
+  } catch (e) {
+    if (!/isn't in the vault/.test(e.message)) throw e;
+    return parseSecret(await readVaultSecret(`shopify-${store}`));
+  }
+}
+
 /** A secret's value → { shop?, token?, clientId?, clientSecret? }. */
 function parseSecret(value) {
   const v = String(value || '').trim();
@@ -95,7 +114,13 @@ async function exchange(shop, clientId, clientSecret) {
     body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.access_token) throw new Error(`Shopify refused the app's client ID/secret (HTTP ${r.status})`);
+  if (!r.ok || !j.access_token) {
+    const why = String(j.error || j.errors || '').toLowerCase();
+    if (why.includes('shop_not_permitted')) throw new Error('Shopify: this app isn’t in the same Shopify organisation as the store. The brand must create the app in its own Dev Dashboard, install it, and share that client ID + secret');
+    if (r.status === 400 || r.status === 401 || why.includes('invalid_client')) throw new Error('Shopify refused the client ID / secret: check both, and that the app is installed on the store');
+    throw new Error(`Shopify token exchange failed (HTTP ${r.status})`);
+  }
+  scopes = String(j.scope || '');
   shopToken = { token: j.access_token, exp: Date.now() + Math.max(300, +j.expires_in || 86399) * 1000 - 5 * 60e3 };
   return shopToken.token;
 }
@@ -106,18 +131,18 @@ async function access() {
   if (!s.source) throw new Error('Shopify isn’t connected');
   if (!s.ready) throw new Error(`Missing Railway variables: ${s.missing.join(', ')}`);
   if (cache && Date.now() < cache.exp) return cache.value;
-  const raw = s.source === 'vault'
-    ? parseSecret(await readVaultSecret(s.secretName))
-    : { token: env('SHOPIFY_ACCESS_TOKEN'), clientId: env('SHOPIFY_CLIENT_ID'), clientSecret: env('SHOPIFY_CLIENT_SECRET') };
+  const raw = s.source === 'vault' ? await readVaultCredentials(s.store)
+    : { token: env('SHOPIFY_CLIENT_ID') ? '' : env('SHOPIFY_ACCESS_TOKEN'), clientId: env('SHOPIFY_CLIENT_ID'), clientSecret: env('SHOPIFY_CLIENT_SECRET') };
   const shop = cleanShop(raw.shop) || s.store;
   if (!STORE_RE.test(shop)) throw new Error('Store name is not valid');
   const token = raw.token || (raw.clientId && raw.clientSecret ? await exchange(shop, raw.clientId, raw.clientSecret) : '');
-  if (!token) throw new Error(s.source === 'vault' ? `Secret "${s.secretName}" has no Shopify token in it` : 'No Shopify token');
+  if (!token) throw new Error(s.source === 'vault' ? `No Shopify client ID + secret found for "${s.store}" in the vault` : 'No Shopify credentials');
   const value = { shop, token, source: s.source };
   cache = { value, exp: Date.now() + TTL };
   return value;
 }
 
 function clear() { cache = null; shopToken = null; }
+const grantedScopes = () => scopes;
 
-module.exports = { access, status, clear, parseSecret, cleanShop };
+module.exports = { access, status, clear, parseSecret, cleanShop, grantedScopes };

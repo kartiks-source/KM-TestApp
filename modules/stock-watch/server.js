@@ -5,7 +5,7 @@
  *   npm start            → http://localhost:4400
  *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected.
  *   PORT, DATA_DIR       → optional
- *   Shopify (read-only) → see src/keys.js: Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_ACCESS_TOKEN
+ *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -120,7 +120,7 @@ function loadDemo() {
 let shopifyRun = null;
 function shopifyStatus() {
   const k = keys.status(); const st = store.load().shopify;
-  return { source: k.source, store: k.store, secretName: k.secretName || null, ready: k.ready, missing: k.missing,
+  return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
     lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun,
     backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
 }

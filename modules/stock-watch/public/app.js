@@ -98,10 +98,11 @@
       return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · not connected</h2>
         <p class="muted">Connect a store and the app reads stock every 15 minutes and new orders since the last read, straight from Shopify. It only ever reads: every call is checked, and anything that could change the store is refused. Read permissions needed: ${scopes}.</p>
         <p class="muted">Set these as Railway variables (the key is never typed into this page):</p>
-        <dl class="kv"><dt>Azure Key Vault (preferred)</dt><dd><span class="mono">AZURE_KEY_VAULT_URL, AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, SHOPIFY_STORE</span>. Reads the secret <span class="mono">shopify-&lt;store&gt;</span>.</dd>
-          <dt>Stop-gap</dt><dd><span class="mono">SHOPIFY_STORE, SHOPIFY_ACCESS_TOKEN</span></dd></dl></div>`;
+        <dl class="kv"><dt>What Shopify gives</dt><dd>The app’s <b>client ID + client secret</b> (Shopify Dev Dashboard). We swap them for a 24-hour token and renew it automatically. The app must be in the <b>same Shopify organisation</b> as the store, so the brand creates and installs it and shares the ID + secret.</dd>
+          <dt>Azure Key Vault (preferred)</dt><dd><span class="mono">AZURE_KEY_VAULT_URL, AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, SHOPIFY_STORE</span>. Reads secrets <span class="mono">shopify-&lt;store&gt;-client-id</span> and <span class="mono">shopify-&lt;store&gt;-client-secret</span>.</dd>
+          <dt>Stop-gap</dt><dd><span class="mono">SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET</span></dd></dl></div>`;
     }
-    const where = sh.source === 'vault' ? `Azure Key Vault, secret <span class="mono">${esc(sh.secretName)}</span>` : 'Railway variables (stop-gap)';
+    const where = sh.source === 'vault' ? `Azure Key Vault, <span class="mono">${esc(sh.secretName)}</span>` : `Railway variables (stop-gap) · ${esc(sh.kind || '')}`;
     return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · ${esc(sh.store || '')}</h2>
       <dl class="kv"><dt>Key from</dt><dd>${where}</dd>
         <dt>Status</dt><dd>${!sh.ready ? `<span style="color:#E0506E">Missing: ${esc(sh.missing.join(', '))}</span>` : sh.running ? 'Pulling now…' : sh.lastError ? `<span style="color:#E0506E">${esc(sh.lastError)}</span>${sh.lastTry ? ` · tried ${dt(sh.lastTry)}` : ''}` : sh.lastSync ? `OK · last read ${dt(sh.lastSync)}` : 'First pull pending'}</dd>

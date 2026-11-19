@@ -3,6 +3,11 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (trend + Shopify credentials)
+- Trend column (Reorder, Products, phone cards): 8 rolling weekly bars with stock-out marks, % change in sales per in-stock day (last 14 vs prior 14), store baseline; Rising / Falling tabs. LOGIC.md 7d, with why plain week-on-week (DAWBU sheet) misleads.
+- Shopify credentials: client ID + secret is now the main path (Dev Dashboard apps, 24-hour token via client credentials grant, renewed automatically); clear error for `shop_not_permitted` (app and store must be in the same Shopify organisation). Key Vault reads `shopify-<store>-client-id` / `-client-secret`. Legacy `shpat_` still works. Tests with a fake Shopify.
+- Critic rule added (AGENTS.md rule 10, docs/ORCA.md).
+
 ## 2026-11-19 · stock-watch (money view: best sellers, profit, overstock, live assumptions)
 - Overview KPIs are now money-first: sold, sales lost (% of demand), profit lost, best sellers at risk, cash to order now, cash in overstock.
 - Best sellers = ABC by revenue (A = first 80% of sales); A badge everywhere; A first within each reorder status; Products tabs "Best sellers", "Best at risk", "Overstock".

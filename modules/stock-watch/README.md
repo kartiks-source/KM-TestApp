@@ -59,12 +59,14 @@ The app pulls straight from Shopify into its own storage. It never connects to a
 - **Gentle on the store:** it pauses whenever less than half of Shopify's request budget is left, so other apps on the store aren't slowed down.
 - **Keys:** kept in memory for 30 minutes, never written to disk, logs or the page. If Shopify rejects a token, it's fetched again at once, so a rotated key is picked up without a restart.
 
-Where the key comes from (Railway variables, nothing typed into the page):
+**Credentials:** Shopify gives an app a **client ID + client secret** (apps created in the Shopify Dev Dashboard). The app swaps them for a 24-hour access token (the client credentials grant) and renews it automatically. Shopify only allows this when the app and the store are in the **same Shopify organisation**, so for a brand's store the brand creates the app, installs it with the three read scopes, and shares the ID + secret. Otherwise Shopify answers `shop_not_permitted` and the page says so.
+
+Where the credentials come from (Railway variables, nothing typed into the page):
 
 | Source | Variables |
 |---|---|
-| **Azure Key Vault** (preferred) | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads the secret `shopify-<SHOPIFY_STORE>`. Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
-| **Railway variables** (stop-gap) | `SHOPIFY_STORE` + `SHOPIFY_ACCESS_TOKEN` (or `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`). Move to Key Vault and rotate the key once the vault is ready. |
+| **Azure Key Vault** (preferred) | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads `shopify-<SHOPIFY_STORE>-client-id` and `shopify-<SHOPIFY_STORE>-client-secret` (or one `shopify-<SHOPIFY_STORE>` secret with JSON). Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
+| **Railway variables** (stop-gap) | `SHOPIFY_STORE` + `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` (legacy: `SHOPIFY_ACCESS_TOKEN`). Move to Key Vault and rotate the key once the vault is ready. |
 
 `SHOPIFY_STORE` is the part before `.myshopify.com`. Once either source is set, the app won't start without `ADMIN_PASSWORD`, and demo data is turned off.
 

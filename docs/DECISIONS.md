@@ -2,13 +2,18 @@
 
 Newest first. Each one: date, decision, who decided, why.
 
+## 2026-11-19: Shopify credentials are client ID + secret
+- Shopify apps from the Dev Dashboard give a **client ID + client secret**, not a permanent `shpat_` token. We swap them for a 24-hour token (client credentials grant: POST `https://{store}.myshopify.com/admin/oauth/access_token`, `grant_type=client_credentials`) and request a new one before expiry; there's no refresh token. Source: Shopify docs, "Client credentials grant".
+- **Constraint:** the grant only works when the app and the store are in the same Shopify organisation. For a brand's store, the brand creates the app in its Dev Dashboard, installs it with read scopes only, and shares the ID + secret (via Key Vault: `shopify-<store>-client-id`, `shopify-<store>-client-secret`). Our own org's app can't reach a client store this way (`shop_not_permitted`).
+- Legacy `shpat_` tokens still work if a brand only has one.
+
 ## 2026-11-19: Look and feel follows Performity
 - Modules use the Performity app's visual language so they can sit beside it: Inter, brand blue #0978BE, pale blue page #EEF3F8, white cards, icon rail, top bar with store picker + Data Sync pill. Source: product screenshots on the Performity marketing site (catalysAnalyst/performity-site). Tokens live in `modules/stock-watch/public/styles.css`.
 - Code conventions not aligned yet: the Performity app repo isn't shared with us.
 
 ## 2026-11-19: Shopify access for standalone apps
 - **Decided (founder):** no connection to the dev team's database; the app's data never flows through their Azure DB. Each app pulls from Shopify into its own storage.
-- **Key source:** a separate Azure Key Vault holding copies of the store tokens (secret `shopify-<store>`), read-only access for our Azure login. Fallback: our own read-only Shopify app. Last resort: one-time secret link into a Railway variable, rotated later. Not a Google Sheet.
+- **Key source:** a separate Azure Key Vault holding each store's app client ID + secret (see the credentials decision above), read-only access for our Azure login. Fallback: our own read-only Shopify app. Last resort: one-time secret link into a Railway variable, rotated later. Not a Google Sheet.
 - **Read-only** is enforced in our code (only GraphQL queries pass), because a shared token may carry write permissions.
 - Full write-up: Shopify Access Options page (claude.ai artifact WtFwqSrSGTDzvPxm13RoG6).
 
