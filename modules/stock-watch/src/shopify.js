@@ -69,7 +69,7 @@ async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
 const STOCK_Q = `query Stock($after: String) {
   productVariants(first: 250, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { title status productType } }
+    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { title status productType vendor } }
   }
 }`;
 
@@ -112,7 +112,7 @@ function diffStock(variants, lastQty, t) {
     next[id] = now;
     const before = Object.prototype.hasOwnProperty.call(lastQty, id) ? lastQty[id] : null;
     if (before === now) continue;
-    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(Number(v.inventoryItem?.unitCost?.amount) > 0 ? { cost: Number(v.inventoryItem.unitCost.amount) } : {}) });
+    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant: v.title === 'Default Title' ? '' : (v.title || ''), before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(v.product?.vendor ? { vendor: v.product.vendor } : {}), ...(Number(v.inventoryItem?.unitCost?.amount) > 0 ? { cost: Number(v.inventoryItem.unitCost.amount) } : {}) });
   }
   return { rows, lastQty: next };
 }

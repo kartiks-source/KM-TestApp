@@ -17,6 +17,8 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Push, Decide (LOGIC.md §13)
+const decide = require('./src/decide');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -171,13 +173,16 @@ async function api(req, res, url) {
 
   if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
 
+  const dc = await decide.handle(req, p, readBody, (id) => engine.report(d.stock, d.orders, d.settings, { days: 30 }).products.find((x) => String(x.id) === id)?.perDay);   // SW-032
+  if (dc) return send(res, dc.code, dc.body);
   if (p === '/api/report' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
+    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days }), { decisions: decide.all() });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
-    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
+    const S = { ...engine.DEFAULT_SETTINGS, ...settingsFor(url, d.settings) }, now = Date.now();
+    return send(res, 200, { ok: true, ...helpers.enrichDetail(engine.productDetail(id, d.stock, d.orders, S, { days, now }), S, now) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
@@ -210,13 +215,12 @@ async function api(req, res, url) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); decide.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
-    const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
-    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
-    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(q).join(',')).join('\n');
-    return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
+    /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §13b) */
+    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days }));
+    const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
+    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
   return fail(res, 404, 'Not found');
 }
