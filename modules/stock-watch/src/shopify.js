@@ -106,7 +106,7 @@ const vid = (gid) => String(gid || '').replace(/^gid:\/\/shopify\/ProductVariant
  * Inactive = product archived or draft, or stock not tracked; it's kept in the catalog, marked.
  */
 function diffStock(variants, lastQty, t) {
-  const rows = []; const next = {}; const catalog = {};
+  const rows = []; const next = {}; const catalog = {}; const excluded = { notActive: 0, untracked: 0 };   // counted for the run history (SW-030)
   for (const v of variants) {
     const id = vid(v.id); const now = Number(v.inventoryQuantity);
     if (!id) continue;
@@ -120,13 +120,14 @@ function diffStock(variants, lastQty, t) {
       status: tracked ? status : (status === 'ACTIVE' ? 'UNTRACKED' : status), tracked, active: tracked && status === 'ACTIVE',
       stock: Number.isFinite(now) ? now : null, seenAt: t,
     };
+    if (!tracked) excluded.untracked++; else if (status !== 'ACTIVE') excluded.notActive++;
     if (!catalog[id].active || !Number.isFinite(now)) continue;
     next[id] = now;
     const before = Object.prototype.hasOwnProperty.call(lastQty, id) ? lastQty[id] : null;
     if (before === now) continue;
     rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant, before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(cost ? { cost } : {}) });
   }
-  return { rows, lastQty: next, catalog };
+  return { rows, lastQty: next, catalog, excluded };
 }
 
 /** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */

@@ -5,6 +5,7 @@
  *   npm start            → http://localhost:4400
  *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected,
  *                          and with NODE_ENV=production (at least 12 characters).
+ *   VIEW_PASSWORD=...    → optional second password: sees everything, changes nothing (src/access.js, SW-029)
  *   PORT, DATA_DIR       → optional
  *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
  */
@@ -20,12 +21,17 @@ const keys = require('./src/keys');
 const shopify = require('./src/shopify');
 const backup = require('./src/backup');
 const onorder = require('./src/onorder');
+const access = require('./src/access');
+const audit = require('./src/audit');
+const runs = require('./src/runs');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
 const PROD = process.env.NODE_ENV === 'production';
 const MIN_PASSWORD = 12;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // same folder as src/store.js
+const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
+const PASSWORDS = { admin: PASSWORD, view: VIEW_PASSWORD };
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
 const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
@@ -75,10 +81,9 @@ let sessionKey = null;
 const keyOf = () => sessionKey || (sessionKey = crypto.createHmac('sha256', loadSecret()).update('password|' + crypto.createHash('sha256').update(PASSWORD).digest('hex')).digest());
 const sign = (exp) => crypto.createHmac('sha256', keyOf()).update('session|' + exp).digest('base64url');
 const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
-function sessionOk(req) {
-  const [exp, sig] = cookieOf(req, COOKIE).split('.');
-  return !!exp && +exp > Date.now() && !!sig && safeEqual(sig, sign(exp));
-}
+const sessionRole = (req) => access.cookieRole(cookieOf(req, COOKIE), sign, safeEqual, { view: VIEW_PASSWORD });
+/** Who made a change, for the settings log: the role, plus "script" when it came with Basic auth. */
+const whoOf = (req, role) => (req.headers.authorization && !sessionRole(req) ? `${role} (script)` : role);
 const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
 /** Client IP: the last X-Forwarded-For hop (added by Railway's proxy; earlier hops are whatever the client sent), else the socket. */
 const ipOf = (req) => { const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); return hops.length ? hops[hops.length - 1] : String(req.socket.remoteAddress || ''); };
@@ -106,10 +111,10 @@ const limiter = {
   },
   ok(ip) { fails.delete(ip); },
 };
-/** 'ok' | 'none' (no credentials) | 'bad' (wrong password) | 'limited' (too many wrong tries). */
+/** 'admin' | 'view' (signed in, SW-029) | 'none' (no credentials) | 'bad' (wrong password) | 'limited' (too many wrong tries). */
 function auth(req) {
-  if (!PASSWORD) return 'ok';
-  if (sessionOk(req)) return 'ok';
+  if (!PASSWORD) return access.ADMIN;
+  const r = sessionRole(req); if (r) return r;
   const m = String(req.headers.authorization || '').match(/^Basic\s+(\S+)$/i);
   if (!m) return 'none';
   const ip = ipOf(req);
@@ -117,10 +122,12 @@ function auth(req) {
   if (block === 'ip') return 'limited';
   const raw = Buffer.from(m[1], 'base64').toString('utf8'); const i = raw.indexOf(':');
   const pass = i >= 0 ? raw.slice(i + 1) : '';   // everything after the first ":" (passwords may contain ":")
-  if (safeEqual(pass, PASSWORD)) { limiter.ok(ip); return 'ok'; }
+  const role = access.roleForPassword(pass, PASSWORDS, safeEqual);
+  if (role) { limiter.ok(ip); return role; }
   limiter.fail(ip); return block ? 'limited' : 'bad';
 }
 const TOO_MANY = 'Too many wrong passwords. Wait 15 minutes.';
+const signedIn = (a) => a === access.ADMIN || a === access.VIEW;
 function loginPage(error = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Stock-out Watch</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -137,13 +144,14 @@ ${error ? `<p class="e" role="alert">${error}</p>` : ''}
 <div><label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="current-password" autofocus required></div>
 <button type="submit">Sign in</button></form></body></html>`;
 }
-const publicSettings = (s) => ({ ...s });
+const publicSettings = (s, role = access.ADMIN) => access.visibleSettings(s, role);
 /* The planning assumptions people can tweak. Same limits whether trying a value or saving it. */
 const LIMITS = { leadDays: [0, 180], coverDays: [1, 365], safetyDays: [0, 60], demandWindowDays: [7, 90], smallTopUpDays: [1, 60], minPerDay: [0, 100], tzOffsetMin: [-720, 840] };
+const PLAN_KEYS = ['leadDays', 'coverDays', 'safetyDays'];   // the three shown under Plan settings
 const clampSetting = (k, v) => (v == null || String(v).trim() === '' || !Number.isFinite(+v) ? undefined : Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], +v)));
 /** Saved settings, with any ?leadDays=… style trial values on top (not saved). */
 function settingsFor(url, saved) {
-  const out = { ...saved };
+  const out = access.visibleSettings(saved, access.VIEW);   // reports echo these back; they never need the Flow key, for any role (SW-029)
   for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, url.searchParams.get(k)); if (v !== undefined) out[k] = v; }
   return out;
 }
@@ -160,6 +168,7 @@ async function syncSheet() {
   if (!s.sheetStockCsv && !s.sheetOrderCsv) return { skipped: true };
   if (keys.status().source) return { skipped: true, reason: ONE_SOURCE };   // Shopify is the only source (SW-006)
   const out = { stock: 0, orders: 0 };
+  const run = runs.begin('sheet');   // run history (SW-030)
   try {
     for (const [kind, url] of [['stock', s.sheetStockCsv], ['order', s.sheetOrderCsv]]) {
       if (!url) continue;
@@ -171,9 +180,11 @@ async function syncSheet() {
       catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows, 'sheet'); else out.orders = store.add('orders', parsed.rows, 'sheet');
     }
+    Object.assign(run, { stock: out.stock, lines: out.orders }); runs.finish(store.load(), run);
     store.setSync({ lastSync: Date.now(), lastSyncError: null });
     return out;
   } catch (e) {
+    Object.assign(run, { stock: out.stock, lines: out.orders }); runs.finish(store.load(), run, e.message);
     store.setSync({ lastSync: Date.now(), lastSyncError: e.message });
     throw e;
   }
@@ -190,10 +201,11 @@ function loadDemo() {
 
 /* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ---------- */
 let shopifyRun = null;
+let shopifyProgress = null;   // live counts of the running pull (SW-030)
 function shopifyStatus() {
   const k = keys.status(); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
-    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun,
+    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun, progress: runs.progress(shopifyProgress),
     backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
 }
 function syncShopify() {
@@ -201,6 +213,7 @@ function syncShopify() {
   if (shopifyRun) return shopifyRun;
   shopifyRun = (async () => {
     const started = Date.now();
+    const run = shopifyProgress = runs.begin('shopify', started);
     try {
       if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
       const nm = store.load().settings.storeName;
@@ -208,18 +221,21 @@ function syncShopify() {
       const s = await shopify.pullStock(store.load().shopify.lastQty);
       const stock = store.add('stock', s.rows, 'shopify');
       store.setCatalog(s.catalog, started);   // current stock + attributes, replaced whole (SW-002)
+      Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
       store.setShopify({ lastQty: s.lastQty });
       let orders = 0;
       await shopify.pullOrders(store.load().shopify.ordersCursor, {
-        onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows, 'shopify').added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
+        onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
       });
+      runs.finish(store.load(), run);
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
       return { stock, orders };
     } catch (e) {
+      runs.finish(store.load(), run, e.message);
       store.setShopify({ lastTry: started, lastError: e.message });
       throw e;
-    } finally { shopifyRun = null; }
+    } finally { shopifyRun = null; shopifyProgress = null; }
   })();
   return shopifyRun;
 }
@@ -274,7 +290,11 @@ async function api(req, res, url) {
 
   const a = auth(req);
   if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
-  if (a !== 'ok') return send(res, 401, { ok: false, error: 'Login needed' });
+  if (!signedIn(a)) return send(res, 401, { ok: false, error: 'Login needed' });
+  const role = a;
+  /* view-only (SW-029): one gate before every route, Sprint 1's included (Mark ordered, settings, import, backup) */
+  if (access.refused(role, req.method, p)) return fail(res, 403, access.READ_ONLY);
+  if (role !== access.ADMIN && p === '/api/export/backup.json') return fail(res, 403, access.READ_ONLY);   // the whole store: ingest key, change log
   if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
   const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
   if (oo) return send(res, oo.code, oo.body);
@@ -287,7 +307,7 @@ async function api(req, res, url) {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() }) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
     const run = syncShopify();
@@ -301,6 +321,7 @@ async function api(req, res, url) {
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
     if (b.newIngestKey === true) { patch.ingestKey = crypto.randomBytes(16).toString('hex'); patch.ingestKeyAt = Date.now(); }
+    audit.record(d, audit.diff(d.settings, patch).filter((c) => c.key !== 'ingestKeyAt'), whoOf(req, role));   // saved with the settings below; the key's date rides with the masked key entry
     return send(res, 200, { ok: true, settings: store.setSettings(patch) });
   }
   if (p === '/api/import' && req.method === 'POST') {
@@ -334,7 +355,7 @@ async function api(req, res, url) {
 
 /* ---------- static ---------- */
 function serveStatic(req, res, url) {
-  if (auth(req) !== 'ok') {
+  if (!signedIn(auth(req))) {
     if (url.pathname === '/favicon.svg') { res.writeHead(200, { 'content-type': TYPES['.svg'] }); return fs.createReadStream(path.join(PUBLIC, 'favicon.svg')).pipe(res); }
     return send(res, 302, '', 'text/plain', { location: '/login' });
   }
@@ -378,7 +399,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
     if (url.pathname === '/health') { const h = store.health(); return send(res, h.ok ? 200 : 503, { ok: h.ok, ...(h.ok ? {} : { error: h.loadError || `Saving data fails: ${h.lastSaveError?.message}` }) }); }
     if (url.pathname === '/login' && req.method === 'GET') {
-      if (auth(req) === 'ok') return send(res, 302, '', 'text/plain', { location: '/' });
+      if (signedIn(auth(req))) return send(res, 302, '', 'text/plain', { location: '/' });
       return send(res, 200, loginPage(), 'text/html; charset=utf-8');
     }
     if (url.pathname === '/login' && req.method === 'POST') {
@@ -387,13 +408,14 @@ const server = http.createServer(async (req, res) => {
       const block = limiter.blocked(ip);
       if (block === 'ip') return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
-      if (!safeEqual(pass, PASSWORD)) {
+      const role = access.roleForPassword(pass, PASSWORDS, safeEqual);
+      if (!role) {
         limiter.fail(ip);
         return block ? send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' }) : send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
       }
       limiter.ok(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
-      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
+      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${access.cookieValue(exp, role, sign, VIEW_PASSWORD)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
     }
     if (url.pathname === '/logout') {   // POST only, so a link or image elsewhere can't sign people out
       if (req.method !== 'POST') return send(res, 303, '', 'text/plain', { location: '/' });
@@ -437,6 +459,8 @@ if (require.main === module) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
   }
+  const accessProblem = access.configProblem(PASSWORDS);
+  if (accessProblem) { console.error('Refusing to start: ' + accessProblem); process.exit(1); }
   let d;
   try { d = store.load(); } catch (e) {
     console.error(`Refusing to start: ${e.message}`);

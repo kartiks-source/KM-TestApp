@@ -406,3 +406,40 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 ## 12. Differences in the Google Sheet version
 
 `modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds. Every difference is listed in one place, [`../stock-watch-sheets/LOGIC.md`](../stock-watch-sheets/LOGIC.md), so this section doesn't repeat them. `test/parity.test.js` runs the same fixtures through both and fails `npm test` on any difference that isn't on that list (same status and order quantity, ₹ lost within 2%).
+
+## 13. Who can change what (view-only sign-in, settings change log)
+
+Code: `src/access.js`, `src/audit.js` (SW-029, ADR-0011). Tests: `test/access.test.js`.
+
+**Rule.**
+- Two shared passwords. `ADMIN_PASSWORD` signs in as **admin** (sees and changes everything). `VIEW_PASSWORD` (optional) signs in as **view**: every number, page and CSV export is the same, but nothing can be changed.
+- The server decides, not the page: any `POST`, `PUT`, `PATCH` or `DELETE` to `/api/…` from a view session (cookie or Basic auth) is refused with **403** before any route runs. That covers settings, Plan settings "Save as default", imports, sheet sync, Shopify "Pull now", demo, clear, "Mark ordered" (`/api/onorder`), and any write route added later. `GET /api/export/backup.json` (the whole store, ingest key and change log included) is admin-only too.
+- A view session never receives the Flow ingest key (it would let them write through `/ingest`): not in `/api/settings`, and the `settings` echoed in `/api/report` and `/api/product/…` never carry it for any role. View sessions get an empty change log (it holds old and new sheet links; the log is on the Data page, which they don't have).
+- The page hides what a viewer can't use (ADR-0006: role views only remove): no Data page, no "Save as default", no Mark-ordered ticks, bulk bar or drawer order form (the drawer still shows what is on order). Trying values in Plan settings still works (it changes nothing stored); Reset is kept.
+- The role is inside the signed session cookie, with a fingerprint of `VIEW_PASSWORD`: a view cookie can't be edited into admin, and changing or removing `VIEW_PASSWORD` signs all view sessions out. Admin cookies keep their old form, so existing sign-ins stay valid.
+- The server refuses to start when `VIEW_PASSWORD` is set without `ADMIN_PASSWORD` (nobody would need to sign in) or equals it.
+- **Change log:** every settings save writes one entry per setting whose value actually changed: `{ at, by, key, old, new }`. `by` is the role (`admin`), with "(script)" when the change came with Basic auth instead of a sign-in. Numbers are compared as numbers (14 and "14" are the same). The ingest key is never logged: it shows as "(old key) → (new key)". Newest first, last 200 kept in `store.json` (`settingsLog`).
+- **Shown:** the latest change to lead time, stock should last or buffer under Plan settings ("Last changed … by … · old → new"), for every role; the last 50 changes under Data → Settings → "Advanced: change log" (admin only; view sessions get `changes: []`).
+
+**Why.** RACI: CEO and finance view, they don't change assumptions or data. A page that only hides buttons can be bypassed with one `curl`, so the check sits on the server. The log answers "who changed cover days and when" when a reorder number moves.
+
+**Considered.** Named users (needs a user store or Performity SSO, later ADR). Per-route checks (easy to forget on a new route; one gate before every write is safer).
+
+**Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords. A viewer sees the "Sync issue" pill without its link (no Data page), so the error text is only its hover tooltip, which phones don't show.
+
+## 14. Sync progress and run history
+
+Code: `src/runs.js`, counts from `syncShopify` / `syncSheet` in `server.js` (SW-030). Tests: `test/runs.test.js`.
+
+**Rule.**
+- A **run** is one Shopify pull (every 15 minutes, or "Pull from Shopify now") or one Google Sheet sync. Skipped syncs (nothing set up) are not runs.
+- **While a Shopify pull runs**, the top-right pill reads "Syncing · stock" while stock is read, then "Syncing · 2,340 orders": the number of orders read so far in this pull (each page of 40 adds to it). The page asks again every 3 seconds until the pull ends, then reloads every number once. On a phone the pill is a dot; the same text is its tooltip and shows in the Data status card.
+- **When a run ends** (finished or failed), one line is kept: start time, how long it took, stock changes stored, order lines read, orders read (Shopify), the error if it failed, and notes. A failed run keeps what it had counted before the error.
+- **Notes** name what the stock pull leaves out on purpose: variants of archived or draft products, and variants whose stock isn't tracked (the stock pull reads only active products with tracked stock: `diffStock` in `src/shopify.js`). The numbers come from the same filter, so they can't drift from it.
+- The last **20** runs are kept in `store.json` (`syncRuns`), newest first, and are not wiped by "Clear all data". Shown on Data, inside the status card, folded: "Last 20 syncs · latest 19 Nov 16:00, 8 s, OK".
+
+**Why.** "Is it stuck or still loading?" on a first 60-day pull, and "when did it last fail, and why?" without reading server logs.
+
+**Considered.** A percentage bar: Shopify doesn't say how many orders are left, so any % would be a guess. Logging every page: too much; one line per run is enough to spot a pattern.
+
+**Limits.** Order lines "read" count lines re-read when an order changed (refunds, edits) as well as new ones. Progress lives in memory: after a restart mid-pull the pill shows nothing until the next pull starts.

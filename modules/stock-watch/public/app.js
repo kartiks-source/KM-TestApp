@@ -68,6 +68,8 @@
   async function load() {
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
+    state.runs = set.runs || [];   // SW-030
+    state.role = set.role || 'admin'; state.changes = set.changes || []; state.lastPlanChange = set.lastPlanChange || null;   // SW-029
     header();
     render._animate = true; render();
     freshness();
@@ -108,14 +110,17 @@
     const err = sh.lastError || src.err;
     const pill = $('#sync-pill');
     pill.className = 'sync-pill ' + (err ? 'err' : src.kind === 'demo' ? 'demo' : src.kind === 'live' ? 'ok' : '');
-    pill.querySelector('span').textContent = err ? 'Sync issue' : src.kind === 'demo' ? 'Demo data' : sh.running ? 'Syncing…' : 'Data Sync';
-    pill.title = err || (src.kind === 'demo' ? 'Showing demo data' : 'Data is syncing');
+    pill.querySelector('span').textContent = err ? 'Sync issue' : src.kind === 'demo' ? 'Demo data' : sh.running ? syncingText(sh.progress) : 'Data Sync';
+    if ($('#sync-progress')) $('#sync-progress').textContent = syncingText(sh.progress);
+    watchSync();
+    pill.title = err || (src.kind === 'demo' ? 'Showing demo data' : sh.running ? syncingText(sh.progress) : 'Data is syncing');
     const badge = src.kind === 'demo' ? '<span class="badge demo">Demo data</span>' : src.kind === 'live' ? '<span class="badge live">Live data</span>' : '<span class="badge empty">No data yet</span>';
     $('#source').innerHTML = `${badge}<span>${inr.format(d.stockRows)} stock changes · ${inr.format(d.orderRows)} order lines</span>`
       + (d.lastStock ? `<span>Last stock change: ${dt(d.lastStock)}</span>` : '')
       + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
       + shopifyBadge();
     $$('.range button').forEach((b) => b.classList.toggle('on', +b.dataset.days === state.days));
+    if (viewOnly()) { $('#tabs a[data-view="data"]').hidden = true; pill.removeAttribute('href'); }   // view-only: no Data page (SW-029)
   }
 
   function shopifyBadge() {
@@ -145,6 +150,42 @@
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
   }
 
+  /* ---------- sync progress and run history (SW-030) ---------- */
+  const syncingText = (p) => (!p ? 'Syncing…' : p.phase === 'orders' ? `Syncing · ${inr.format(p.orders)} orders` : 'Syncing · stock');
+  const took = (ms) => (ms < 90e3 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60e3)} min`);
+  /* While a pull runs, refresh the pill every 3 s; when it ends, reload everything once. */
+  function watchSync() {
+    if (!(state.shopify || {}).running || watchSync.t) return;
+    watchSync.t = setTimeout(async () => {
+      watchSync.t = null;
+      try {
+        const set = await api('/api/settings');
+        if (set.shopify && set.shopify.running) { state.shopify = set.shopify; header(); } else await load();
+      } catch { /* next load() tries again */ }
+    }, 3000);
+  }
+  function runLine(r) {
+    const what = `${inr.format(r.stock)} stock changes · ${inr.format(r.lines)} order lines${r.kind === 'shopify' ? ` (${inr.format(r.orders)} orders)` : ''}`;
+    return `<div class="ep"><span class="muted">${dt(r.start)}</span><span>${r.kind === 'shopify' ? 'Shopify' : 'Sheet'} · ${took(r.ms)}</span><span>${what}</span>${r.error ? `<span class="st crit" title="${esc(r.error)}">Failed</span><span class="err-t">${esc(r.error)}</span>` : '<span class="st ok">OK</span>'}${(r.notes || []).map((n) => `<span class="muted">${esc(n)}</span>`).join('')}</div>`;
+  }
+  function runHistory() {
+    const list = state.runs || [], last = list[0];
+    if (!list.length) return '';
+    return `<details class="fold-in"><summary>Last ${list.length} sync${list.length === 1 ? '' : 's'} · latest ${dt(last.start)}, ${took(last.ms)}, ${last.error ? 'failed' : 'OK'}</summary><div class="log">${list.map(runLine).join('')}</div></details>`;
+  }
+
+  /* ---------- view-only sign-in and the settings change log (SW-029) ---------- */
+  const viewOnly = () => state.role === 'view';
+  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key' };
+  const shortVal = (v) => (v == null || v === '' ? '–' : String(v).length > 40 ? String(v).slice(0, 37) + '…' : String(v));
+  const changeText = (c) => `${esc(SETTING_LABEL[c.key] || c.key)}: ${esc(shortVal(c.old))} → <b>${esc(shortVal(c.new))}</b>`;
+  function changeLog() {
+    const list = state.changes || [];
+    return `<details class="fold-in"><summary>Advanced: change log</summary>${list.length
+      ? `<div class="log">${list.map((c) => `<div class="ep"><span class="muted">${dt(c.at)}</span><span>${changeText(c)}</span><span class="muted">by ${esc(c.by)}</span></div>`).join('')}</div>`
+      : '<p class="muted small">No settings changed yet.</p>'}</details>`;
+  }
+
   /* ---------- planning assumptions: change a number, every figure updates; save when happy ---------- */
   function planBar() {
     const S = state.settings, R = state.report.settings, t = state.report.totals;
@@ -152,7 +193,7 @@
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
         <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
     return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span>' : ''}</summary>
-      <div class="pbody">${fields}${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
+      <div class="pbody">${fields}${trial ? `<span class="pact">${viewOnly() ? '' : '<button class="btn" id="what-save">Save as default</button>'}<button class="btn ghost" id="what-reset">Reset</button></span>` : ''}</div>${state.lastPlanChange ? `<p class="muted small plast">Last changed ${dt(state.lastPlanChange.at)} by ${esc(state.lastPlanChange.by)} · ${changeText(state.lastPlanChange)}</p>` : ''}</details>`;
   }
   let whatTimer = null;
   function setWhat(k, v) {
@@ -390,9 +431,10 @@
     const week = r.reorder.filter((p) => p.status === 'Order this week').length;
     const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(t.ordered ? [['ordered', 'Ordered', t.ordered]] : []), ['all', 'All', r.reorder.length]];
     const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
-    const pickable = rows.filter((p) => !p.onOrder && p.orderQty > 0);
+    const canPick = (p) => !viewOnly() && !p.onOrder && p.orderQty > 0;   // view-only sign-in can't mark ordered (SW-029)
+    const pickable = rows.filter(canPick);
     const cols = [
-      { k: 'name', label: 'Product', f: (p) => (!p.onOrder && p.orderQty > 0 ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : '<span class="pick-sp"></span>') + nameCell(p, true, true) },
+      { k: 'name', label: 'Product', f: (p) => (canPick(p) ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : (viewOnly() ? '' : '<span class="pick-sp"></span>')) + nameCell(p, true, true) },
       { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
@@ -403,7 +445,7 @@
       { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
     ];
-    const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && !p.onOrder && p.orderQty > 0));
+    const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && canPick(p)));
     return `
       <section class="headline"><h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
         <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p></section>
@@ -412,7 +454,7 @@
         <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
-        <header>${!p.onOrder && p.orderQty > 0 ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${f === 'all' || f === 'ordered' ? status(p) : poTag(p).trim()}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
   }
 
@@ -523,7 +565,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings</h1></section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p></section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>
@@ -553,6 +595,7 @@
         </div>
         <details class="fold-in"><summary>Advanced: planning rules</summary>
           <div class="form">${ASSUME.map(([k, label, , , tip]) => field(k, label, s[k], tip)).join('')}</div></details>
+        ${changeLog()}
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
@@ -582,7 +625,7 @@
           <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day</span></div>
           <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
-        ${p && (p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
+        ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>
           <p class="muted small">Units sold per week, week starting on the date shown; rose = out of stock part of that week.</p>` : ''}</div>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
@@ -595,7 +638,9 @@
   function orderForm(p) {
     const o = p.onOrder, lead = state.report.settings.leadDays;
     const facts = o ? `${o.late ? '<b class="lostv">Late</b> · was due' : 'Lands'} ${dateShort(o.eta)} · marked ${dateShort(o.at)}${o.by ? ` by ${esc(o.by)}` : ''}${o.remaining < o.qty ? ` · ${inr.format(o.qty - o.remaining)} received` : ''}` : `Suggested: ${inr.format(p.orderQty)} pcs, landing in ${lead} days`;
-    return `<div class="panel poform"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>
+    const head = `<div class="panel poform"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>`;
+    if (viewOnly()) return head + '</div>';   // view-only: the facts, no form (SW-029)
+    return `${head}
       <div class="porow"><label>Pieces<input id="oo-qty" inputmode="numeric" autocomplete="off" value="${o ? o.qty : p.orderQty}"></label>
         <label>Lands on<input id="oo-eta" type="date" min="${isoDay(Date.now())}" value="${isoDay(o ? Math.max(o.eta, Date.now()) : Date.now() + lead * 864e5)}"></label>
         <label>Your name<input id="oo-by" autocomplete="name" placeholder="optional" value="${esc(myName())}"></label>
@@ -612,9 +657,10 @@
   const VIEWS = { overview, reorder, stockouts, products, data: dataView };
   function render() {
     if (!state.report) return;
+    if (state.view === 'data' && viewOnly()) { state.view = 'overview'; history.replaceState(null, '', '#overview'); }
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
     $('#view').classList.toggle('calm', !render._animate); render._animate = false;   // bars animate when a page opens, not on every filter or keystroke
-    $('#view').innerHTML = (VIEWS[state.view] || overview)();
+    $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>' : '');
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
     render._caret = null;

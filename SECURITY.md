@@ -9,6 +9,7 @@ Found a problem? Tell the repo owner directly (not in a public issue or a shared
 | Secret | What it unlocks | Lives in | Rotate |
 |---|---|---|---|
 | `ADMIN_PASSWORD` | the whole web app: every page, every `/api` route, Clear, the ingest key, exports | Railway variable (service `web`) | Change the variable and apply it (Railway redeploys). Every session is signed out (the cookie signature depends on it). Tell the team the new one by a private channel, never in chat history, a doc or a sheet |
+| `VIEW_PASSWORD` (optional) | a view-only sign-in: every page, number and CSV; no write (`POST/PUT/PATCH/DELETE /api/*` → 403), no ingest key, no backup export | Railway variable (service `web`) | Change or remove the variable and apply it: every view session is signed out (a fingerprint of it is inside the signed view cookie). Must differ from `ADMIN_PASSWORD`; the app refuses to start with it set but no `ADMIN_PASSWORD` |
 | Shopify client ID + client secret | read access to the store's products, inventory and orders (`read_products`, `read_inventory`, `read_orders`) | Azure Key Vault: `shopify-<store>-client-id` and `shopify-<store>-client-secret` (or one `shopify-<store>` JSON secret). Stop-gap: Railway variables `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | The brand rotates the secret in its Shopify Dev Dashboard → update the Key Vault secret (or variable) → restart the app (credentials are cached 30 minutes, the 24-hour Shopify token until near expiry). Check the Data page shows a good pull |
 | Legacy `SHOPIFY_ACCESS_TOKEN` (`shpat_…`) | same as above | Railway variable | Revoke in Shopify admin (uninstall the custom app or regenerate), set the new one, restart. Prefer moving to client ID + secret |
 | Azure service principal: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` (+ `AZURE_KEY_VAULT_URL`) | reading Shopify secrets from the vault | Railway variables | Create a new client secret in Azure (Entra ID → App registrations → the app → Certificates & secrets), set the variable, restart, check a pull works, then delete the old secret. Give the principal **Get** on secrets only |
@@ -28,11 +29,12 @@ Never put any of these in code, Markdown, logs, commit messages, chat or a Googl
 - **`/health`** is open and returns only `{"ok":true}`.
 - **Shopify is read-only in code:** `src/shopify.js` `assertReadOnly()` lets only GraphQL query documents through (no `mutation`, no `subscription`) and the app asks only for read scopes, because a shared key may carry write scopes. No webhooks are registered.
 - **The Google Sheet** never talks to Shopify and holds no key: Shopify Flow writes rows into it with the brand's own Google connection.
-- Next: view-only password (SW-029), named users / Performity SSO (SW-060).
+- **View-only password** (`VIEW_PASSWORD`, SW-029, LOGIC.md §13): one gate right after sign-in refuses every write to `/api` with 403 before any route runs (Sprint 1's Mark ordered, settings, import, clear, demo, pulls included; digest settings when they land). `GET /api/export/backup.json` is admin-only. Same wrong-password limiter as admin.
+- Next: named users / Performity SSO (SW-060).
 
 ## Endpoints that change or wipe data
 
-All need the admin login except `/ingest/*`. Each wipe is backed up first (`docs/RUNBOOK.md`).
+All need the admin login except `/ingest/*` (a `VIEW_PASSWORD` session gets 403 on every one). Each wipe is backed up first (`docs/RUNBOOK.md`).
 
 | Endpoint | Effect | Undo |
 |---|---|---|
