@@ -261,6 +261,8 @@
     const color = p.daysLeft <= 3 ? '#C8344F' : p.daysLeft <= warn ? '#C27416' : '#0978BE';
     return `<span class="days"><span class="num ${p.daysLeft <= 3 ? 'lostv' : ''}">${n1(p.daysLeft)}</span><span class="meter"><i style="width:${Math.min(100, (p.daysLeft / (warn + 7)) * 100)}%;background:${color}"></i></span></span>`;
   }
+  /* SW-024: one plain sentence (LOGIC.md §13a), the same text the drawer and the digest use */
+  const whyCell = (p) => (p.why ? `<span class="why${p.stock != null && p.stock <= 0 ? ' out' : p.daysLeft != null && p.daysLeft <= 3 ? ' crit' : ''}" title="${esc(p.why)}">${esc(p.why)}</span>` : '–');
   const trendOnly = (p) => (p.trendPct == null && !p.trendNew ? '<span class="muted" title="Not enough sales yet to call a trend">–</span>' : trendChip(p));
 
   function summaryText() {
@@ -307,7 +309,8 @@
     const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
     const cols = [
       { k: 'name', label: 'Product', f: (p) => nameCell(p) },
-      { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
+      ...(f === 'all' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
+      { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: whyCell, val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
@@ -322,10 +325,10 @@
         <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p></section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`)}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`)}</div>
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <div class="mfacts">${status(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
+        <div class="mfacts">${f === 'all' ? status(p) : ''}${whyCell(p)}${bestTag(p)}</div>`)}`;
   }
 
   /* stock-outs, one row per product (the individual stock-outs are in the product drawer) */
@@ -353,7 +356,7 @@
       { k: 'pattern', label: 'Pattern', f: pattern, val: (a) => a.small + a.repeat },
     ];
     return `
-      <section class="headline"><h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> in sales${t.hasCost ? ` · ${money(t.lostProfit)} profit` : ''}</h1>
+      <section class="headline"><h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> in sales${t.hasCost ? ` · ${money(t.lostProfit)} profit` : ''}${t.stillOut && t.stillOutPerDay ? ` · ${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span>` : ''}</h1>
         <details class="how exp"><summary>How we estimate this</summary><p>Hours out of stock, weighted by when this store usually sells, × the product’s normal sales per hour × the average price paid. Open a product for each stock-out.</p></details></section>
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
@@ -363,13 +366,46 @@
   }
 
   /* Products */
-  const PRODUCT_TABS = [['all', 'All'], ['bestrisk', 'Best sellers at risk'], ['today', 'Order today'], ['over', 'Overstock'], ['lost', 'Losing sales']];
-  const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['slow', 'Slow sellers'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
-  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && TODAY.includes(p.status)
+  /* SW-026: Pause / Push for marketing replace the Overstock chip (Push = the overstock list by ₹ stuck); Overstock moves to More… */
+  const PRODUCT_TABS = [['all', 'All'], ['bestrisk', 'Best sellers at risk'], ['today', 'Order today'], ['pause', 'Pause promotion'], ['push', 'Push these'], ['lost', 'Losing sales']];
+  const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['over', 'Overstock'], ['slow', 'Slow sellers'], ['decide', 'Slow sellers to decide'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
+  const MKT_TIP = { pause: 'Out of stock now, or fewer days left than the supplier lead time: pause ads and promotions until it’s back', push: 'Overstocked, most cash stuck first: promote, bundle or discount' };
+  const decideOf = () => (decideOf.r === state.report ? decideOf.m : (decideOf.r = state.report, decideOf.m = new Map((state.report.decide || []).map((x) => [x.id, x]))));
+  const productMatch = (p, f) => f === 'all' || (f === 'pause' || f === 'push' ? p.mkt === f : f === 'decide' ? decideOf().has(p.id) : f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && TODAY.includes(p.status)
     : f === 'over' ? p.overstock : f === 'rising' ? p.trendPct >= 10 || p.trendNew : f === 'falling' ? p.trendPct <= -10 : group(p.status) === f);
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
-    return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
+    const dm = f === 'decide' ? decideOf() : null;
+    const list = r.products.filter((p) => (dm ? dm.has(p.id) : productMatch(p, f)) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
+    if (f === 'pause' || f === 'push') return mktSort(list, f);
+    if (dm) return list.sort((a, b) => dm.get(b.id).value - dm.get(a.id).value);
+    return list;
+  }
+  /* same order as src/helpers.js mktSort (LOGIC.md §13c) */
+  const mktSort = (rows, kind) => rows.slice().sort(kind === 'push' ? (a, b) => (b.excessValue || 0) - (a.excessValue || 0)
+    : (a, b) => (a.stock <= 0 ? -1 : a.daysLeft ?? 1e9) - (b.stock <= 0 ? -1 : b.daysLeft ?? 1e9) || b.perDay * b.price - a.perDay * a.price);
+  /* SW-032: the decision cell and its buttons */
+  const DECIDE_LABEL = { drop: 'Don’t reorder?', clear: 'Clear' };
+  const decideCell = (p) => { const x = decideOf().get(p.id); if (!x) return '–'; return `<span class="dec ${x.kind}" title="${x.kind === 'drop' ? 'Sells slowly and is out of stock: sales lost in the period' : 'Sells slowly and has stock: stock × unit cost (price when no cost)'}">${DECIDE_LABEL[x.kind]} <b>${money(x.value)}</b>${x.kind === 'drop' ? ' lost' : ' at cost'}</span>`; };
+  const decideBtns = (p) => { const x = decideOf().get(p.id); if (!x) return ''; return `<span class="decb">${['keep', x.kind === 'drop' ? 'drop' : 'clear', ...(x.kind === 'clear' ? ['drop'] : [])].map((d) => `<button class="btn ghost xs" data-decide="${esc(p.id)}|${d}" title="${esc(DECIDE_TIP[d])}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</span>`; };
+  const DECIDE_TIP = { keep: 'Keep selling and reordering as now', drop: 'Stop reordering it', clear: 'Sell off the stock (discount, bundle)' };
+  /* SW-026: the Pause / Push action bar: counts, copy SKUs, CSV */
+  function mktBar(rows, f) {
+    if (f !== 'pause' && f !== 'push') return '';
+    const n = f === 'pause' ? `${inr.format(rows.filter((p) => p.orderQty > 0).length)} to reorder · ${inr.format(rows.filter((p) => p.status === 'Slow seller').length)} slow` : `${money(rows.reduce((a, p) => a + (p.excessValue || 0), 0))} stuck`;
+    return `<div class="mktbar"><span title="${esc(MKT_TIP[f])}">${n}</span>${rows.length ? `<button class="btn ghost xs" id="copy-skus">Copy ${inr.format(rows.length)} SKUs</button><button class="btn ghost xs" id="csv-mkt">CSV</button>` : ''}</div>`;
+  }
+  function downloadMktCsv(f) {
+    const head = f === 'pause' ? ['Product', 'SKU', 'Variant ID', 'Why', 'Back in stock', 'In stock', 'Days left'] : ['Product', 'SKU', 'Variant ID', 'Overstock ₹', 'In stock', 'Days left'];
+    const body = productRows().map((p) => (f === 'pause' ? [p.name, p.sku, p.id, p.why, p.backIn, p.stock, p.daysLeft ?? ''] : [p.name, p.sku, p.id, p.excessValue, p.stock, p.daysLeft ?? '']));
+    saveCsv(`${f === 'pause' ? 'pause-promotion' : 'push-these'}-${isoToday()}.csv`, [head, ...body]);
+  }
+  const isoToday = () => local(Date.now()).toISOString().slice(0, 10);
+  function saveCsv(name, lines) {
+    const q = (x) => { const v = String(x ?? ''); return `"${(typeof x === 'string' && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`; };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + lines.map((l) => l.map(q).join(',')).join('\n')], { type: 'text/csv' }));
+    a.download = name; a.click(); URL.revokeObjectURL(a.href);
   }
   const PRODUCT_COLS = () => [
     { k: 'name', label: 'Product', f: (p) => nameCell(p), csv: (p) => p.name },
@@ -402,17 +438,29 @@
     const types = [...new Set(r.products.map((p) => p.type).filter(Boolean))].sort();
     const inType = r.products.filter((p) => !ty || p.type === ty);
     const tot = rows.reduce((a, p) => ({ sold: a.sold + p.sold, lost: a.lost + p.lost, stock: a.stock + (p.stock > 0 ? p.stock : 0) }), { sold: 0, lost: 0, stock: 0 });
-    const cols = PRODUCT_COLS().filter((c) => !c.hide);
+    let cols = PRODUCT_COLS().filter((c) => !c.hide);
+    /* Pause: "Back in stock" in place of Order; Push: Overstock ₹ in place of Order; Decide: the decision in place of Status and Order */
+    if (f === 'pause') cols = cols.map((c) => (c.k === 'orderQty' ? { k: 'backIn', label: 'Back in stock', tip: 'The marked order’s date, or the earliest an order placed today could land', f: (p) => `<span class="muted">${esc(p.backIn || '–')}</span>` } : c));
+    if (f === 'push') cols = cols.map((c) => (c.k === 'orderQty' ? { ...PRODUCT_COLS().find((x) => x.k === 'excessValue'), opt: 0 } : c)).filter((c, i, a) => c.k !== 'excessValue' || a.findIndex((x) => x.k === 'excessValue') === i);
+    if (f === 'decide') cols = cols.filter((c) => !['status', 'orderQty', 'daysLeft'].includes(c.k)).concat([{ k: 'decide', label: 'Decide', f: decideCell, val: (p) => decideOf().get(p.id)?.value || 0 }, { k: 'act', label: '', f: decideBtns }]);
     const moreOn = PRODUCT_MORE.some(([k]) => k === f);
     return `
       <section class="headline"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
-      <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}">${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
+      <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}"${MKT_TIP[k] ? ` title="${esc(MKT_TIP[k])}"` : ''}>${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
-        ${colPicker('products', cols)}${dlMenu('products')}</div>
+        ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
         <header><h3>${nameCell(p, false)}</h3>${status(p)}</header>
-        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>`)}`;
+        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'pause' ? `<div class="mfacts"><span>${esc(p.backIn || '')}</span></div>` : ''}${f === 'decide' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
+      ${f === 'decide' ? decidedNote() : ''}`;
+  }
+  /* SW-032: decided items are hidden until their sales change by more than half; listed here so a decision can be undone */
+  function decidedNote() {
+    const d = state.report.decided || []; if (!d.length) return '';
+    const byId = new Map(state.report.products.map((p) => [p.id, p]));
+    return `<details class="panel fold decided"><summary><b>${d.length} decided</b> <span class="muted">hidden until their sales change by more than half</span></summary>
+      <div class="bars">${d.map((x) => `<div class="bar-row" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(byId.get(x.id)?.name || x.id)}</span><span class="muted">${esc(x.decision[0].toUpperCase() + x.decision.slice(1))}</span><button class="btn ghost xs" data-decide="${esc(x.id)}|">Undo</button></div>`).join('')}</div></details>`;
   }
   function downloadProductsCsv() {
     const cols = PRODUCT_COLS();
@@ -483,6 +531,7 @@
       body.innerHTML = `
         <h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
+        ${p?.why ? `<p class="dwhy">${whyCell(p)}</p>` : ''}
         <section class="tiles dtiles">
           <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)}` : ''}</span></div>
           <div class="tile ${p?.daysLeft != null && p.daysLeft <= 3 ? 'lost' : ''}"><b>${p?.daysLeft == null ? (p?.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b><span>days left · ${p?.stock ?? '–'} in stock</span></div>
@@ -525,6 +574,13 @@
     if (t.dataset.filterStockouts) { state.filter.stockouts = t.dataset.filterStockouts; state.limit.stockouts = 0; render(); return; }
     if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; state.limit.products = 0; render(); return; }
     if (t.id === 'csv-products') { downloadProductsCsv(); return; }
+    if (t.id === 'csv-mkt') { downloadMktCsv(state.filter.products); return; }
+    if (t.id === 'copy-skus') { copy(productRows().map((p) => p.sku || p.id).join('\n')); return; }
+    if (t.dataset.decide != null) {
+      const [id, d] = t.dataset.decide.split('|'); t.disabled = true;
+      try { await api('/api/decide', { method: 'POST', body: JSON.stringify({ id, decision: d || null }) }); toast(d ? 'Decided: hidden until its sales change by more than half' : 'Back on the list'); await reloadReport(); } catch (err) { toast(err.message); t.disabled = false; }
+      return;
+    }
     if (t.id === 'copy-summary') { copy(summaryText()); return; }
     if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
 
