@@ -140,7 +140,7 @@ async function run(browser, base, vp) {
     check(vp.name, 'drawer opens and closes', !!title, title);
   } catch (e) { check(vp.name, 'drawer opens and closes', false, e.message.split('\n')[0]); }
 
-  /* CSV import (demo kept: "Remove the demo data first" unticked) */
+  /* CSV import. The first real row clears the demo (SW-007), so the demo is loaded again after it for the next viewport */
   try {
     await page.goto(`${base}/#data`); await ready(page);
     await page.click('details.fold:has(#imp-file) > summary');
@@ -152,6 +152,7 @@ async function run(browser, base, vp) {
     await page.waitForFunction(() => /Read \d+ rows/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 5000 });
     check(vp.name, 'CSV import', true, await page.textContent('#toast'));
   } catch (e) { check(vp.name, 'CSV import', false, e.message.split('\n')[0]); }
+  await page.evaluate(() => fetch('/api/demo', { method: 'POST' })).catch(() => {});
 
   check(vp.name, 'no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await ctx.close();
