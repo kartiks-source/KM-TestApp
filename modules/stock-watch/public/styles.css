@@ -400,3 +400,14 @@ table.fixed td:first-child { max-width: none; }
 .headline .yday { flex-basis: 100%; margin: 2px 0 0; color: var(--soft); font-size: 13px; }
 .headline .yday b { color: var(--ink-2); font-weight: 600; }
 @media (max-width: 760px) { .range .wide-only { display: none; } .range button[data-days="month"] { text-transform: capitalize; } }
+
+/* Sprint 2 · B-roles: role picker in the store menu (SW-020) */
+.rolepick > summary.store-pill { cursor: pointer; }
+.rolepick .role-name { color: var(--brand); font-weight: 600; font-size: 12px; margin-left: -4px; }
+.rolepick .role-name:not(:empty)::before { content: "· "; color: var(--faint); }
+.rolepick .menu { left: 0; right: auto; min-width: 300px; }
+.rolepick .menu .rp-h { margin: 2px 8px 4px; font-size: 12px; color: var(--faint); }
+.rolepick .menu .linkbtn { display: grid; gap: 0; text-align: left; width: 100%; }
+.rolepick .menu .linkbtn small { color: var(--soft); font-size: 12px; }
+.rolepick .menu .linkbtn.on { background: var(--brand-wash); }
+.rolepick .menu .linkbtn.on b { color: var(--brand); }

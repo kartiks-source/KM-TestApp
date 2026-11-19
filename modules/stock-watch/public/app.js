@@ -249,7 +249,7 @@
 
   /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
   const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
-  const showCol = (id, c) => !c.opt || (colsOn[id] || []).includes(c.k);
+  const showCol = (id, c) => (!c.opt || (colsOn[id] || []).includes(c.k)) && !window.SW_ROLES?.hidesCol(id, c.k);   // a role view can remove default columns (SW-020)
   function colPicker(id, cols) {
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
     return `<details class="colpick"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
@@ -467,6 +467,7 @@
       <section class="panel">
         <div class="form">
           ${field('storeName', 'Store name', s.storeName, 'Shown at the top', 'text')}
+          ${window.SW_ROLES ? SW_ROLES.field() : ''}
           <div class="field"><label for="f-tzOffsetMin">Time zone</label><select id="f-tzOffsetMin" data-setting="tzOffsetMin">${tzOpts.map(([v, l]) => `<option value="${v}" ${v === +s.tzOffsetMin ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small>Days and the sales-by-hour pattern follow this</small></div>
         </div>
         <details class="fold-in"><summary>Advanced: planning rules</summary>
@@ -635,5 +636,6 @@
   }
 
   state.view = (location.hash || '#overview').slice(1);
+  window.SW_ROLES?.start(state);   // land on the chosen role's home page (SW-020)
   load().catch((e) => { $('#view').innerHTML = `<p class="pad">Couldn’t load: ${esc(e.message)}</p>`; });
 })();

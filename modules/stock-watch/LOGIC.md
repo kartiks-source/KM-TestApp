@@ -322,3 +322,22 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 `modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds, with two differences:
 - **It values every hour of a stock-out equally** (no hour-of-day weighting, section 4a). Its ₹ lost can differ from the web app's for stock-outs mostly at night or mostly in the evening; over whole days the two agree.
 - **It uses a fixed 30-day window** and counts a stock-out that started before it in full, where the web app counts only the hours inside the selected period.
+
+## 13. Role home views (SW-020, `public/roles.js`)
+
+No number changes with a role: a role view only **removes** parts of today's default screen (ADR-0006) and picks the page you land on. No role chosen = today's view.
+
+| Role | Lands on | Removed (everything else stays) |
+|---|---|---|
+| CEO | Overview | Reorder in the menu; tiles "to order today" and "best sellers at risk"; both lists |
+| Founder / COO | Overview | daily chart |
+| Ops / inventory | Reorder → Order today | Stock-outs in the menu; the "each order covers…" line; daily chart |
+| Buyer | Reorder → Order today | Overview and Stock-outs in the menu; plan settings; explainer; Sales lost column |
+| Marketing | Products → Order today (out of stock or about to run out: don't promote) | Reorder and Stock-outs in the menu; "to order today" tile and list; Order column |
+| Finance | Overview | Stock-outs in the menu; tiles "sales lost" and "best sellers at risk"; Biggest losses list; daily chart |
+| Warehouse | Reorder → Order today | Overview, Stock-outs, Products in the menu; period picker; plan settings; explainer; Order cost and Sales lost columns |
+
+- Chosen from the store menu (top left), **Show me** on Data & settings (phones), or a link `/?role=ceo` (`?role=all` = everything). Remembered per browser.
+- Data & settings is never removed: it holds the switch back. Removing a page from the menu doesn't lock it (view-only access is SW-029).
+- Why: each role has one decision (docs/RACI.md); the rest is noise for that person. Considered: per-role pages. Rejected: they'd add screens for everyone and drift from the default.
+- Checked: `test/roles.test.js` (every role removes something on its home page, never Data); `test/smoke/roles-smoke.js` counts visible pieces per role against the default at 1280/1440/1920/390.

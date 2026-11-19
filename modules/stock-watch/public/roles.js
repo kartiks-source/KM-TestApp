@@ -1,0 +1,149 @@
+/* Stock-out Watch — role home views (SW-020). docs/RACI.md says what each role sees first; ADR-0006 says a
+ * role view only REMOVES things from today's default screen, never adds. No role chosen = today's view.
+ *
+ * Runs in the browser (before app.js) and in Node (src/digest.js reads the names and digest cadence).
+ * How it removes: one <style> built from the role's `hide` list, plus app.js asking hidesCol() for
+ * table columns. The choice is remembered per browser (localStorage), set from the store menu, the
+ * "Show me" field on Data & settings, or a link: /?role=ceo (or ?role=all to go back to everything).
+ */
+(function (root) {
+  'use strict';
+
+  /* What each hide key removes. Rail keys apply on every page; the rest on one page. */
+  const PARTS = {
+    'rail:overview': ['*', '#tabs a[data-view="overview"]'],
+    'rail:reorder': ['*', '#tabs a[data-view="reorder"]'],
+    'rail:stockouts': ['*', '#tabs a[data-view="stockouts"]'],
+    'rail:products': ['*', '#tabs a[data-view="products"]'],
+    range: ['*', '.top .range, .top .rlabel'],
+    'tile:lost': ['overview', '#view > .tiles.t4 > .tile[data-go="stockouts"]'],
+    'tile:order': ['overview', '#view > .tiles.t4 > .tile[data-go="reorder"]'],
+    'tile:bestrisk': ['overview', '#view > .tiles.t4 > .tile[data-filter="bestrisk"]'],
+    'tile:over': ['overview', '#view > .tiles.t4 > .tile[data-filter="over"]'],
+    'list:today': ['overview', '#view > .grid2 > .panel:has(a[data-filter="today"])'],
+    'list:losses': ['overview', '#view > .grid2 > .panel:has(a[data-filter="lost"])'],
+    chart: ['overview', '#view > .panel.chart'],
+    explain: ['reorder', '#view > .headline .exp'],
+    plan: ['reorder', '#view > .plan'],
+    'col:reorder:status': ['reorder', null],
+    'col:reorder:orderValue': ['reorder', '#view .mcard .mq small'],          /* columns go via hidesCol(); the selector */
+    'col:reorder:lost': ['reorder', '#view .mcard .mfacts .lostv'],          /* hides the same fact on phone cards     */
+    'col:products:orderQty': ['products', null],
+    'col:products:sold': ['products', null],
+  };
+  const TILES = ['tile:lost', 'tile:order', 'tile:bestrisk', 'tile:over'];
+
+  /* Per docs/RACI.md "What each role sees first". home/filter = where the role lands; digest = how often
+   * the morning digest goes to them (SW-028): 'daily', 'monday' or null (not pushed). */
+  const ROLES = {
+    ceo: {
+      name: 'CEO', lands: 'Overview: sales lost, cash in overstock, daily chart', home: 'overview', digest: 'monday',
+      hide: ['rail:reorder', 'tile:order', 'tile:bestrisk', 'list:today', 'list:losses'],
+    },
+    founder: {
+      name: 'Founder / COO', lands: 'Overview: order today, losses, best sellers, overstock', home: 'overview', digest: 'daily',
+      hide: ['chart'],
+    },
+    ops: {
+      name: 'Ops / inventory', lands: 'Reorder → Order today', home: 'reorder', filter: 'today', digest: 'daily',
+      hide: ['rail:stockouts', 'explain', 'chart'],
+    },
+    buyer: {
+      name: 'Buyer', lands: 'Reorder → Order today: quantities and order cost', home: 'reorder', filter: 'today', digest: null,
+      hide: ['rail:overview', 'rail:stockouts', 'explain', 'plan', 'col:reorder:lost'],
+    },
+    marketing: {
+      name: 'Marketing', lands: 'Products → Order today: what not to promote', home: 'products', filter: 'today', digest: 'daily',
+      hide: ['rail:reorder', 'rail:stockouts', 'tile:order', 'list:today', 'col:products:orderQty'],
+    },
+    finance: {
+      name: 'Finance', lands: 'Overview: cash to order today, cash in overstock', home: 'overview', digest: 'monday',
+      hide: ['rail:stockouts', 'tile:lost', 'tile:bestrisk', 'list:losses', 'chart'],
+    },
+    warehouse: {
+      name: 'Warehouse', lands: 'Reorder → Order today: pieces to order', home: 'reorder', filter: 'today', digest: null,
+      hide: ['rail:overview', 'rail:stockouts', 'rail:products', 'range', 'explain', 'plan', 'col:reorder:orderValue', 'col:reorder:lost'],
+    },
+  };
+  const ORDER = Object.keys(ROLES);
+  const KEY = 'sw-role';
+
+  const valid = (r) => Object.prototype.hasOwnProperty.call(ROLES, r);
+  const hides = (role, key) => valid(role) && ROLES[role].hide.includes(key);
+
+  /** The CSS that removes a role's parts (empty for no role). Pure, so it can be tested. */
+  function css(role) {
+    if (!valid(role)) return '';
+    const R = ROLES[role], sel = R.hide.map((k) => PARTS[k] && PARTS[k][1]).filter(Boolean);
+    let out = sel.length ? `${sel.join(',\n')} { display: none !important; }\n` : '';
+    const tiles = TILES.filter((k) => !R.hide.includes(k)).length;
+    if (tiles < TILES.length) {
+      out += `#view > .tiles.t4 { grid-template-columns: repeat(${tiles}, minmax(0, 1fr)); }\n`;
+      out += `@media (max-width: 760px) { #view > .tiles.t4 { grid-template-columns: repeat(${Math.min(2, tiles)}, minmax(0, 1fr)); } }\n`;
+    }
+    const lists = ['list:today', 'list:losses'].filter((k) => R.hide.includes(k)).length;
+    if (lists === 2) out += '#view > .grid2 { display: none; }\n';
+    else if (lists === 1) out += '#view > .grid2 { grid-template-columns: minmax(0, 1fr); max-width: 880px; }\n';   // one list, still readable on wide screens
+    return out;
+  }
+
+  const API = { ROLES, ORDER, PARTS, valid, hides, css };
+  if (typeof module === 'object' && module.exports) module.exports = API;
+  if (typeof document === 'undefined') return;
+
+  /* ---------- browser ---------- */
+  const read = () => { try { const r = localStorage.getItem(KEY) || ''; return valid(r) ? r : ''; } catch { return ''; } };
+  const write = (r) => { try { if (valid(r)) localStorage.setItem(KEY, r); else localStorage.removeItem(KEY); } catch { /* private window: role lasts this page only */ } };
+  let role = read();
+  /* ?role=ceo link: remember it, then drop it from the address bar */
+  const qs = new URLSearchParams(location.search);
+  if (qs.has('role')) {
+    role = valid(qs.get('role')) ? qs.get('role') : '';
+    write(role);
+    qs.delete('role');
+    history.replaceState(null, '', location.pathname + (qs.toString() ? `?${qs}` : '') + location.hash);
+  }
+  const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function apply() {
+    document.documentElement.dataset.role = role;
+    let st = document.getElementById('role-css');
+    if (!st) { st = document.createElement('style'); st.id = 'role-css'; document.head.appendChild(st); }
+    st.textContent = css(role);
+    const nm = document.getElementById('role-name');
+    if (nm) nm.textContent = role ? ROLES[role].name : '';
+    const menu = document.getElementById('role-menu');
+    if (menu) {
+      menu.innerHTML = '<p class="rp-h">Show me</p>' + ['', ...ORDER].map((r) => `<button class="linkbtn${r === role ? ' on' : ''}" data-role="${r}" aria-pressed="${r === role}"><b>${r ? esc(ROLES[r].name) : 'Everything'}</b><small>${r ? esc(ROLES[r].lands) : 'Every page, every number (default)'}</small></button>`).join('');
+    }
+  }
+  function choose(r) {
+    role = valid(r) ? r : '';
+    write(role);
+    location.replace(location.pathname + location.search);   // reload with no #page: start() lands on the role's home
+  }
+
+  Object.assign(API, {
+    current: () => role,
+    /** app.js: is this table column removed for the current role? */
+    hidesCol: (table, k) => hides(role, `col:${table}:${k}`),
+    /** app.js on start: with no #page in the address, land on the role's home page (and tab). */
+    start(state) {
+      if (!role || location.hash) return;
+      const R = ROLES[role];
+      state.view = R.home;
+      if (R.filter) state.filter[R.home] = R.filter;
+      history.replaceState(null, '', '#' + R.home);
+    },
+    /** The "Show me" field on Data & settings (the store menu is hidden on phones). */
+    field: () => `<div class="field"><label for="f-role">Show me</label><select id="f-role">${['', ...ORDER].map((r) => `<option value="${r}" ${r === role ? 'selected' : ''}>${r ? esc(ROLES[r].name) : 'Everything (default)'}</option>`).join('')}</select><small>Remembered on this browser. Link for a role: /?role=ceo</small></div>`,
+  });
+  root.SW_ROLES = API;
+
+  apply();
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('#role-menu [data-role]');
+    if (b) { e.preventDefault(); choose(b.dataset.role); }
+  });
+  document.addEventListener('change', (e) => { if (e.target.id === 'f-role') choose(e.target.value); });
+})(typeof window !== 'undefined' ? window : globalThis);
