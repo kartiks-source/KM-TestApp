@@ -32,6 +32,17 @@ orca agent read <id>      # what an agent said
 
 Keep tasks touching the same file in one agent.
 
+## The critic (every dev cycle)
+
+Every change gets a review from an agent that didn't write it. Point it at the diff and the rules, not at the builder's explanation, so its read isn't anchored:
+
+```bash
+orca worktree create --repo name:Stock-Watch --name sw-critic --agent codex \
+  --prompt "You are the critic. Read AGENTS.md, modules/stock-watch/LOGIC.md and the diff of the last commit (git show HEAD). Run npm test and the app (npm start). Report, most serious first: wrong or misleading numbers, rules that contradict LOGIC.md, untested edge cases, UX that slows a decision, wasted space. Cite file:line. Don't fix anything."
+```
+
+The builder then fixes what holds up and notes anything rejected (and why) in `docs/DEVLOG.md`.
+
 ## Finishing
 
 1. Each agent runs `npm test` and updates the module `AGENTS.md` and `docs/DEVLOG.md`.

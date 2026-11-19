@@ -33,7 +33,8 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 7. **No secrets in git, ever.** Keys go in Railway variables or Azure Key Vault. Never in code, Markdown, logs or Google Sheets.
 8. **Shopify is read-only** in every module. Only GraphQL queries are allowed through; no mutations, and no webhooks registered under someone else's app.
 9. **One agent, one worktree, one branch.** When several agents run at once in Orca, each gets its own worktree (see `docs/ORCA.md`). Merge to `main` only after tests pass.
-10. **Stay standalone.** No module reads another team's database. Data comes from Shopify (read-only) into the module's own storage.
+10. **A critic reviews every dev cycle.** Before a change is called done, a separate reviewer agent that hasn't seen the builder's reasoning reads the diff, `LOGIC.md` and the running app. It looks for wrong numbers, rules that contradict `LOGIC.md`, edge cases, UX that slows a decision, and anything a demanding expert would send back. The builder fixes what holds up or records why not in `docs/DEVLOG.md`. In Orca, run the critic in its own worktree or agent (see `docs/ORCA.md`).
+11. **Stay standalone.** No module reads another team's database. Data comes from Shopify (read-only) into the module's own storage.
 
 ## Deploy
 

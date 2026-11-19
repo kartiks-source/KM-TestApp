@@ -122,3 +122,17 @@ test('best sellers (A = first 80% of sales), profit lost at unit cost, overstock
   // order value uses unit cost when known (cash to commit)
   if (P.big.orderQty) assert.equal(P.big.orderValue, Math.round(P.big.orderQty * 400));
 });
+
+test('trend: a stock-out is not read as falling demand; too few sales gives no trend', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  // 2 a day for 28 days, but out of stock for 7 of the last 14 days (and no sales then)
+  const lines = []; let n = 0;
+  for (let d = 1; d <= 28; d++) if (d > 7 || d <= 0) lines.push({ t: now - d * D + 3600e3, order: `#${n++}`, variantId: 'v', qty: 2, price: 100 });
+  const eps = [{ start: now - 7 * D, end: now, open: true }];
+  const t = E.trend(lines, eps, now);
+  assert.equal(t.weeks.length, 8);
+  assert.equal(t.weeks[7].units, 0); assert.equal(t.weeks[7].outDays, 7);
+  assert.equal(t.trendPct, 0);             // raw week-on-week would say −50%
+  const thin = E.trend([{ t: now - D, qty: 2 }, { t: now - 20 * D, qty: 1 }], [], now);
+  assert.equal(thin.trendPct, null);       // 3 units in 28 days: too few to call
+});

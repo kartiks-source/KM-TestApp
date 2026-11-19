@@ -212,6 +212,29 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 
 **When it can be wrong:** stock bought ahead of a known season or campaign will look overstocked until the demand arrives.
 
+## 7d. Trend (sparkline and % change)
+
+**Rule:**
+- **Bars:** units sold in each of the last 8 rolling 7-day blocks ending now, oldest on the left, scaled to that product's best week. A **rose mark** under a bar means the product was out of stock for part of that week (hover a bar for units and days out).
+- **% change** = sales per **in-stock** day in the last 14 days vs the 14 days before:
+
+  > rate = units sold ÷ days in stock (in that 14-day half)
+  > change = (recent rate − earlier rate) ÷ earlier rate
+
+  ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = no sales in the earlier half but sales now. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
+- **Store baseline:** the same comparison for the whole store (units, all products) is shown next to the Products tabs and in each chip's tooltip.
+
+**Why it's built this way (and what's wrong with plain week-on-week, as in the DAWBU sheet):**
+- **Stock-outs aren't demand.** A product out for half of last week shows −50% week-on-week, though shoppers wanted it as much as ever. Dividing by in-stock days removes that. It's the same principle as section 3.
+- **Two weeks against two weeks.** For a product selling a few a week, one week against one week swings wildly (2 → 1 = −50%). Doubling the window halves most of that noise, and the 6-unit minimum hides changes that are just noise.
+- **Rolling weeks ending now,** not calendar weeks, so there's never a half-finished current week dragging the last bar down.
+- **A ±10% band,** wider than ±5%, so normal week-to-week wobble stays "flat".
+- **The store baseline separates season from product.** After a peak like Diwali almost everything falls. A product down 20% while the store is down 25% is holding up; one down 50% isn't.
+
+**When it can be wrong:**
+- **Promotions in either half** distort it, and so do price changes.
+- **Gifting and decor seasons,** where the store baseline helps but doesn't remove the effect entirely.
+
 ## 8. Restocking patterns
 
 | Flag | Rule | Why it matters |

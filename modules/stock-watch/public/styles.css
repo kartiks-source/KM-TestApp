@@ -153,7 +153,7 @@ button.tile:hover { border-color: var(--brand); }
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { font-size: 12.5px; color: var(--ink-2); font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; background: #F6F8FB; position: sticky; top: 0; }
-th.r, td.r { text-align: right; font-variant-numeric: tabular-nums; }
+th.r, td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 tbody tr:nth-child(even) { background: #FBFCFE; }
 tbody tr:hover { background: var(--brand-wash2); cursor: pointer; }
 tr:last-child td { border-bottom: 0; }
@@ -209,6 +209,18 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .pname { color: var(--brand); font-weight: 500; }
 .abc { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 6px; border-radius: 4px; background: var(--brand); color: #fff; font-size: 10px; font-weight: 700; vertical-align: 1px; }
 .plumv { color: var(--plum); font-weight: 600; }
+/* trend sparkline: bars rise in on render; rose base = out of stock that week */
+.trc { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.spark { display: block; overflow: visible; }
+.spark .sb { fill: #9CC7E6; transform-box: fill-box; transform-origin: bottom; animation: sbIn .45s cubic-bezier(.2,.8,.2,1) both; }
+.spark .sb.last { fill: var(--brand); }
+.spark .so { fill: var(--lost); }
+.spark g:hover .sb { fill: var(--brand-d); }
+@keyframes sbIn { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .spark .sb { animation: none; } }
+.base { font-size: 12px; font-weight: 600; color: var(--soft); background: #EEF1F5; border-radius: 8px; padding: 6px 10px; white-space: nowrap; }
+.tr { display: inline-block; min-width: 54px; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tr.up { color: #16A34A; } .tr.down { color: var(--lost); } .tr.flat { color: var(--soft); } .tr.low { color: var(--faint); } .tr.new { color: var(--brand); }
 .tile b small { font-size: 13px; color: var(--faint); font-weight: 500; }
 
 /* assumptions bar: change a number, everything updates */
@@ -256,6 +268,7 @@ table.fixed td:first-child { max-width: none; }
 .tbl td .cat { display: inline-block; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .tbl td .st { white-space: nowrap; font-size: 11.5px; padding: 2px 8px; }
 /* fit the screen: lower-priority columns step aside on narrower laptops (all of them stay in the CSV) */
+@media (max-width: 1700px) { .tbl .p4 { display: none; } }
 @media (max-width: 1400px) { .tbl .p3 { display: none; } .tbl td:first-child { max-width: 230px; } }
 @media (max-width: 1180px) { .tbl .p2 { display: none; } .tbl td:first-child { max-width: 200px; } .tbl td .sku { display: none; } }
 .headline p .lostv { font-weight: 600; }

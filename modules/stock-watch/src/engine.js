@@ -69,6 +69,41 @@ function demandPerDay(units, from, to, eps) {
   return { perDay: units / days, inStockDays: days };
 }
 
+/**
+ * Trend, measured on demand rather than raw sales so a stock-out doesn't look like a slump.
+ *   weeks: the last 8 rolling 7-day blocks ending now (oldest first): units sold and days out of stock.
+ *   trendPct: sales per in-stock day in the last 14 days vs the 14 days before. null when there's
+ *   too little to say (fewer than 6 units over those 28 days, or under 3 in-stock days in either half).
+ */
+const TREND_MIN_UNITS = 6;
+function trend(lines, eps, now) {
+  const weeks = [];
+  for (let w = 7; w >= 0; w--) {
+    const a = now - (w + 1) * 7 * DAY, b = now - w * 7 * DAY;
+    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
+    const out = eps.reduce((s, e) => s + overlap(e.start, e.end, a, b), 0);
+    weeks.push({ units, outDays: round(out / DAY, 1) });
+  }
+  const half = (a, b) => {
+    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
+    const inDays = (b - a - eps.reduce((s, e) => s + overlap(e.start, e.end, a, b), 0)) / DAY;
+    return { units, inDays, rate: inDays > 0 ? units / inDays : 0 };
+  };
+  const recent = half(now - 14 * DAY, now), before = half(now - 28 * DAY, now - 14 * DAY);
+  let trendPct = null;
+  if (recent.units + before.units >= TREND_MIN_UNITS && recent.inDays >= 3 && before.inDays >= 3) {
+    trendPct = before.rate > 0 ? round(((recent.rate - before.rate) / before.rate) * 100, 1) : null;
+  }
+  return { weeks, trendPct, trendNew: before.units === 0 && recent.units > 0 };
+}
+
+/** Whole-store sales, last 14 days vs the 14 before: the baseline a product's trend should be read against. */
+function storeTrend(orders, now) {
+  const sum = (a, b) => orders.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
+  const recent = sum(now - 14 * DAY, now), before = sum(now - 28 * DAY, now - 14 * DAY);
+  return before > 0 ? round(((recent - before) / before) * 100, 1) : null;
+}
+
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'OK'];
 /** Reorder status and quantity for one product. */
 function plan({ stock, perDay, lead, cover, safety }) {
@@ -196,6 +231,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.excessUnits = Math.max(0, Math.floor(have - need));
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
     row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
+    Object.assign(row, trend(p.lines, eps, now));
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
@@ -241,6 +277,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       orderValueAll: reorder.reduce((s, p) => s + p.orderValue, 0),
       overstocked: products.filter((p) => p.overstock).length,
       excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
+      storeTrendPct: storeTrend(orders, now),
     },
     daily: dailyRows, reorder, stockouts, products,
     data: {
@@ -276,4 +313,5 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
     stockouts: r.stockouts.filter((s) => String(s.id) === String(id)).sort((a, b) => a.start - b.start) };
 }
 
-module.exports = { report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+module.exports = {
+  trend, TREND_MIN_UNITS, report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

@@ -128,6 +128,28 @@
     clearTimeout(whatTimer); whatTimer = setTimeout(() => reloadReport().catch((e) => toast(e.message)), 220);
   }
 
+  /* ---------- trend: 8 weekly bars (units), rose base where the product was out of stock that week ---------- */
+  const WEEK_LABEL = (i) => (i === 7 ? 'last 7 days' : `${7 - i} week${7 - i > 1 ? 's' : ''} before`);
+  function spark(p, w = 64, h = 20) {
+    const wk = p.weeks || []; if (!wk.length) return '';
+    const max = Math.max(1, ...wk.map((x) => x.units)), bw = w / wk.length;
+    const bars = wk.map((x, i) => {
+      const bh = x.units ? Math.max(2, (x.units / max) * (h - 4)) : 0;
+      const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + 1}" y="${h - 2}" width="${bw - 2}" height="2"/>` : '';
+      return `<g><title>${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out of stock ${n1(x.outDays)} d` : ''}</title>`
+        + `<rect class="sb${i === wk.length - 1 ? ' last' : ''}" style="animation-delay:${i * 35}ms" x="${i * bw + 1}" y="${h - 3 - bh}" width="${bw - 2}" height="${bh}" rx="1"/>${out}</g>`;
+    }).join('');
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Weekly units, last 8 weeks">${bars}</svg>`;
+  }
+  function trendChip(p) {
+    if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="No sales in the 14 days before; selling now">New</span>' : '<span class="tr low" title="Too few sales to call a trend">·</span>';
+    const v = p.trendPct, cls = v >= 10 ? 'up' : v <= -10 ? 'down' : 'flat';
+    const base = state.report.totals.storeTrendPct;
+    return `<span class="tr ${cls}" title="Sales per in-stock day, last 14 days vs the 14 before. Out-of-stock days are left out, so a stock-out doesn't look like falling demand.${base != null ? ` Whole store over the same days: ${base > 0 ? '+' : ''}${n1(base)}%.` : ''}">${cls === 'up' ? '▲' : cls === 'down' ? '▼' : '▬'} ${v > 0 ? '+' : ''}${n1(v)}%</span>`;
+  }
+  const trendCell = (p) => `<span class="trc">${spark(p)}${trendChip(p)}</span>`;
+  const trendCol = { k: 'trendPct', label: 'Trend', tip: '8 weekly bars of units sold (rose base = out of stock that week) and the change in sales per in-stock day: last 14 days vs the 14 before', f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' };
+
   /* ---------- generic sortable table ---------- */
   /* A sortable table on wide screens; on phones the same rows as cards (card(r) → html) with a sort picker. */
   function table(id, cols, rows, empty, card) {
@@ -273,12 +295,13 @@
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => inr.format(p.stock) },
         { k: 'perDay', label: 'Per day', r: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+        trendCol,
         { k: 'orderValue', label: 'Value', r: 1, tip: 'Cash to commit: order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
         { k: 'lost', label: 'Lost', r: 1, tip: `₹ lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
       ], rows, 'Nothing to order in this view.', (p) => `
         <header><h3>${abcMark(p)}${esc(p.name)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <div class="mfacts">${pill(p.status)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}<span class="sku">${esc(p.sku)}</span></div>`)}`;
+        <div class="mfacts">${pill(p.status)}${trendCell(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}<span class="sku">${esc(p.sku)}</span></div>`)}`;
   }
 
   function stockouts() {
@@ -305,8 +328,8 @@
         <div class="mfacts"><span class="${s.open ? 'bad' : ''}">out <b>${dur(s.hours)}</b></span><span>${dt(s.start)} → ${s.open ? '<span class="st open">Still out</span>' : dt(s.end)}</span>${s.topUp == null ? '' : `<span>refilled <b>${inr.format(s.topUp)}</b> (${n1(s.topUpDays)} d)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`)}`;
   }
 
-  const PRODUCT_TABS = [['all', 'All'], ['best', 'Best sellers'], ['bestrisk', 'Best at risk'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['over', 'Overstock'], ['Slow seller', 'Slow'], ['lost', 'Lost sales']];
-  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && ['Out now', 'Critical', 'Order now'].includes(p.status) : f === 'over' ? p.overstock : p.status === f);
+  const PRODUCT_TABS = [['all', 'All'], ['best', 'Best sellers'], ['bestrisk', 'Best at risk'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['rising', 'Rising'], ['falling', 'Falling'], ['over', 'Overstock'], ['Slow seller', 'Slow'], ['lost', 'Lost sales']];
+  const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && ['Out now', 'Critical', 'Order now'].includes(p.status) : f === 'over' ? p.overstock : f === 'rising' ? p.trendPct >= 10 || p.trendNew : f === 'falling' ? p.trendPct <= -10 : p.status === f);
   const abcMark = (p) => (p.abc === 'A' ? '<span class="abc" title="Best seller: in the products making the top 80% of sales">A</span>' : '');
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
@@ -321,6 +344,7 @@
     { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
     { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1, csv: (p) => p.daysLeft ?? '' },
     { k: 'perDay', label: 'Per day', r: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+    trendCol,
     { k: 'unitsSold', label: 'Units', r: 1, pr: 3, tip: `Units sold in the last ${state.days} days`, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'price', label: 'Avg price', hide: 1 },
     { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (p) => money(p.sold) },
@@ -330,8 +354,8 @@
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'excessValue', label: 'Excess', r: 1, pr: 2, tip: 'Cash in stock beyond what the next lead + cover + safety days need (at unit cost when known)', f: (p) => (p.excessValue ? `<span class="${p.overstock ? 'plumv' : 'muted'}">${money(p.excessValue)}</span>` : '–') },
     ...(state.report.totals.hasCost ? [
-      { k: 'lostProfit', label: 'Profit lost', r: 1, pr: 3, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
-      { k: 'margin', label: 'Margin', r: 1, pr: 3, tip: '(price paid − unit cost) ÷ price paid', f: (p) => (p.margin == null ? '–' : `${n1(p.margin)}%`) },
+      { k: 'lostProfit', label: 'Profit lost', r: 1, pr: 4, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
+      { k: 'margin', label: 'Margin', r: 1, pr: 4, tip: '(price paid − unit cost) ÷ price paid', f: (p) => (p.margin == null ? '–' : `${n1(p.margin)}%`) },
       { k: 'cost', label: 'Unit cost', hide: 1 },
     ] : []),
   ];
@@ -345,11 +369,11 @@
       <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       ${planBar()}
-      <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
+      <div class="toolbar"><div class="chips">${r.totals.storeTrendPct != null ? `<span class="base" title="Whole store, units sold: last 14 days vs the 14 before. A product falling about as much as the store is following the season, not losing ground.">Store ${r.totals.storeTrendPct >= 0 ? '▲' : '▼'} ${r.totals.storeTrendPct > 0 ? '+' : ''}${n1(r.totals.storeTrendPct)}%</span>` : ''}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
 </div>
       ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
         <header><h3>${abcMark(p)}${esc(p.name)}</h3>${pill(p.status)}</header>
-        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span>${p.overstock ? `<span class="plumv">${money(p.excessValue)} excess</span>` : ''}<span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
+        <div class="mfacts">${trendCell(p)}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span>${p.overstock ? `<span class="plumv">${money(p.excessValue)} excess</span>` : ''}<span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
   }
   const inShape = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function downloadProductsCsv() {
