@@ -284,7 +284,7 @@
     const top = r.products.filter((p) => p.lost > 0).slice(0, 5), maxLost = Math.max(1, ...top.map((p) => p.lost));
     return `
       <section class="headline">
-        <h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today · stock-outs cost <span class="lost">${money(t.lost)}</span> ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</h1>
+        <h1><span class="h-order">Order <span class="amberv">${money(t.orderValueNow)}</span> today · </span><span class="h-lost">stock-outs cost <span class="lost">${money(t.lost)}</span> ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</span></h1>
         ${window.SW_DIGEST ? SW_DIGEST.shareMenu() : '<button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>'}
         ${ydayStrip(r.yesterday)}
       </section>

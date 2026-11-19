@@ -4,8 +4,9 @@
  * schedule at a set store-time hour, and a log of every send. No email provider, no dependencies.
  * The text comes from src/digest.js. Rules: LOGIC.md §14.
  *
- * Settings live in the store under `digest` (not in `settings`, so the webhook URL never goes out with
- * GET /api/settings). DIGEST_WEBHOOK_URL (Railway variable) overrides the saved URL. PUBLIC_URL or
+ * Webhook URLs come from env only (they often carry a token; secrets stay out of store.json):
+ * DIGEST_WEBHOOK_URL for every role, DIGEST_WEBHOOK_URL_<ROLE> (e.g. _CEO) for a role's own recipient.
+ * Hour, roles, pause and the send log live in the store under `digest`. PUBLIC_URL or
  * RAILWAY_PUBLIC_DOMAIN gives the address for links in scheduled digests.
  *
  * server.js passes ctx = { report({ days, now }) → report with .yesterday, pull() → fresh data }.
@@ -18,15 +19,19 @@ const DAY = 864e5;
 const CATCH_UP_HOURS = 3;     // after a restart, a missed digest still goes out within 3 h of the set hour
 const LOG_KEEP = 50;
 const SCHEDULED = R.ORDER.filter((r) => R.ROLES[r].digest);
-const DEFAULTS = () => ({ webhookUrl: '', hour: 9, roles: SCHEDULED.slice(), paused: false, lastSent: {}, log: [] });
+const DEFAULTS = () => ({ hour: 9, roles: SCHEDULED.slice(), paused: false, lastSent: {}, log: [] });
 
 function conf() {
   const d = store.load();
   d.digest = { ...DEFAULTS(), ...(d.digest || {}) };
+  delete d.digest.webhookUrl;   // no longer kept in the store (env only)
   return d.digest;
 }
-const envUrl = () => (process.env.DIGEST_WEBHOOK_URL || '').trim();
-const webhookUrl = () => envUrl() || conf().webhookUrl;
+const env = (k) => (process.env[k] || '').trim();
+/** The webhook for one role: its own DIGEST_WEBHOOK_URL_<ROLE>, else DIGEST_WEBHOOK_URL. '' = none. */
+const webhookUrl = (role = '') => (R.valid(role) && env(`DIGEST_WEBHOOK_URL_${role.toUpperCase()}`)) || env('DIGEST_WEBHOOK_URL');
+const anyWebhook = (roles) => !!env('DIGEST_WEBHOOK_URL') || roles.some((r) => webhookUrl(r));
+const hostOf = (u) => { try { return u ? new URL(u).host : null; } catch { return null; } };
 
 /** '' when fine, else why not. https only; http just for this machine (local testing). */
 function checkUrl(u) {
@@ -37,24 +42,19 @@ function checkUrl(u) {
   return 'Webhook URL must start with https://';
 }
 
-/** What the page may see: never the URL itself (it often carries a token), only its host. */
+/** What the page may see: never a URL itself (it often carries a token), only its host. */
 function publicConf() {
-  const c = conf(), u = webhookUrl();
-  let host = null; try { host = u ? new URL(u).host : null; } catch { /* bad env value */ }
+  const c = conf(), u = env('DIGEST_WEBHOOK_URL');
   return {
-    webhook: { set: !!u, host, fromEnv: !!envUrl() }, tzOffsetMin: store.load().settings.tzOffsetMin, hour: c.hour, roles: c.roles, paused: c.paused,
-    scheduled: SCHEDULED.map((r) => ({ role: r, name: R.ROLES[r].name, cadence: R.ROLES[r].digest })),
+    webhook: { set: anyWebhook(SCHEDULED), host: hostOf(u) }, tzOffsetMin: store.load().settings.tzOffsetMin, hour: c.hour, roles: c.roles, paused: c.paused,
+    scheduled: SCHEDULED.map((r) => ({ role: r, name: R.ROLES[r].name, cadence: R.ROLES[r].digest, host: hostOf(webhookUrl(r)), own: !!env(`DIGEST_WEBHOOK_URL_${r.toUpperCase()}`) })),
     log: c.log.slice(-20).reverse(),
   };
 }
 
 function applyPatch(b) {
   const c = conf();
-  if (typeof b.webhookUrl === 'string') {
-    const u = b.webhookUrl.trim();
-    if (u) { const err = checkUrl(u); if (err) return err; }
-    c.webhookUrl = u;
-  }
+  if (b.webhookUrl !== undefined) return 'The webhook URL is set on the server (DIGEST_WEBHOOK_URL), not here';
   if (b.hour != null) {
     const h = Number(b.hour);
     if (!Number.isInteger(h) || h < 0 || h > 23) return 'Hour must be 0–23';
@@ -66,7 +66,8 @@ function applyPatch(b) {
   return '';
 }
 
-/* links in digests: env first, else the address the app was last opened at (signed-in requests only) */
+/* links in digests: env first, else the address the app was last opened at (signed-in requests only; set
+ * PUBLIC_URL when the proxy's Host / X-Forwarded-Host can't be trusted, see LOGIC.md §14) */
 let lastBase = '';
 const baseUrl = () => (process.env.PUBLIC_URL || '').replace(/\/+$/, '') || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '') || lastBase;
 
@@ -89,10 +90,11 @@ function logSend(entry) {
 
 /** POST one role's digest to the webhook. Always logged. Never throws. */
 async function send(role, ctx, trigger, now = Date.now(), note = '') {
-  const url = webhookUrl();
+  const url = webhookUrl(role);
   const entry = { at: now, role, trigger, ok: false, status: null, error: null };
   try {
     if (!url) throw new Error('No webhook URL set');
+    const bad = checkUrl(url); if (bad) throw new Error(bad);
     const d = make(role, ctx, now);
     const res = await fetch(url, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
@@ -107,16 +109,18 @@ async function send(role, ctx, trigger, now = Date.now(), note = '') {
   return entry;
 }
 
-/** Which roles are due at `now`: the set hour (store time) has passed today, within the catch-up window,
- *  not yet sent today; weekly roles only on Mondays. */
+/** Which roles are due at `now`: within CATCH_UP_HOURS after the set hour (store time; wraps past midnight,
+ *  so 23:00 still has until 02:00), not yet sent for that day; weekly roles only on Mondays. "That day" is the
+ *  day the set hour fell on, so a 23:00 send caught up at 01:00 counts for the day before. */
 function due(now = Date.now()) {
   const c = conf();
-  if (c.paused || !webhookUrl()) return [];
+  if (c.paused) return [];
   const local = new Date(now + store.load().settings.tzOffsetMin * 60e3);
-  const h = local.getUTCHours();
-  if (h < c.hour || h >= c.hour + CATCH_UP_HOURS) return [];
-  const day = local.toISOString().slice(0, 10), monday = local.getUTCDay() === 1;
-  return c.roles.filter((r) => R.valid(r) && c.lastSent[r] !== day && (R.ROLES[r].digest === 'daily' || (R.ROLES[r].digest === 'monday' && monday)))
+  const since = (local.getUTCHours() - c.hour + 24) % 24;   // whole hours since the set hour
+  if (since >= CATCH_UP_HOURS) return [];
+  const slot = new Date(local.getTime() - since * 36e5);
+  const day = slot.toISOString().slice(0, 10), monday = slot.getUTCDay() === 1;
+  return c.roles.filter((r) => R.valid(r) && webhookUrl(r) && c.lastSent[r] !== day && (R.ROLES[r].digest === 'daily' || (R.ROLES[r].digest === 'monday' && monday)))
     .map((r) => ({ role: r, day }));
 }
 
@@ -150,7 +154,7 @@ function schedule(ctx) {
  *   GET  /api/digest?role=ops        → { ok, role, roleName, title, lines, link, text }
  *   GET  /api/digest.txt?role=ops    → the text
  *   GET  /api/digest/settings        → hour, roles, paused, webhook host (never the URL), last 20 sends
- *   PUT  /api/digest/settings        { webhookUrl?, hour?, roles?, paused? }
+ *   PUT  /api/digest/settings        { hour?, roles?, paused? }   (webhook URLs: env only → 400)
  *   POST /api/digest/send?role=ops   → send now (no role: every ticked role), logged
  */
 async function handle(req, url, readBody, ctx) {
@@ -172,11 +176,11 @@ async function handle(req, url, readBody, ctx) {
     return err ? { code: 400, body: { ok: false, error: err } } : { code: 200, body: { ok: true, ...publicConf() } };
   }
   if (p === '/api/digest/send' && req.method === 'POST') {
-    if (!webhookUrl()) return { code: 400, body: { ok: false, error: 'Set a webhook URL first' } };
     const roles = role ? [role] : conf().roles;
     if (!roles.length) return { code: 400, body: { ok: false, error: 'No roles ticked' } };
+    if (!anyWebhook(roles)) return { code: 400, body: { ok: false, error: 'No webhook: set DIGEST_WEBHOOK_URL on the server' } };
     const sent = [];
-    for (const r of roles) sent.push(await send(r, ctx, 'manual'));
+    for (const r of roles.filter((x) => webhookUrl(x))) sent.push(await send(r, ctx, 'manual'));
     return { code: sent.every((s) => s.ok) ? 200 : 502, body: { ok: sent.every((s) => s.ok), sent, error: sent.find((s) => !s.ok)?.error } };
   }
   return { code: 404, body: { ok: false, error: 'Not found' } };

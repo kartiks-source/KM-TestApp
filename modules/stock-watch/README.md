@@ -120,7 +120,8 @@ Railway builds the `Dockerfile` at the repo root, which copies this folder. Atta
 | `DATA_DIR` | where `store.json` lives (default `./data`; `/data` in Docker) |
 | Shopify key variables | see "Shopify, read-only" above |
 | `SHOPIFY_API_VERSION` | optional, default `2026-07` |
-| `DIGEST_WEBHOOK_URL` | optional: where the morning digest is POSTed (overrides the one saved under Data & settings) |
+| `DIGEST_WEBHOOK_URL` | optional: where the morning digest is POSTed (env only; the page never sees or saves it) |
+| `DIGEST_WEBHOOK_URL_<ROLE>` | optional: one role's own recipient, e.g. `DIGEST_WEBHOOK_URL_CEO` (else `DIGEST_WEBHOOK_URL`) |
 | `PUBLIC_URL` | optional: the app's address for links in scheduled digests (Railway's `RAILWAY_PUBLIC_DOMAIN` is used if set) |
 
 Health check: `GET /health`.

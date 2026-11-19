@@ -399,7 +399,7 @@ table.fixed td:first-child { max-width: none; }
 /* Sprint 2 · B-roles: yesterday strip + "This month" (SW-027) */
 .headline .yday { flex-basis: 100%; margin: 2px 0 0; color: var(--soft); font-size: 13px; }
 .headline .yday b { color: var(--ink-2); font-weight: 600; }
-@media (max-width: 760px) { .range .wide-only { display: none; } .range button[data-days="month"] { text-transform: capitalize; } }
+@media (max-width: 760px) { .range .wide-only { display: none; } .range button[data-days="month"] { text-transform: capitalize; } .range button { min-height: 44px; } }   /* SW-023: 44 px touch targets */
 
 /* Sprint 2 · B-roles: role picker in the store menu (SW-020) */
 .rolepick > summary.store-pill { cursor: pointer; }
@@ -420,4 +420,4 @@ table.fixed td:first-child { max-width: none; }
 .dg-h { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: var(--soft); }
 .dg-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
 .okv { color: var(--ok); font-weight: 600; }
-@media (max-width: 760px) { .share .menu { right: 0; left: auto; } .dg-roles label { min-height: 44px; } }
+@media (max-width: 760px) { .share .menu { right: 0; left: auto; } .share > summary.btn, .share .menu .linkbtn { min-height: 44px; } .dg-roles label { min-height: 44px; } }

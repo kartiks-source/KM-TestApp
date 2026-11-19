@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-digest-test-'));
-delete process.env.DIGEST_WEBHOOK_URL; delete process.env.PUBLIC_URL; delete process.env.RAILWAY_PUBLIC_DOMAIN;
+for (const k of Object.keys(process.env)) if (k.startsWith('DIGEST_WEBHOOK_URL')) delete process.env[k];
+delete process.env.PUBLIC_URL; delete process.env.RAILWAY_PUBLIC_DOMAIN;
 delete process.env.ADMIN_PASSWORD; delete process.env.SHOPIFY_STORE; delete process.env.AZURE_KEY_VAULT_URL;
 
 const test = require('node:test');
@@ -88,28 +89,66 @@ test('deep link opens the role’s home view', () => {
   assert.match(D.build({ report: r, role: 'ops', base: 'https://x.app' }).text, /\nOpen: https:\/\/x\.app\/\?role=ops#reorder$/);
 });
 
-test('webhook URL: https only (http just for this machine); bad hour refused', () => {
+test('webhook URL: https only (http just for this machine); bad hour refused; never saved from the page (env only)', () => {
   assert.equal(S.checkUrl('https://hooks.example.com/a'), '');
   assert.equal(S.checkUrl('http://127.0.0.1:9/x'), '');
   assert.match(S.checkUrl('http://hooks.example.com/a'), /https/);
   assert.match(S.checkUrl('ftp://x'), /https/);
   assert.match(S.checkUrl('not a url'), /valid/);
   assert.match(S.applyPatch({ hour: 24 }), /0–23/);
-  assert.match(S.applyPatch({ webhookUrl: 'http://evil.example/x' }), /https/);
+  assert.match(S.applyPatch({ webhookUrl: 'https://hooks.example.com/a' }), /DIGEST_WEBHOOK_URL/);
+  assert.match(S.applyPatch({ webhookUrl: '' }), /DIGEST_WEBHOOK_URL/);
+  assert.equal(S.publicConf().webhook.set, false);
+  assert.equal(store.load().digest.webhookUrl, undefined);
 });
 
-test('settings never show the webhook URL, only its host', () => {
-  assert.equal(S.applyPatch({ webhookUrl: HOOK, hour: 9, paused: false }), '');
+test('settings never show the webhook URL, only its host; never stored', () => {
+  process.env.DIGEST_WEBHOOK_URL = HOOK;
+  assert.equal(S.applyPatch({ hour: 9, paused: false }), '');
   const c = S.publicConf();
   assert.equal(c.webhook.set, true);
   assert.equal(c.webhook.host, new URL(HOOK).host);
   assert.doesNotMatch(JSON.stringify(c), /SECRET123/);
-  assert.doesNotMatch(JSON.stringify(store.load().settings), /SECRET123/);   // not in GET /api/settings either
+  assert.doesNotMatch(JSON.stringify(store.load()), /SECRET123/);   // not in the store (data volume), so not in GET /api/settings either
+});
+
+test('per-role recipients: DIGEST_WEBHOOK_URL_<ROLE> wins for that role, the others use DIGEST_WEBHOOK_URL', () => {
+  const other = 'https://hooks.example.com/ceo?token=CEOSECRET';
+  process.env.DIGEST_WEBHOOK_URL_CEO = other;
+  try {
+    const c = S.publicConf();
+    const ceo = c.scheduled.find((x) => x.role === 'ceo'), ops = c.scheduled.find((x) => x.role === 'ops');
+    assert.equal(ceo.own, true); assert.equal(ceo.host, 'hooks.example.com');
+    assert.equal(ops.own, false); assert.equal(ops.host, new URL(HOOK).host);
+    assert.doesNotMatch(JSON.stringify(c), /CEOSECRET/);
+    delete process.env.DIGEST_WEBHOOK_URL;                                   // only the CEO has one: only the CEO is due (Monday)
+    const at = Date.parse('2026-11-30T00:00:00Z') - 330 * 60e3 + 9.2 * 36e5;
+    assert.deepEqual(S.due(at).map((x) => x.role), ['ceo']);
+  } finally { delete process.env.DIGEST_WEBHOOK_URL_CEO; process.env.DIGEST_WEBHOOK_URL = HOOK; }
+});
+
+test('catch-up window wraps past midnight: a 23:00 send still goes at 01:00, counted for the day before', () => {
+  const at = (h, d) => Date.parse(`${d}T00:00:00Z`) - 330 * 60e3 + h * 36e5;
+  const keep = { ...store.load().digest, lastSent: { ...store.load().digest.lastSent } };
+  try {
+    S.applyPatch({ hour: 23, roles: ['ops'], paused: false });
+    store.load().digest.lastSent = {};
+    assert.deepEqual(S.due(at(22.9, '2026-12-01')), []);
+    assert.deepEqual(S.due(at(23.5, '2026-12-01')), [{ role: 'ops', day: '2026-12-01' }]);
+    assert.deepEqual(S.due(at(1.5, '2026-12-02')), [{ role: 'ops', day: '2026-12-01' }]);   // 2.5 h after 23:00
+    assert.deepEqual(S.due(at(2, '2026-12-02')), []);                                       // 3 h: window closed
+    store.load().digest.lastSent = { ops: '2026-12-01' };
+    assert.deepEqual(S.due(at(1.5, '2026-12-02')), []);                                     // sent at 23:00: not again after midnight
+    S.applyPatch({ hour: 22, roles: ['ceo'] });
+    store.load().digest.lastSent = {};
+    assert.deepEqual(S.due(at(0.5, '2026-11-23')), []);                                     // Mon 00:30 belongs to Sun 22:00: not a Monday send
+    assert.deepEqual(S.due(at(0.5, '2026-11-24')), [{ role: 'ceo', day: '2026-11-23' }]);   // Tue 00:30 belongs to Mon 22:00: the CEO's Monday digest
+  } finally { Object.assign(store.load().digest, keep); store.save(true); }
 });
 
 test('schedule: nothing before the hour; at 9:00 store time pulls first, then sends each daily role once; Monday-only roles skip Thursday', async () => {
   got.length = 0; ctx.pulls = 0;
-  S.applyPatch({ webhookUrl: HOOK, hour: 9, roles: ROLES.ORDER, paused: false });
+  S.applyPatch({ hour: 9, roles: ROLES.ORDER, paused: false });
   const at = (h, d = '2026-11-19') => Date.parse(`${d}T00:00:00Z`) - 330 * 60e3 + h * 36e5;   // h:00 IST on that day
   assert.deepEqual(await S.tick(ctx, at(8.5)), []);
   const sent = await S.tick(ctx, at(9.1));

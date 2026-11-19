@@ -52,9 +52,9 @@ Google Sheet CSV / upload ───┘
 
 ## Role views and digest (Sprint 2 · B-roles)
 
-- Role views only remove UI (ADR-0006); config in `public/roles.js`, rules in LOGIC.md §13. Browser check: `node test/smoke/roles-smoke.js` (needs Playwright; `CHROMIUM_PATH` if its browser isn't downloaded).
-- Digest: LOGIC.md §14. Optional variables `DIGEST_WEBHOOK_URL`, `PUBLIC_URL`. Without a webhook nothing is sent; Share → Copy / WhatsApp still works.
-- Next: per-role webhook URLs if a client needs separate recipients; warehouse home on the Ordered list once SW-012 lands; marketing home on Pause/Push chips once SW-026 lands.
+- Role views only remove UI (ADR-0006); config in `public/roles.js`, rules in LOGIC.md §13. Browser check: `node test/smoke/roles-smoke.js` (needs Playwright; uses its browser, else system Chrome, else `CHROMIUM_PATH`). Not in `npm test` (no browser in CI, no deps).
+- Digest: LOGIC.md §14. Optional variables `DIGEST_WEBHOOK_URL`, `DIGEST_WEBHOOK_URL_<ROLE>` (per-role recipient), `PUBLIC_URL`. Env only, never saved from the page. Without a webhook nothing is sent; Share → Copy / WhatsApp still works.
+- Next: warehouse home on the Ordered list once SW-012 lands; marketing home on Pause/Push chips once SW-026 lands.
 
 ## Railway variables now
 

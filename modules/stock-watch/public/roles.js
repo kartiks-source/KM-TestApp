@@ -16,6 +16,7 @@
     'rail:stockouts': ['*', '#tabs a[data-view="stockouts"]'],
     'rail:products': ['*', '#tabs a[data-view="products"]'],
     range: ['*', '.top .range, .top .rlabel'],
+    'head:order': ['overview', '#view > .headline h1 .h-order'],             /* RACI: the A's number leads the headline */
     'tile:lost': ['overview', '#view > .tiles.t4 > .tile[data-go="stockouts"]'],
     'tile:order': ['overview', '#view > .tiles.t4 > .tile[data-go="reorder"]'],
     'tile:bestrisk': ['overview', '#view > .tiles.t4 > .tile[data-filter="bestrisk"]'],
@@ -38,7 +39,7 @@
   const ROLES = {
     ceo: {
       name: 'CEO', lands: 'Overview: sales lost, cash in overstock, daily chart', home: 'overview', digest: 'monday',
-      hide: ['rail:reorder', 'tile:order', 'tile:bestrisk', 'list:today', 'list:losses'],
+      hide: ['rail:reorder', 'head:order', 'tile:order', 'tile:bestrisk', 'list:today', 'list:losses'],
     },
     founder: {
       name: 'Founder / COO', lands: 'Overview: order today, losses, best sellers, overstock', home: 'overview', digest: 'daily',
@@ -54,7 +55,7 @@
     },
     marketing: {
       name: 'Marketing', lands: 'Products → Order today: what not to promote', home: 'products', filter: 'today', digest: 'daily',
-      hide: ['rail:reorder', 'rail:stockouts', 'tile:order', 'list:today', 'col:products:orderQty'],
+      hide: ['rail:reorder', 'rail:stockouts', 'head:order', 'tile:order', 'list:today', 'col:products:orderQty'],
     },
     finance: {
       name: 'Finance', lands: 'Overview: cash to order today, cash in overstock', home: 'overview', digest: 'monday',
@@ -81,13 +82,23 @@
       out += `#view > .tiles.t4 { grid-template-columns: repeat(${tiles}, minmax(0, 1fr)); }\n`;
       out += `@media (max-width: 760px) { #view > .tiles.t4 { grid-template-columns: repeat(${Math.min(2, tiles)}, minmax(0, 1fr)); } }\n`;
     }
+    if (R.hide.includes('head:order')) out += '#view > .headline h1 .h-lost { display: inline-block; }\n#view > .headline h1 .h-lost::first-letter { text-transform: uppercase; }\n';   // "Stock-outs cost …" leads
     const lists = ['list:today', 'list:losses'].filter((k) => R.hide.includes(k)).length;
     if (lists === 2) out += '#view > .grid2 { display: none; }\n';
     else if (lists === 1) out += '#view > .grid2 { grid-template-columns: minmax(0, 1fr); max-width: 880px; }\n';   // one list, still readable on wide screens
     return out;
   }
 
-  const API = { ROLES, ORDER, PARTS, valid, hides, css };
+  /** Where a role lands on first load. hash = location.hash without '#'. With no #page, or #<the role's home>
+   *  (digest links: /?role=marketing#products), → { view, filter, setHash }; any other #page opens as asked → null. */
+  function landing(role, hash) {
+    if (!valid(role)) return null;
+    const R = ROLES[role];
+    if (hash && hash !== R.home) return null;
+    return { view: R.home, filter: R.filter || null, setHash: !hash };
+  }
+
+  const API = { ROLES, ORDER, PARTS, valid, hides, css, landing };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof document === 'undefined') return;
 
@@ -127,13 +138,13 @@
     current: () => role,
     /** app.js: is this table column removed for the current role? */
     hidesCol: (table, k) => hides(role, `col:${table}:${k}`),
-    /** app.js on start: with no #page in the address, land on the role's home page (and tab). */
+    /** app.js on start: land on the role's home page and tab (see landing()). */
     start(state) {
-      if (!role || location.hash) return;
-      const R = ROLES[role];
-      state.view = R.home;
-      if (R.filter) state.filter[R.home] = R.filter;
-      history.replaceState(null, '', '#' + R.home);
+      const L = landing(role, location.hash.slice(1));
+      if (!L) return;
+      state.view = L.view;
+      if (L.filter) state.filter[L.view] = L.filter;
+      if (L.setHash) history.replaceState(null, '', '#' + L.view);
     },
     /** The "Show me" field on Data & settings (the store menu is hidden on phones). */
     field: () => `<div class="field"><label for="f-role">Show me</label><select id="f-role">${['', ...ORDER].map((r) => `<option value="${r}" ${r === role ? 'selected' : ''}>${r ? esc(ROLES[r].name) : 'Everything (default)'}</option>`).join('')}</select><small>Remembered on this browser. Link for a role: /?role=ceo</small></div>`,

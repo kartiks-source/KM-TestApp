@@ -56,3 +56,31 @@ test('digest cadence follows the RACI "Pushed to them" column', () => {
   const c = Object.fromEntries(R.ORDER.map((k) => [k, R.ROLES[k].digest]));
   assert.deepEqual(c, { ceo: 'monday', founder: 'daily', ops: 'daily', buyer: null, marketing: 'daily', finance: 'monday', warehouse: null });
 });
+
+test('landing: a role link with or without #<its home> applies the role’s tab; another #page opens as asked', () => {
+  // digest links carry the hash (/?role=marketing#products): the Order today tab must still apply
+  assert.deepEqual(R.landing('marketing', 'products'), { view: 'products', filter: 'today', setHash: false });
+  assert.deepEqual(R.landing('marketing', ''), { view: 'products', filter: 'today', setHash: true });
+  assert.deepEqual(R.landing('ceo', 'overview'), { view: 'overview', filter: null, setHash: false });
+  assert.equal(R.landing('marketing', 'data'), null);
+  assert.equal(R.landing('', 'products'), null);
+  assert.equal(R.landing('intern', ''), null);
+  for (const k of R.ORDER) assert.equal(R.landing(k, R.ROLES[k].home).view, R.ROLES[k].home, k);
+});
+
+test('RACI "A’s number first": a role that hides the order tile also drops "Order ₹X today" from the headline', () => {
+  for (const k of R.ORDER) {
+    const h = R.ROLES[k].hide;
+    assert.equal(h.includes('head:order'), h.includes('tile:order'), k);
+  }
+  assert.match(R.css('ceo'), /\.headline h1 \.h-order/);
+  assert.match(R.css('ceo'), /\.h-lost::first-letter \{ text-transform: uppercase; \}/);
+  assert.doesNotMatch(R.css('founder'), /h-order/);
+});
+
+test('RACI tile count: CEO lands on Overview with 2 tiles (sales lost, overstock) + the daily chart', () => {
+  const tiles = ['tile:lost', 'tile:order', 'tile:bestrisk', 'tile:over'].filter((t) => !R.ROLES.ceo.hide.includes(t));
+  assert.deepEqual(tiles, ['tile:lost', 'tile:over']);
+  assert.ok(!R.ROLES.ceo.hide.includes('chart'));
+  assert.match(RACI, /\| CEO \| Overview, 2 tiles \+ daily chart \|/);
+});

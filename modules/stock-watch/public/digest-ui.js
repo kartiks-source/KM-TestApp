@@ -1,6 +1,7 @@
 /* Stock-out Watch — morning digest in the page (SW-028). Loads before app.js.
  *  - Overview "Share" menu: Copy summary (app.js), Copy digest, Send on WhatsApp (wa.me link, no account needed).
- *  - Data & settings → "Morning digest": webhook URL, hour, roles, pause, send now, last sends.
+ *  - Data & settings → "Morning digest": hour, roles, pause, send now, last sends. Webhook URLs are env only
+ *    (DIGEST_WEBHOOK_URL, DIGEST_WEBHOOK_URL_<ROLE>); the page sees their host, never the URL.
  * The digest is for the role chosen in the store menu (public/roles.js), or everyone. Server: src/digest-service.js. */
 (function () {
   'use strict';
@@ -50,15 +51,15 @@
   const when = (t, off) => { const d = new Date(t + (off || 0) * 60e3); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };   // store time, like the rest of the page
   function body(c) {
     const names = Object.fromEntries((window.SW_ROLES ? SW_ROLES.ORDER : []).map((r) => [r, SW_ROLES.ROLES[r].name]));
-    const hook = c.webhook.fromEnv ? `<p class="muted">Webhook set by the server (<span class="mono">DIGEST_WEBHOOK_URL</span>) · ${esc(c.webhook.host || '')}</p>`
-      : `<div class="field"><label for="dg-url">Webhook URL</label><input id="dg-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="${c.webhook.set ? `Set · ${esc(c.webhook.host)} (leave blank to keep)` : 'https://… (Zapier, Make, Slack, WhatsApp Business tool)'}"><small>${c.webhook.set ? 'The full address is never shown again. ' : ''}Each digest is POSTed as JSON: role, title, lines, link, text.</small></div>`;
+    const hook = c.webhook.set ? `<p class="muted">${c.webhook.host ? `Sent to ${esc(c.webhook.host)}` : 'Sent only to roles with their own webhook'} (set on the server). Each digest is POSTed as JSON: role, title, lines, link, text.</p>`
+      : '<p class="muted">No webhook yet: ask whoever runs the server to set <span class="mono">DIGEST_WEBHOOK_URL</span> (one per role: <span class="mono">DIGEST_WEBHOOK_URL_CEO</span> …).</p>';
     const log = c.log.length ? `<ul class="dg-log">${c.log.slice(0, 5).map((l) => `<li><span class="muted">${esc(when(l.at, c.tzOffsetMin))}</span> ${esc(names[l.role] || 'Everyone')} · ${l.trigger === 'manual' ? 'sent by hand' : 'scheduled'} · ${l.ok ? `<span class="okv">sent</span>` : `<span class="lostv">failed: ${esc(l.error)}</span>`}${l.note ? ` <span class="muted">(${esc(l.note)})</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing sent yet.</p>';
     return `<p class="muted">At the hour below (store time), after a fresh data pull, each ticked role gets its digest: 6 lines at most, with a link that opens their view. CEO and Finance get theirs on Mondays. Without a webhook, use Share → Copy or WhatsApp on the Overview.</p>
       <div class="form">${hook}
         <div class="field"><label for="dg-hour">Send at</label><select id="dg-hour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === c.hour ? 'selected' : ''}>${pad(h)}</option>`).join('')}</select><small>Store time; a missed send still goes within 3 hours</small></div></div>
-      <div class="dg-roles" role="group" aria-label="Who gets a digest">${c.scheduled.map((s) => `<label><input type="checkbox" data-dg-role="${esc(s.role)}" ${c.roles.includes(s.role) ? 'checked' : ''}> ${esc(s.name)} <span class="muted">${s.cadence === 'monday' ? 'Mondays' : 'daily'}</span></label>`).join('')}</div>
+      <div class="dg-roles" role="group" aria-label="Who gets a digest">${c.scheduled.map((s) => `<label><input type="checkbox" data-dg-role="${esc(s.role)}" ${c.roles.includes(s.role) ? 'checked' : ''}> ${esc(s.name)} <span class="muted">${s.cadence === 'monday' ? 'Mondays' : 'daily'}${s.own ? ` · ${esc(s.host || 'own webhook')}` : ''}</span></label>`).join('')}</div>
       <label class="muted"><input type="checkbox" id="dg-paused" ${c.paused ? 'checked' : ''}> Pause sending</label>
-      <div class="toolbar"><button class="btn" id="dg-save">Save</button>${c.webhook.set ? '<button class="btn ghost" id="dg-send">Send now</button>' : ''}${c.webhook.set && !c.webhook.fromEnv ? '<button class="btn ghost" id="dg-remove">Remove webhook</button>' : ''}</div>
+      <div class="toolbar"><button class="btn" id="dg-save">Save</button>${c.webhook.set ? '<button class="btn ghost" id="dg-send">Send now</button>' : ''}</div>
       <h3 class="dg-h">Last sends</h3>${log}`;
   }
   async function loadPanel() {
@@ -67,19 +68,17 @@
   }
 
   document.addEventListener('click', async (e) => {
-    const t = e.target.closest && e.target.closest('#copy-digest, #wa-digest, #dg-save, #dg-send, #dg-remove');
+    const t = e.target.closest && e.target.closest('#copy-summary, #copy-digest, #wa-digest, #dg-save, #dg-send');
     if (!t) return;
+    if (t.id === 'copy-summary') { t.closest('details')?.removeAttribute('open'); return; }   // app.js copies; close the Share menu
     try {
       if (t.id === 'copy-digest') { await copy(await digestText()); t.closest('details')?.removeAttribute('open'); }
       if (t.id === 'wa-digest' && !(cached && cached.role === role())) { e.preventDefault(); window.open(wa(await digestText()), '_blank', 'noopener'); }
-      if (t.id === 'dg-save' || t.id === 'dg-remove') {
+      if (t.id === 'dg-save') {
         const patch = { hour: +$('#dg-hour').value, paused: $('#dg-paused').checked, roles: [...document.querySelectorAll('[data-dg-role]')].filter((i) => i.checked).map((i) => i.dataset.dgRole) };
-        const u = $('#dg-url');
-        if (t.id === 'dg-remove') patch.webhookUrl = '';
-        else if (u && u.value.trim()) patch.webhookUrl = u.value.trim();
         t.disabled = true;
         $('#digest-body').innerHTML = body(await api('/api/digest/settings', { method: 'PUT', body: JSON.stringify(patch) }));
-        toast(t.id === 'dg-remove' ? 'Webhook removed' : 'Digest settings saved');
+        toast('Digest settings saved');
       }
       if (t.id === 'dg-send') {
         t.disabled = true; t.textContent = 'Sending…';
