@@ -119,7 +119,7 @@
 
   /* ---------- charts (SVG, to scale) ---------- */
   function dailyChart(daily) {
-    const W = narrow() ? 360 : 1000, H = narrow() ? 230 : 280, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
+    const W = narrow() ? 360 : 1000, H = narrow() ? 230 : 365, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
     const max = Math.max(1, ...daily.map((d) => d.sold + d.lost));
     const step = niceStep(max / 4); const top = Math.ceil(max / step) * step;
     const y = (v) => T + (H - T - B) * (1 - v / top);
@@ -168,9 +168,10 @@
 
   /* ---------- views ---------- */
   function overview() {
-    const r = state.report, t = r.totals, top = r.products.filter((p) => p.lost > 0).slice(0, 7);
+    const r = state.report, t = r.totals, top = r.products.filter((p) => p.lost > 0).slice(0, 10);
     const maxLost = Math.max(1, ...top.map((p) => p.lost));
     const hours = r.stockouts.reduce((s, e) => s + e.hours, 0);
+    const openNow = r.stockouts.filter((e) => e.open).sort((a, b) => b.lost - a.lost);
     const outProducts = new Set(r.stockouts.map((s) => s.id)).size;
     const note = t.stockouts
       ? `In the last ${r.days} days, ${outProducts} selling products ran out of stock ${t.stockouts} times, adding up to ${hours >= 48 ? `about ${inr.format(Math.round(hours / 24))} product-days` : `about ${Math.round(hours)} product-hours`} with an empty shelf. That cost an estimated ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand), demand the ads had already brought in. ${t.smallTopUps} times the shelf was refilled with less than ${state.settings.smallTopUpDays} days of stock, and ${t.repeats} times a product sold out again within a week.`
@@ -183,26 +184,31 @@
       <section class="tiles">
         <div class="tile sold"><b>${money(t.sold)}</b><span>sold</span></div>
         <div class="tile lost"><b>${money(t.lost)}</b><span>lost to stock-outs</span></div>
-        <button class="tile lost" data-go="reorder" data-filter="Out now"><b>${t.outNow}</b><span>out of stock now</span></button>
+        <button class="tile lost" data-go="reorder" data-filter="Out now"><b>${t.outNow}</b><span>selling items out now</span></button>
         <button class="tile amber" data-go="reorder" data-filter="now"><b>${t.orderNow}</b><span>to order now</span></button>
         <button class="tile plum" data-go="stockouts" data-filter="small"><b>${t.smallTopUps}</b><span>small top-ups</span></button>
         <button class="tile plum" data-go="stockouts" data-filter="again"><b>${t.repeats}</b><span>out again within a week</span></button>
       </section>
-      <section class="panel chart">
+      <section class="ov">
+      <div class="panel chart ov-chart">
         <div class="panel-head"><h2>Sold vs lost to stock-outs, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold</span><span><i style="background:#E0506E"></i>Lost to stock-outs</span></div></div>
         ${dailyChart(r.daily)}
-      </section>
-      <section class="grid2">
-        <div class="panel"><div class="panel-head"><h2>Biggest losses</h2><a href="#products">All products</a></div>
+      </div>
+        <div class="panel ov-order"><div class="panel-head"><h2>Order today</h2><a href="#reorder">All ${r.reorder.length}</a></div>
+          ${r.reorder.length ? `<div class="bars">${r.reorder.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(p.name)}</span>${pill(p.status)}<span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering right now.</p>'}
+        </div>
+        <div class="panel ov-loss"><div class="panel-head"><h2>Biggest losses</h2><a href="#products">All products</a></div>
           ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}"><span class="name">${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
         </div>
-        <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder">Full list</a></div>
-          ${r.reorder.length ? `<div class="bars">${r.reorder.slice(0, 7).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(p.name)}</span>${pill(p.status)}<span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering right now.</p>'}
+      <div class="ov-side">
+        <div class="panel"><div class="panel-head"><h2>Out of stock right now</h2><a href="#stockouts" data-go="stockouts" data-filter="open">All ${openNow.length}, incl. slow sellers</a></div>
+          ${openNow.length ? `<div class="bars">${openNow.slice(0, 5).map((e) => `<div class="bar-row" data-product="${esc(e.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(e.name)}</span><span class="muted num">${dur(e.hours)}</span><span class="val">${money(e.lost)}</span></div>`).join('')}</div>` : '<p class="muted">Every selling product is in stock.</p>'}
         </div>
-      </section>
-      <section class="note">
-        <p>${esc(note)}</p>
-        <div class="actions"><button class="btn light" id="copy-note">Copy for the client</button></div>
+        <div class="note">
+          <div class="panel-head"><h2>For the client</h2><button class="btn light" id="copy-note">Copy</button></div>
+          <p>${esc(note)}</p>
+        </div>
+      </div>
       </section>`;
   }
 
@@ -219,13 +225,12 @@
     const rows = r.reorder.filter((p) => (f === 'all' || (f === 'now' ? ['Critical', 'Order now'].includes(p.status) : p.status === f)) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
     const S = state.settings;
     return `
-      <section class="headline"><h1>Reorder before they run out</h1>
+      <section class="headline ex"><h1>Reorder before they run out</h1>
         <p>Order quantity covers ${S.leadDays} days of lead time + ${S.coverDays} days after it lands + ${S.safetyDays} safety days, at each product’s in-stock sales rate. Change these in Data &amp; settings.</p></section>
-      <div class="toolbar">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}
-        <input class="search" id="q-reorder" placeholder="Search product or SKU" value="${esc(state.q.reorder)}">
-        <a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}">Download CSV</a></div>
+      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${esc(k)}">${l}<span class="c">${c}</span></button>`).join('')}<a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}">Download CSV</a></div>
+        <input class="search" id="q-reorder" placeholder="Search product or SKU" value="${esc(state.q.reorder)}"></div>
       ${table('reorder', [
-        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sub mono">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
         { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
@@ -235,10 +240,8 @@
         { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
       ], rows, 'Nothing to order in this view.', (p) => `
-        <header>${pill(p.status)}<div class="mq"><small>Order</small><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <h3>${esc(p.name)}</h3><p class="sub mono">${esc(p.sku)}</p>
-        <div class="mstats">${kv('Days left', p.daysLeft == null ? '–' : n1(p.daysLeft), p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : '')}${kv('In stock', inr.format(p.stock))}${kv('Sells / day', n1(p.perDay))}</div>
-        ${p.lost || p.outs ? `<footer>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.outs ? `<span>${p.outs} stock-out${p.outs > 1 ? 's' : ''} in ${state.days} days</span>` : ''}</footer>` : ''}`)}`;
+        <header><h3>${esc(p.name)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <div class="mfacts">${pill(p.status)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}<span class="sku">${esc(p.sku)}</span></div>`)}`;
   }
 
   function stockouts() {
@@ -247,12 +250,12 @@
     const rows = r.stockouts.filter((s) => (f === 'all' || (f === 'open' ? s.open : f === 'small' ? s.small : s.repeat)) && (!q || `${s.name} ${s.sku}`.toLowerCase().includes(q)))
       .map((s, i) => ({ ...s, key: i }));
     return `
-      <section class="headline"><h1>Every stock-out, and what it cost</h1>
+      <section class="headline ex"><h1>Every stock-out, and what it cost</h1>
         <p>₹ lost = selling hours out of stock × the product’s normal sales per hour × its average selling price. Hours are weighted by when this store actually sells, so a night-time stock-out counts for less.</p></section>
-      <div class="toolbar">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}
+      <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
       ${table('stockouts', [
-        { k: 'name', label: 'Product', f: (s) => `<span class="pname">${esc(s.name)}</span><span class="sub mono">${esc(s.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (s) => `<span class="pname">${esc(s.name)}</span><span class="sku">${esc(s.sku)}</span>` },
         { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
         { k: 'hours', label: 'Out for', r: 1, nw: 1, f: (s) => dur(s.hours) },
         { k: 'start', label: 'Went out', nw: 1, f: (s) => dt(s.start) },
@@ -261,20 +264,18 @@
         { k: 'topUp', label: 'Refilled with', r: 1, nw: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
         { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
       ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.', (s) => `
-        <header><h3>${esc(s.name)}</h3><div class="mq"><small>Lost</small><b class="lostv">${money(s.lost)}</b></div></header>
-        <p class="sub mono">${esc(s.sku)}</p>
-        <div class="mstats">${kv('Out for', dur(s.hours), s.open ? 'bad' : '')}${kv('Went out', dt(s.start))}${kv(s.open ? 'Status' : 'Back in', s.open ? '<span class="st open">Still out</span>' : dt(s.end))}</div>
-        <footer>${s.topUp == null ? '' : `<span>Refilled ${inr.format(s.topUp)} pcs (${n1(s.topUpDays)} days of sales)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again within a week</span>' : ''}</footer>`)}`;
+        <header><h3>${esc(s.name)}</h3><div class="mq"><b class="lostv">${money(s.lost)}</b><small>lost</small></div></header>
+        <div class="mfacts"><span class="${s.open ? 'bad' : ''}">out <b>${dur(s.hours)}</b></span><span>${dt(s.start)} → ${s.open ? '<span class="st open">Still out</span>' : dt(s.end)}</span>${s.topUp == null ? '' : `<span>refilled <b>${inr.format(s.topUp)}</b> (${n1(s.topUpDays)} d)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`)}`;
   }
 
   function products() {
     const r = state.report, q = state.q.products.toLowerCase();
     const rows = r.products.filter((p) => !q || `${p.name} ${p.sku}`.toLowerCase().includes(q));
     return `
-      <section class="headline"><h1>Products</h1><p>Every product seen in stock changes or orders. Click one for its stock history.</p></section>
+      <section class="headline ex"><h1>Products</h1><p>Every product seen in stock changes or orders. Click one for its stock history.</p></section>
       <div class="toolbar"><input class="search" id="q-products" placeholder="Search product or SKU" value="${esc(state.q.products)}"></div>
       ${table('products', [
-        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sub mono">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status) },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
         { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
@@ -283,16 +284,15 @@
         { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
       ], rows, 'No products yet.', (p) => `
-        <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header><p class="sub mono">${esc(p.sku)}</p>
-        <div class="mstats">${kv('In stock', p.stock == null ? '–' : inr.format(p.stock), p.stock != null && p.stock <= 0 ? 'bad' : '')}${kv('Sells / day', n1(p.perDay))}${kv(`Sold (${state.days} d)`, money(p.sold))}</div>
-        ${p.lost ? `<footer><span class="lostv">${money(p.lost)} lost</span><span>${p.outs} stock-out${p.outs > 1 ? 's' : ''}</span></footer>` : ''}`)}`;
+        <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header>
+        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost · ${p.outs} out</span>` : ''}</div>`)}`;
   }
 
   function dataView() {
     const s = state.settings, d = state.report.data, src = state.source;
     const base = location.origin;
     return `
-      <section class="headline"><h1>Data &amp; settings</h1><p>Stock-out Watch needs two things from the store: every stock change and every order line. It reads them from Shopify (read-only), or from Shopify Flow, a Google Sheet or a CSV, with no Shopify key at all.</p></section>
+      <section class="headline ex"><h1>Data &amp; settings</h1><p>Stock-out Watch needs two things from the store: every stock change and every order line. It reads them from Shopify (read-only), or from Shopify Flow, a Google Sheet or a CSV, with no Shopify key at all.</p></section>
       <section class="cards">
         ${shopifyPanel()}
         <div class="panel"><h2>Data now</h2>

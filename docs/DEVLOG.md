@@ -3,6 +3,11 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (density pass: no wasted space)
+- Full-width content; compact KPI cards, panels and tables (rows about 37px, SKU beside the name).
+- Overview: chart beside Order today (10 items); Biggest losses (10) beside a new "Out of stock right now" list and the client note.
+- Phones: one-line top bar, KPI cards three across, method notes hidden, filters in one scrolling row, cards about half the height (decision line + one line of facts).
+
 ## 2026-11-19 · stock-watch (QA pass, every page on phone + desktop)
 - Charts sized to the screen so labels are readable on phones; re-render when crossing the phone breakpoint.
 - Details panel now closes when you change page (it stayed open over other pages).
