@@ -60,7 +60,7 @@ Why both: the pull needs no setup by the brand, while Flow is exact. Running bot
 
 > sales per day = units sold in the last 28 days ÷ days the product was **in stock** during those 28 days (at least 1 day)
 
-Setting: *Sales history used* [28 days]. If the store's data starts later than 28 days ago, the window starts with the data.
+Setting: *Sales history used* [28 days]. If the store's data starts later than 28 days ago, the window starts with the data. **A product's own window starts at its first stock record or first order**, so a product launched 5 days ago is measured over those 5 days, not diluted by 23 days before it existed. (Without this, a new launch looked like a slow, overstocked product.)
 
 **Why in-stock days, not calendar days:** a product that sold 28 units but was out of stock for 7 of the 28 days really sells 28 ÷ 21 = 1.33 a day, not 1.0. Dividing by 28 would make every stock-out shrink the next order, and the product would run out sooner the next time, a loop that keeps getting worse. Removing the out-of-stock time breaks that loop.
 
@@ -122,10 +122,10 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 
 | Number | Rule |
 |---|---|
-| Sold | sum of quantity × price paid for every order line in the period |
+| Sold | sum of quantity × price paid for every order line in the period. Totals are the sum of the product rows, so the Overview and the Products page always agree |
 | Lost to stock-outs | sum of ₹ lost (section 4) for stock-out hours inside the period; a stock-out spanning midnight is split across the days it covers |
 | % of demand | lost ÷ (sold + lost). "Demand" = what was sold plus what would have been sold |
-| Daily chart | the same two numbers per local day (India time by default, setting *Time zone offset* [330 minutes]) |
+| Daily chart | the same two numbers per local day (India time by default, setting *Time zone offset* [330 minutes]); the first bar is the partial day the period starts in |
 | Selling items out now | products at 0 stock that sell at least the minimum rate (section 7) |
 | Out of stock right now (list) | every open stock-out, slow sellers included, so it can be higher than the count above |
 | Product-days with an empty shelf | total stock-out hours across all products ÷ 24 |
@@ -172,7 +172,9 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Rule:** a product selling below *Ignore below* [0.2 units a day, about 6 a month] is a **Slow seller**. Slow sellers are left out of the reorder list and alerts, but their stock-outs and ₹ lost are still counted.
 
-**Why:** for a product selling one unit a month, "days left" and "order quantity" swing wildly with a single order, and filling the reorder list with them hides the products that matter. It's not marked "not selling" because these products do sell, just slowly.
+**Exception: a best seller (A, section 7a) is never a slow seller.** A ₹90,000 sofa selling one a month can be in the top 80% of revenue; it stays on the reorder list.
+
+**Why:** for a product selling one unit a month, "days left" and "order quantity" swing wildly with a single order, and filling the reorder list with them hides the products that matter. It's not marked "not selling" because these products do sell, just slowly. A product with no sales at all is never "Out now" or on the reorder list, whatever the cutoff.
 
 ---
 
@@ -194,7 +196,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 > profit lost = units lost × (average price paid − unit cost)
 > margin = (average price paid − unit cost) ÷ average price paid
 
-**Unit cost** comes from Shopify's inventory item cost ("Cost per item", readable with `read_inventory`), or from a `cost` column in a CSV/Flow row. Products without a cost show "–" and aren't counted in profit lost. The Overview tile only appears when at least one product has a cost.
+**Unit cost** comes from Shopify's inventory item cost ("Cost per item", readable with `read_inventory`), or from a `cost` column in a CSV/Flow row. Products without a cost show "–" and aren't counted in profit lost. The Overview tile only appears when at least one product has a cost, and says "N/M costed" when only some do: then it's a minimum.
 
 **Why:** ₹ lost in sales overstates what the business lost. What it actually lost is the margin on those sales, and that's the number to weigh against the cost of holding more stock.
 
@@ -206,7 +208,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 > excess pieces = stock now − needed (never below 0)
 > excess ₹ = excess pieces × unit cost (× average price paid if cost is unknown)
 
-A product is **Overstocked** when its stock is more than **twice** what's needed, or it has stock but hasn't sold at all. **Cash in overstock** on the Overview adds up the excess ₹ of overstocked products only.
+A product is **Overstocked** when its stock is more than **twice** what's needed, or it has stock but hasn't sold at all. **Cash in overstock** on the Overview adds up, for overstocked products only, the excess ₹ beyond **one times** the need (the cash you could free by selling down to a normal level). The "twice" is only the flag threshold.
 
 **Why:** this is the cost-cutting side of the same maths. Money sitting in stock that won't sell for months could pay for stock that's running out. The usual moves are to stop reordering it, bundle it with a best seller, or discount it. The "twice" margin keeps a product that's only slightly over from being flagged.
 
@@ -221,15 +223,16 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
   > rate = units sold ÷ days in stock (in that 14-day half)
   > change = (recent rate − earlier rate) ÷ earlier rate
 
-  ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = no sales in the earlier half but sales now. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
-- **Store baseline:** the same comparison for the whole store (units, all products) is shown next to the Products tabs and in each chip's tooltip.
+  ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = in stock for at least 7 days of the earlier half with no sales, and 3 or more sold since. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
+- **Only time we have data for counts.** Days before a product's first record are "no data" (an empty bar), never "in stock, sold 0". Without this, a store with 20 days of history showed every product at +133%.
+- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown next to the Products tabs and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
 
 **Why it's built this way (and what's wrong with plain week-on-week, as in the DAWBU sheet):**
 - **Stock-outs aren't demand.** A product out for half of last week shows −50% week-on-week, though shoppers wanted it as much as ever. Dividing by in-stock days removes that. It's the same principle as section 3.
 - **Two weeks against two weeks.** For a product selling a few a week, one week against one week swings wildly (2 → 1 = −50%). Doubling the window halves most of that noise, and the 6-unit minimum hides changes that are just noise.
 - **Rolling weeks ending now,** not calendar weeks, so there's never a half-finished current week dragging the last bar down.
 - **A ±10% band,** wider than ±5%, so normal week-to-week wobble stays "flat".
-- **The store baseline separates season from product.** After a peak like Diwali almost everything falls. A product down 20% while the store is down 25% is holding up; one down 50% isn't.
+- **The baseline separates season from product.** After a peak like Diwali almost everything falls. A product down 20% while the typical product is down 25% is holding up; one down 50% isn't.
 
 **When it can be wrong:**
 - **Promotions in either half** distort it, and so do price changes.

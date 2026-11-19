@@ -136,3 +136,79 @@ test('trend: a stock-out is not read as falling demand; too few sales gives no t
   const thin = E.trend([{ t: now - D, qty: 2 }, { t: now - 20 * D, qty: 1 }], [], now);
   assert.equal(thin.trendPct, null);       // 3 units in 28 days: too few to call
 });
+
+/* ---- cases raised by the logic critic (2026-11-19) ---- */
+const S0 = { leadDays: 7, coverDays: 30, safetyDays: 3, minPerDay: 0.2 };
+
+test('a product launched 5 days ago: rate counts only its own days; not flagged overstock', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 60 * D, variantId: 'old', sku: 'O', product: 'Old', before: 50, now: 50, price: 100 },
+    { t: now - 5 * D, variantId: 'new', sku: 'N', product: 'New', before: 60, now: 60, price: 100 }];
+  const orders = [{ t: now - 59 * D, order: '#o', variantId: 'old', qty: 1, price: 100 }];
+  for (let d = 1; d <= 5; d++) orders.push({ t: now - d * D + 3600e3, order: `#n${d}`, variantId: 'new', qty: 2, price: 100 });
+  const p = E.report(stock, orders, S0, { days: 30, now }).products.find((x) => x.id === 'new');
+  assert.ok(Math.abs(p.perDay - 2) < 0.01, `perDay ${p.perDay}`);
+  assert.equal(p.overstock, false);
+});
+
+test('trend with short history: flat sales give a flat trend, not a jump; weeks before data are empty', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const lines = []; for (let d = 1; d <= 20; d++) lines.push({ t: now - d * D + 3600e3, qty: 2 });
+  const t = E.trend(lines, [], now, now - 20 * D);
+  assert.equal(t.trendPct, 0);
+  assert.equal(t.weeks[0].units, null);         // 8 weeks ago: before the data
+  assert.equal(t.trendNew, false);
+  const tenDays = E.trend(lines.slice(0, 10), [], now, now - 10 * D);
+  assert.equal(tenDays.trendNew, false);        // too little history is not "New"
+});
+
+test('"New" needs a real earlier window in stock and at least 3 sales since', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  assert.equal(E.trend([{ t: now - D, qty: 1 }], [], now, now - 60 * D).trendNew, false);   // one sale isn't a trend
+  assert.equal(E.trend([{ t: now - D, qty: 2 }, { t: now - 2 * D, qty: 2 }], [], now, now - 60 * D).trendNew, true);
+  const outBefore = [{ start: now - 28 * D, end: now - 14 * D }];                             // out of stock the whole earlier half
+  assert.equal(E.trend([{ t: now - D, qty: 2 }, { t: now - 2 * D, qty: 2 }], outBefore, now, now - 60 * D).trendNew, false);
+});
+
+test('a best seller that sells few units (high price) is still on the reorder list', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 40 * D, variantId: 'sofa', sku: 'S', product: 'Sofa', before: 1, now: 1, price: 90000 },
+    { t: now - 10 * D, variantId: 'sofa', sku: 'S', product: 'Sofa', before: 1, now: 0, price: 90000 },
+    { t: now - 40 * D, variantId: 'mug', sku: 'M', product: 'Mug', before: 500, now: 500, price: 100 }];
+  const orders = [{ t: now - 10 * D, order: '#1', variantId: 'sofa', qty: 1, price: 90000 }];
+  for (let d = 1; d <= 28; d++) orders.push({ t: now - d * D, order: `#m${d}`, variantId: 'mug', qty: 1, price: 100 });
+  const r = E.report(stock, orders, S0, { days: 30, now });
+  const sofa = r.products.find((p) => p.id === 'sofa');
+  assert.equal(sofa.abc, 'A'); assert.ok(sofa.perDay < 0.2);
+  assert.equal(sofa.status, 'Out now');          // was "Slow seller" and hidden from the reorder list
+  assert.ok(r.reorder.some((p) => p.id === 'sofa'));
+});
+
+test('overview totals equal the sum of the product rows (partial first day included)', () => {
+  const demo = require('../src/demo');
+  const now = Date.parse('2026-11-19T07:30:00Z');
+  const g = demo.generate({ now });
+  for (const days of [7, 30]) {
+    const r = E.report(g.stock, g.orders, {}, { days, now });
+    const sold = r.products.reduce((s, p) => s + p.sold, 0), lost = r.products.reduce((s, p) => s + p.lost, 0);
+    assert.equal(r.totals.sold, sold); assert.equal(r.totals.lost, lost);
+    const ds = r.daily.reduce((s, d) => s + d.sold, 0);
+    assert.ok(Math.abs(ds - sold) <= r.daily.length, `daily ${ds} vs rows ${sold}`);   // rounding per day only
+  }
+});
+
+test('typical-product baseline is the median product trend, not raw store units', () => {
+  const now = Date.parse('2026-11-19T07:30:00Z');
+  const g = require('../src/demo').generate({ now });
+  const r = E.report(g.stock, g.orders, {}, { days: 30, now });
+  const v = r.products.map((p) => p.trendPct).filter((x) => x != null).sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2), med = v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  assert.ok(Math.abs(r.totals.storeTrendPct - med) < 0.06);
+});
+
+test('slow-seller cutoff 0 never makes a product with no demand "Out now"', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const r = E.report([{ t: now - 10 * D, variantId: 'x', sku: 'X', product: 'X', before: 1, now: 0, price: 10 }], [], { ...S0, minPerDay: 0 }, { days: 30, now });
+  assert.notEqual(r.products[0].status, 'Out now');
+  assert.equal(r.reorder.length, 0);
+});

@@ -32,16 +32,25 @@ orca agent read <id>      # what an agent said
 
 Keep tasks touching the same file in one agent.
 
-## The critic (every dev cycle)
+## The three critics (every dev cycle)
 
-Every change gets a review from an agent that didn't write it. Point it at the diff and the rules, not at the builder's explanation, so its read isn't anchored:
+Every change gets three reviews from agents that didn't write it. Point them at the diff and the rules, not at the builder's explanation, so their read isn't anchored. Run them in parallel, each in its own worktree:
 
 ```bash
-orca worktree create --repo name:Stock-Watch --name sw-critic --agent codex \
-  --prompt "You are the critic. Read AGENTS.md, modules/stock-watch/LOGIC.md and the diff of the last commit (git show HEAD). Run npm test and the app (npm start). Report, most serious first: wrong or misleading numbers, rules that contradict LOGIC.md, untested edge cases, UX that slows a decision, wasted space. Cite file:line. Don't fix anything."
+# 1. Logic critic: the numbers
+orca worktree create --repo name:Stock-Watch --name critic-logic --agent codex \
+  --prompt "You are the logic critic. Read AGENTS.md and modules/<module>/LOGIC.md, then the diff (git log -p -3). Run npm test and load src/engine.js in node to check numbers. Report, most serious first, CONFIRMED vs SUSPECTED with file:line: formulas that don't match LOGIC.md, wrong windows, cost vs price mix-ups, NaN/edge cases, anything that would mislead a decision. Don't fix anything."
+
+# 2. UI critic: the running app
+orca worktree create --repo name:Stock-Watch --name critic-ui --agent claude \
+  --prompt "You are the UI critic. Run the app (cd modules/stock-watch && DATA_DIR=\$(mktemp -d) PORT=4640 node server.js). Screenshot every page at 1280, 1440, 1920 and 390x844 (playwright cli). Report: wasted space, sideways scroll, unclear labels, decision number not prominent, Performity inconsistency, touch targets, accessibility. Page + viewport + fix for each. Don't fix anything."
+
+# 3. Cross-module critic: same rule, same answer
+orca worktree create --repo name:Stock-Watch --name critic-modules --agent codex \
+  --prompt "You are the cross-module critic. Compare every business rule across modules/* (and LOGIC.md files, DECISIONS.md), and against the client's existing tools where known. Report rule differences, undocumented ones, doc/code drift, and what should become shared code so modules don't fork. file:line both sides. Don't fix anything."
 ```
 
-The builder then fixes what holds up and notes anything rejected (and why) in `docs/DEVLOG.md`.
+The builder fixes what holds up and notes anything rejected (and why) in `docs/DEVLOG.md`.
 
 ## Finishing
 

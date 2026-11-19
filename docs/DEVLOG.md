@@ -3,6 +3,19 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (logic critic fixes)
+Logic critic found 12 confirmed + 1 suspected issues; all fixed except where noted:
+- New launches: sales rate now starts at the product's first record (was diluted → false "Overstocked").
+- Trend: time before a product's data is "no data", not zero sales (short history showed +133%); "New" needs 7 in-stock days before and 3+ sales since; baseline is now the median product trend (same measure), labelled "Typical".
+- A best seller is never "Slow seller" (high-price items were hidden from reorder); no-demand products never "Out now" even at cutoff 0.
+- Totals = sum of product rows; daily chart includes the partial first day (Overview and Products disagreed by ~2%).
+- Overstock tooltip wording fixed (flag at 2× need, cash = beyond 1× need). Reorder text and days-left colours follow trial values.
+- Assumption labels no longer act as the − button; inputs properly labelled. Save/Reset errors shown.
+- Profit lost visible on all laptop widths; tile says "N/M costed" when costs are partial.
+- Column widths stored per screen size, only for visible columns, scaled to fit; resize works with touch (pointer events). Keyboard resize: not done (rejected for now, low value vs effort).
+- Blank trial value no longer read as 0.
+- 7 regression tests added (27 total).
+
 ## 2026-11-19 · stock-watch (trend + Shopify credentials)
 - Trend column (Reorder, Products, phone cards): 8 rolling weekly bars with stock-out marks, % change in sales per in-stock day (last 14 vs prior 14), store baseline; Rising / Falling tabs. LOGIC.md 7d, with why plain week-on-week (DAWBU sheet) misleads.
 - Shopify credentials: client ID + secret is now the main path (Dev Dashboard apps, 24-hour token via client credentials grant, renewed automatically); clear error for `shop_not_permitted` (app and store must be in the same Shopify organisation). Key Vault reads `shopify-<store>-client-id` / `-client-secret`. Legacy `shpat_` still works. Tests with a fake Shopify.

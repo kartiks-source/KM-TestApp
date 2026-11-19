@@ -74,34 +74,42 @@ function demandPerDay(units, from, to, eps) {
  *   weeks: the last 8 rolling 7-day blocks ending now (oldest first): units sold and days out of stock.
  *   trendPct: sales per in-stock day in the last 14 days vs the 14 days before. null when there's
  *   too little to say (fewer than 6 units over those 28 days, or under 3 in-stock days in either half).
+ *   since: when this product's data starts. Time before it is "no data", never "in stock, sold 0".
+ *   trendNew: it was in stock for at least 7 of the earlier days and sold nothing, and has sold 3+ since.
  */
 const TREND_MIN_UNITS = 6;
-function trend(lines, eps, now) {
+function trend(lines, eps, now, since = -Infinity) {
   const weeks = [];
   for (let w = 7; w >= 0; w--) {
     const a = now - (w + 1) * 7 * DAY, b = now - w * 7 * DAY;
+    if (b <= since) { weeks.push({ units: null, outDays: 0 }); continue; }
     const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
-    const out = eps.reduce((s, e) => s + overlap(e.start, e.end, a, b), 0);
+    const out = eps.reduce((s, e) => s + overlap(e.start, e.end, Math.max(a, since), b), 0);
     weeks.push({ units, outDays: round(out / DAY, 1) });
   }
-  const half = (a, b) => {
+  const half = (a0, b) => {
+    const a = Math.max(a0, since);
+    if (b <= a) return { units: 0, inDays: 0, rate: 0 };
     const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
     const inDays = (b - a - eps.reduce((s, e) => s + overlap(e.start, e.end, a, b), 0)) / DAY;
     return { units, inDays, rate: inDays > 0 ? units / inDays : 0 };
   };
   const recent = half(now - 14 * DAY, now), before = half(now - 28 * DAY, now - 14 * DAY);
   let trendPct = null;
-  if (recent.units + before.units >= TREND_MIN_UNITS && recent.inDays >= 3 && before.inDays >= 3) {
-    trendPct = before.rate > 0 ? round(((recent.rate - before.rate) / before.rate) * 100, 1) : null;
+  if (recent.units + before.units >= TREND_MIN_UNITS && recent.inDays >= 3 && before.inDays >= 3 && before.rate > 0) {
+    trendPct = round(((recent.rate - before.rate) / before.rate) * 100, 1);
   }
-  return { weeks, trendPct, trendNew: before.units === 0 && recent.units > 0 };
+  const trendNew = before.inDays >= 7 && before.units === 0 && recent.units >= 3;
+  return { weeks, trendPct, trendNew };
 }
 
-/** Whole-store sales, last 14 days vs the 14 before: the baseline a product's trend should be read against. */
-function storeTrend(orders, now) {
-  const sum = (a, b) => orders.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
-  const recent = sum(now - 14 * DAY, now), before = sum(now - 28 * DAY, now - 14 * DAY);
-  return before > 0 ? round(((recent - before) / before) * 100, 1) : null;
+/** The baseline to read a product's trend against: the median trend of all products that have one.
+ *  Same measure (sales per in-stock day), so store-wide stock-outs don't drag it down. */
+function storeTrend(products) {
+  const v = products.map((p) => p.trendPct).filter((x) => x != null).sort((a, b) => a - b);
+  if (v.length < 5) return null;
+  const m = Math.floor(v.length / 2);
+  return round(v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2, 1);
 }
 
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'OK'];
@@ -162,9 +170,14 @@ function report(stock, orders, settings = {}, opts = {}) {
 
   const firstOrder = orders.length ? Math.min(...orders.map((o) => o.t)) : now;
   const demandFrom = Math.max(now - S.demandWindowDays * DAY, firstOrder);
+  /* a product's data starts at its first stock record or first order; before that it didn't exist for us */
+  for (const p of P.values()) p.first = Math.min(p.changes.length ? p.changes[0].t : Infinity, ...p.lines.map((o) => o.t));
 
+  /* one bucket per local day touched by the period, the partial first day included, so the daily
+     chart adds up to the same totals as the product rows */
   const daily = {};
-  for (let t = now - (days - 1) * DAY; t <= now; t += DAY) daily[dayKey(t, off)] = { sold: 0, lost: 0, units: 0, unitsLost: 0, outSkus: new Set() };
+  const lastKey = dayKey(now, off);
+  for (let t = from; ; t += DAY) { const k = dayKey(Math.min(t, now), off); daily[k] = daily[k] || { sold: 0, lost: 0, units: 0, unitsLost: 0, outSkus: new Set() }; if (k === lastKey || t >= now) break; }
   for (const o of orders) {
     if (o.t < from) continue;
     const d = daily[dayKey(o.t, off)]; if (!d) continue;
@@ -175,11 +188,12 @@ function report(stock, orders, settings = {}, opts = {}) {
   for (const p of P.values()) {
     const name = [p.product, p.variant && p.variant !== 'Default Title' ? p.variant : ''].filter(Boolean).join(' · ') || p.sku || p.id;
     const eps = episodes(p.changes, now);
-    const recent = p.lines.filter((o) => o.t >= demandFrom);
+    const pFrom = Math.max(demandFrom, Number.isFinite(p.first) ? p.first : demandFrom);   // a new launch isn't diluted by days before it existed
+    const recent = p.lines.filter((o) => o.t >= pFrom);
     const units = recent.reduce((s, o) => s + num(o.qty), 0);
     const revenue = recent.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
     const price = units ? revenue / units : p.price;
-    const { perDay } = demandPerDay(units, demandFrom, now, eps);
+    const { perDay } = demandPerDay(units, pFrom, now, eps);
     const perSellingHour = perDay / 24;
 
     let lost = 0, unitsLost = 0, outs = 0, smallTopUps = 0, repeats = 0;
@@ -208,7 +222,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     });
 
     const pl = p.stock == null ? null : plan({ stock: p.stock, perDay, lead: S.leadDays, cover: S.coverDays, safety: S.safetyDays });
-    const selling = perDay >= S.minPerDay;
+    const selling = perDay > 0 && perDay >= S.minPerDay;
     const row = {
       id: p.id, name, sku: p.sku, stock: p.stock, perDay: round(perDay, 2), price: Math.round(price),
       daysLeft: pl && Number.isFinite(pl.daysLeft) ? round(pl.daysLeft, 1) : null,
@@ -219,6 +233,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '',
     };
+    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price }, enumerable: false });
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
     row.cost = p.cost ? Math.round(p.cost) : null;
@@ -231,7 +246,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.excessUnits = Math.max(0, Math.floor(have - need));
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
     row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
-    Object.assign(row, trend(p.lines, eps, now));
+    Object.assign(row, trend(p.lines, eps, now, p.first));
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
@@ -245,6 +260,14 @@ function report(stock, orders, settings = {}, opts = {}) {
     const before = allSold ? run / allSold : 1; run += p.sold;
     p.abc = !p.sold ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
   }
+  /* a best seller is never "slow": it earns its place by ₹ even when it sells few units (e.g. furniture) */
+  for (const p of products) {
+    const { pl, perDay, unitValue } = p._plan;
+    if (p.abc === 'A' && p.status === 'Slow seller' && pl && perDay > 0) {
+      p.status = pl.status; p.orderQty = pl.qty; p.orderValue = Math.round(pl.qty * unitValue);
+      if (p.status !== 'OK') reorder.push(p);
+    }
+  }
 
   const rank = (s) => STATUS.indexOf(s);
   reorder.sort((a, b) => rank(a.status) - rank(b.status) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
@@ -254,8 +277,9 @@ function report(stock, orders, settings = {}, opts = {}) {
   const dailyRows = Object.entries(daily).map(([day, d]) => ({
     day, sold: Math.round(d.sold), lost: Math.round(d.lost), units: d.units, unitsLost: round(d.unitsLost, 1), outSkus: d.outSkus.size,
   }));
-  const sold = dailyRows.reduce((s, d) => s + d.sold, 0);
-  const lost = dailyRows.reduce((s, d) => s + d.lost, 0);
+  /* totals come from the product rows, so they always equal what the Products page adds up to */
+  const sold = products.reduce((s, p) => s + p.sold, 0);
+  const lost = products.reduce((s, p) => s + p.lost, 0);
 
   return {
     generatedAt: now, days, from, settings: S,
@@ -277,7 +301,9 @@ function report(stock, orders, settings = {}, opts = {}) {
       orderValueAll: reorder.reduce((s, p) => s + p.orderValue, 0),
       overstocked: products.filter((p) => p.overstock).length,
       excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
-      storeTrendPct: storeTrend(orders, now),
+      storeTrendPct: storeTrend(products),
+      costed: products.filter((p) => p.cost != null && (p.sold || p.lost)).length,
+      active: products.filter((p) => p.sold || p.lost).length,
     },
     daily: dailyRows, reorder, stockouts, products,
     data: {

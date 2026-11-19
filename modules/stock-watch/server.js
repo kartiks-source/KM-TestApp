@@ -77,7 +77,7 @@ ${error ? `<p class="e" role="alert">${error}</p>` : ''}
 const publicSettings = (s) => ({ ...s });
 /* The planning assumptions people can tweak. Same limits whether trying a value or saving it. */
 const LIMITS = { leadDays: [0, 180], coverDays: [1, 365], safetyDays: [0, 60], demandWindowDays: [7, 90], smallTopUpDays: [1, 60], minPerDay: [0, 100], tzOffsetMin: [-720, 840] };
-const clampSetting = (k, v) => (v == null || v === '' || !Number.isFinite(+v) ? undefined : Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], +v)));
+const clampSetting = (k, v) => (v == null || String(v).trim() === '' || !Number.isFinite(+v) ? undefined : Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], +v)));
 /** Saved settings, with any ?leadDays=… style trial values on top (not saved). */
 function settingsFor(url, saved) {
   const out = { ...saved };

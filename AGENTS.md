@@ -33,7 +33,11 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 7. **No secrets in git, ever.** Keys go in Railway variables or Azure Key Vault. Never in code, Markdown, logs or Google Sheets.
 8. **Shopify is read-only** in every module. Only GraphQL queries are allowed through; no mutations, and no webhooks registered under someone else's app.
 9. **One agent, one worktree, one branch.** When several agents run at once in Orca, each gets its own worktree (see `docs/ORCA.md`). Merge to `main` only after tests pass.
-10. **A critic reviews every dev cycle.** Before a change is called done, a separate reviewer agent that hasn't seen the builder's reasoning reads the diff, `LOGIC.md` and the running app. It looks for wrong numbers, rules that contradict `LOGIC.md`, edge cases, UX that slows a decision, and anything a demanding expert would send back. The builder fixes what holds up or records why not in `docs/DEVLOG.md`. In Orca, run the critic in its own worktree or agent (see `docs/ORCA.md`).
+10. **Three critics review every dev cycle.** Before a change is called done, three separate reviewer agents that haven't seen the builder's reasoning each give a ranked list of findings with file:line. They never fix anything themselves.
+    - **Logic critic:** the numbers. It checks formulas against `LOGIC.md`, period windows, cost vs price, edge cases (no sales, no cost, short history) and anything that would mislead a decision.
+    - **UI critic:** the running app at 1280, 1440, 1920 and 390px phone width. It checks for wasted space, sideways scrolling, whether the decision number is the most prominent thing on the page, consistency with the Performity look, touch targets and accessibility.
+    - **Cross-module critic:** whether the same rule gives the same answer in every module (and against the client's existing tools, such as the DAWBU sheet), drift between docs and code, and what should be shared code so modules don't fork logic.
+    The builder fixes what holds up and records anything rejected, with the reason, in `docs/DEVLOG.md`. Ready-made prompts for each are in `docs/ORCA.md`.
 11. **Stay standalone.** No module reads another team's database. Data comes from Shopify (read-only) into the module's own storage.
 
 ## Deploy

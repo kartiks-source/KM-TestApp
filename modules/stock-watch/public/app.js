@@ -115,9 +115,9 @@
   function planBar() {
     const S = state.settings, R = state.report.settings, t = state.report.totals;
     const trial = Object.keys(state.what).length > 0;
-    const fields = ASSUME.map(([k, label, unit, step, tip]) => `<label class="pf" title="${esc(tip)}"><span>${label}</span>
-        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="number" step="${step}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></label>`).join('');
-    const impact = `<div class="pimpact"><span title="Cash to commit (at unit cost) for everything Out now, Critical or Order now">Order now <b>${money(t.orderValueNow)}</b></span><span title="Order value of the whole reorder list">Full list <b>${money(t.orderValueAll)}</b></span><span title="Cash in stock beyond twice what the next order cycle needs">Overstock <b>${money(t.excessValue)}</b></span></div>`;
+    const fields = ASSUME.map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
+        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="number" inputmode="decimal" min="0" step="${step}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
+    const impact = `<div class="pimpact"><span title="Cash to commit (at unit cost) for everything Out now, Critical or Order now">Order now <b>${money(t.orderValueNow)}</b></span><span title="Order value of the whole reorder list">Full list <b>${money(t.orderValueAll)}</b></span><span title="Overstocked products (stock over twice what lead + cover + safety days need): the cash in stock beyond that need">Overstock <b>${money(t.excessValue)}</b></span></div>`;
     return `<details class="plan" ${(state.planOpen ?? !narrow()) ? 'open' : ''}><summary>Assumptions${trial ? ' <span class="badge demo">trying new values</span>' : ''}${impact}</summary>
       <div class="pbody">${fields}
         ${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
@@ -133,8 +133,9 @@
   const WEEK_LABEL = (i) => (i === 7 ? 'last 7 days' : `${7 - i} week${7 - i > 1 ? 's' : ''} before`);
   function spark(p, w = 64, h = 20) {
     const wk = p.weeks || []; if (!wk.length) return '';
-    const max = Math.max(1, ...wk.map((x) => x.units)), bw = w / wk.length;
+    const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length;
     const bars = wk.map((x, i) => {
+      if (x.units == null) return `<g><title>${WEEK_LABEL(i)}: no data yet</title><rect class="nd" x="${i * bw + 1}" y="${h - 3}" width="${bw - 2}" height="1"/></g>`;
       const bh = x.units ? Math.max(2, (x.units / max) * (h - 4)) : 0;
       const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + 1}" y="${h - 2}" width="${bw - 2}" height="2"/>` : '';
       return `<g><title>${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out of stock ${n1(x.outDays)} d` : ''}</title>`
@@ -143,14 +144,19 @@
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Weekly units, last 8 weeks">${bars}</svg>`;
   }
   function trendChip(p) {
-    if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="No sales in the 14 days before; selling now">New</span>' : '<span class="tr low" title="Too few sales to call a trend">·</span>';
+    if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="In stock but no sales in the 14 days before; 3 or more sold since">New</span>' : '<span class="tr low" title="Too few sales or too little history to call a trend">·</span>';
     const v = p.trendPct, cls = v >= 10 ? 'up' : v <= -10 ? 'down' : 'flat';
     const base = state.report.totals.storeTrendPct;
-    return `<span class="tr ${cls}" title="Sales per in-stock day, last 14 days vs the 14 before. Out-of-stock days are left out, so a stock-out doesn't look like falling demand.${base != null ? ` Whole store over the same days: ${base > 0 ? '+' : ''}${n1(base)}%.` : ''}">${cls === 'up' ? '▲' : cls === 'down' ? '▼' : '▬'} ${v > 0 ? '+' : ''}${n1(v)}%</span>`;
+    return `<span class="tr ${cls}" title="Sales per in-stock day, last 14 days vs the 14 before. Out-of-stock days are left out, so a stock-out doesn't look like falling demand.${base != null ? ` Typical product over the same days: ${base > 0 ? '+' : ''}${n1(base)}%.` : ''}">${cls === 'up' ? '▲' : cls === 'down' ? '▼' : '▬'} ${v > 0 ? '+' : ''}${n1(v)}%</span>`;
   }
   const trendCell = (p) => `<span class="trc">${spark(p)}${trendChip(p)}</span>`;
   const trendCol = { k: 'trendPct', label: 'Trend', tip: '8 weekly bars of units sold (rose base = out of stock that week) and the change in sales per in-stock day: last 14 days vs the 14 before', f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' };
 
+  /* which priority columns the CSS shows at this width (mirrors the @media rules in styles.css) */
+  const colVisible = (c) => !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
+  const tier = () => (innerWidth > 1700 ? 'xl' : innerWidth > 1400 ? 'l' : innerWidth > 1180 ? 'm' : 's');
+  const colKey = (id) => `${id}@${tier()}`;                 // widths are remembered per screen size
+  const tableRoom = () => (document.querySelector('.wrap')?.clientWidth || innerWidth) - 46;
   /* ---------- generic sortable table ---------- */
   /* A sortable table on wide screens; on phones the same rows as cards (card(r) → html) with a sort picker. */
   function table(id, cols, rows, empty, card) {
@@ -161,7 +167,9 @@
       rows = rows.slice().sort((a, b) => { const x = v(a), y = v(b); return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
-    const W = state.colW[id], fixed = W && cols.every((c) => W[c.k]);
+    cols = cols.filter(colVisible);
+    const W = state.colW[colKey(id)], fixed = W && cols.every((c) => W[c.k]);
+    if (fixed) { const sum = cols.reduce((a, c) => a + W[c.k], 0), room = tableRoom(); if (sum > room) cols.forEach((c) => { W[c.k] = Math.max(40, Math.floor((W[c.k] * room) / sum)); }); }
     const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk;
@@ -243,10 +251,10 @@
       <section class="tiles">
         <div class="tile sold" title="Sales in the period"><b>${money(t.sold)}</b><span>sold</span></div>
         <button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost while products were out of stock"><b>${money(t.lost)}</b><span>sales lost · ${n1(t.lostPct)}% of demand</span></button>
-        ${t.hasCost ? `<div class="tile lost" title="Lost sales minus what those units would have cost (price paid − unit cost)"><b>${money(t.lostProfit)}</b><span>profit lost</span></div>` : ''}
+        ${t.hasCost ? `<div class="tile lost" title="Units lost × (price paid − unit cost), for products with a unit cost${t.costed < t.active ? `. Only ${t.costed} of ${t.active} products have a cost, so this is a minimum` : ''}"><b>${money(t.lostProfit)}</b><span>profit lost${t.costed < t.active ? ` · ${t.costed}/${t.active} costed` : ''}</span></div>` : ''}
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that are out, critical or due to order now"><b>${t.bestAtRisk}<small> / ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
         <button class="tile amber" data-go="reorder" data-filter="now" title="Cash to commit (at unit cost) for everything Out now, Critical or Order now"><b>${money(t.orderValueNow)}</b><span>to order now · ${t.orderNow + t.outNow} items</span></button>
-        <button class="tile plum" data-go="products" data-filter="over" title="Cash in stock beyond twice what the next order cycle needs: discount it, bundle it, or stop reordering"><b>${money(t.excessValue)}</b><span>cash in overstock · ${t.overstocked} items</span></button>
+        <button class="tile plum" data-go="products" data-filter="over" title="Overstocked products (stock over twice what lead + cover + safety days need): the cash in stock beyond that need. Discount it, bundle it, or stop reordering"><b>${money(t.excessValue)}</b><span>cash in overstock · ${t.overstocked} items</span></button>
       </section>
       <section class="ov">
       <div class="panel chart ov-chart">
@@ -273,7 +281,7 @@
 
   function daysCell(p) {
     if (p.daysLeft == null) return p.stock <= 0 ? '<span class="st out">0</span>' : '–';
-    const S = state.settings, warn = S.leadDays + S.safetyDays;
+    const S = state.report.settings, warn = S.leadDays + S.safetyDays;
     const color = p.daysLeft <= 3 ? '#E0506E' : p.daysLeft <= warn ? '#E8902A' : '#0978BE';
     return `<span class="days"><span class="num">${n1(p.daysLeft)}</span><span class="meter"><i style="width:${Math.min(100, (p.daysLeft / (warn + 7)) * 100)}%;background:${color}"></i></span></span>`;
   }
@@ -282,7 +290,7 @@
     const r = state.report, f = state.filter.reorder, q = state.q.reorder.toLowerCase();
     const groups = [['all', 'All', r.reorder.length], ['Out now', 'Out now', r.totals.outNow], ['now', 'Critical + order now', r.totals.orderNow], ['Order this week', 'This week', r.totals.orderWeek]];
     const rows = r.reorder.filter((p) => (f === 'all' || (f === 'now' ? ['Critical', 'Order now'].includes(p.status) : p.status === f)) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
-    const S = state.settings;
+    const S = state.report.settings;   // the values being tried, not only the saved ones
     return `
       <section class="headline ex"><h1>Reorder before they run out</h1>
         <p>Order quantity covers ${S.leadDays} days of lead time + ${S.coverDays} days after it lands + ${S.safetyDays} safety days, at each product’s in-stock sales rate. Try other values in Assumptions below.</p></section>
@@ -350,12 +358,12 @@
     { k: 'price', label: 'Avg price', hide: 1 },
     { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (p) => money(p.sold) },
     { k: 'lost', label: 'Lost', r: 1, tip: `₹ lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
-    { k: 'lostPct', label: '% lost', r: 1, tip: 'Lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
+    { k: 'lostPct', label: '% lost', r: 1, pr: 3, tip: 'Lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
     { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'excessValue', label: 'Excess', r: 1, pr: 2, tip: 'Cash in stock beyond what the next lead + cover + safety days need (at unit cost when known)', f: (p) => (p.excessValue ? `<span class="${p.overstock ? 'plumv' : 'muted'}">${money(p.excessValue)}</span>` : '–') },
     ...(state.report.totals.hasCost ? [
-      { k: 'lostProfit', label: 'Profit lost', r: 1, pr: 4, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
+      { k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
       { k: 'margin', label: 'Margin', r: 1, pr: 4, tip: '(price paid − unit cost) ÷ price paid', f: (p) => (p.margin == null ? '–' : `${n1(p.margin)}%`) },
       { k: 'cost', label: 'Unit cost', hide: 1 },
     ] : []),
@@ -370,7 +378,7 @@
       <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       ${planBar()}
-      <div class="toolbar"><div class="chips">${r.totals.storeTrendPct != null ? `<span class="base" title="Whole store, units sold: last 14 days vs the 14 before. A product falling about as much as the store is following the season, not losing ground.">Store ${r.totals.storeTrendPct >= 0 ? '▲' : '▼'} ${r.totals.storeTrendPct > 0 ? '+' : ''}${n1(r.totals.storeTrendPct)}%</span>` : ''}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
+      <div class="toolbar"><div class="chips">${r.totals.storeTrendPct != null ? `<span class="base" title="Typical product: the median trend across all products with enough sales, measured the same way (sales per in-stock day, last 14 days vs the 14 before). A product falling about as much is following the season, not losing ground.">Typical ${r.totals.storeTrendPct >= 0 ? '▲' : '▼'} ${r.totals.storeTrendPct > 0 ? '+' : ''}${n1(r.totals.storeTrendPct)}%</span>` : ''}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
 </div>
       ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
         <header><h3>${abcMark(p)}${esc(p.name)}</h3>${pill(p.status)}</header>
@@ -482,8 +490,7 @@
     if (t.dataset.filterProducts) { state.filter.products = t.dataset.filterProducts; render(); return; }
     if (t.id === 'csv-products') { downloadProductsCsv(); return; }
     if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
-    if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
-    if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
+
     if (t.matches('th[data-k]')) {
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
@@ -494,6 +501,8 @@
     if (t.id === 'copy-note') { copy($('.note p').textContent); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
     try {
+      if (t.id === 'what-reset') { state.what = {}; await reloadReport(); return; }
+      if (t.id === 'what-save') { t.disabled = true; await api('/api/settings', { method: 'PUT', body: JSON.stringify(state.what) }); state.what = {}; toast('Saved as the default'); await load(); return; }
       if (t.id === 'load-demo') { t.disabled = true; await api('/api/demo', { method: 'POST' }); toast('Demo data loaded'); await load(); }
       if (t.id === 'clear-all') { $('#clear-confirm').innerHTML = '<div class="confirm">Delete every stock change and order line? <button class="btn danger" id="clear-yes">Delete all</button><button class="btn ghost" id="clear-no">Keep</button></div>'; }
       if (t.id === 'clear-no') { $('#clear-confirm').innerHTML = ''; }
@@ -535,11 +544,11 @@
     state.sort[id] = k ? { k, dir: +dir } : null; render();
   });
   /* drag a header edge to resize, like a spreadsheet; double-click to reset that table */
-  document.addEventListener('mousedown', (e) => {
+  document.addEventListener('pointerdown', (e) => {
     const h = e.target.closest('.rz'); if (!h) return;
-    e.preventDefault();
+    e.preventDefault(); h.setPointerCapture && h.setPointerCapture(e.pointerId);
     const th = h.closest('th'), table = th.closest('table'), id = table.dataset.table;
-    const ths = [...table.querySelectorAll('th')];
+    const ths = [...table.querySelectorAll('th')].filter((x) => x.getBoundingClientRect().width > 0);
     const W = {}; ths.forEach((x) => { W[x.dataset.k] = Math.round(x.getBoundingClientRect().width); });
     table.classList.add('fixed'); ths.forEach((x) => { x.style.width = W[x.dataset.k] + 'px'; });
     table.style.width = Object.values(W).reduce((a, b) => a + b, 0) + 'px';
@@ -547,14 +556,14 @@
     document.body.classList.add('resizing');
     const move = (ev) => { W[k] = Math.max(40, w0 + ev.clientX - x0); th.style.width = W[k] + 'px'; table.style.width = Object.values(W).reduce((a, b) => a + b, 0) + 'px'; };
     const up = () => {
-      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('resizing');
-      state.colW[id] = W; try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.body.classList.remove('resizing');
+      state.colW[colKey(id)] = W; try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
     };
-    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
   });
   document.addEventListener('dblclick', (e) => {
     const h = e.target.closest('.rz'); if (!h) return;
-    const id = h.closest('table').dataset.table; delete state.colW[id];
+    const id = h.closest('table').dataset.table; Object.keys(state.colW).filter((k) => k === id || k.startsWith(id + '@')).forEach((k) => delete state.colW[k]);
     try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
     render();
   });
@@ -565,7 +574,8 @@
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);
   let wasNarrow = narrow();
-  window.addEventListener('resize', () => { if (narrow() !== wasNarrow) { wasNarrow = narrow(); render(); } });
+  let wasTier = tier();
+  window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } });
 
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); toast('Copied'); }

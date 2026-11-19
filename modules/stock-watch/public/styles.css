@@ -215,6 +215,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .spark .sb { fill: #9CC7E6; transform-box: fill-box; transform-origin: bottom; animation: sbIn .45s cubic-bezier(.2,.8,.2,1) both; }
 .spark .sb.last { fill: var(--brand); }
 .spark .so { fill: var(--lost); }
+.spark .nd { fill: var(--line-2); }
 .spark g:hover .sb { fill: var(--brand-d); }
 @keyframes sbIn { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .spark .sb { animation: none; } }
@@ -232,6 +233,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .plan[open] summary { padding-bottom: 2px; }
 .pbody { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 2px 14px 8px; }
 .pf { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--soft); }
+.pf label { cursor: default; }
 .pf em { font-style: normal; color: var(--faint); font-size: 12px; }
 .pin { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; background: #fff; }
 .pin input { width: 42px; border: 0; text-align: center; font-weight: 600; color: var(--ink); padding: 4px 0; -moz-appearance: textfield; }
@@ -247,7 +249,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 
 /* resizable columns */
 .tbl th { position: sticky; }
-.rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 4; }
+.rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 4; touch-action: none; }
 .rz:hover, body.resizing .rz:active { background: var(--brand-wash); }
 body.resizing { cursor: col-resize; user-select: none; }
 table.fixed { table-layout: fixed; }
