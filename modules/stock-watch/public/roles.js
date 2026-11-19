@@ -86,6 +86,8 @@
     if (tiles < TILES.length) {
       out += `#view > .tiles.t4 { grid-template-columns: repeat(${tiles}, minmax(0, 1fr)); }\n`;
       out += `@media (max-width: 760px) { #view > .tiles.t4 { grid-template-columns: repeat(${Math.min(2, tiles)}, minmax(0, 1fr)); } }\n`;
+      const kept = TILES.filter((k) => !R.hide.includes(k));
+      if (kept.length > 1 && kept.length % 2) out += `@media (max-width: 760px) { ${PARTS[kept[kept.length - 1]][1]} { grid-column: 1 / -1; } }\n`;   // M7: no half-empty row on phones
     }
     if (R.hide.includes('head:order')) out += '#view > .headline h1 .h-lost { display: inline-block; }\n#view > .headline h1 .h-lost::first-letter { text-transform: uppercase; }\n';   // "Stock-outs cost …" leads
     const lists = ['list:today', 'list:losses'].filter((k) => R.hide.includes(k)).length;

@@ -353,7 +353,7 @@
   /* SW-021: trend in the decision rows. ≥ 1400 px: its own cell (48×16 spark + chip); narrower: a 40×12 spark at the
      start of the name cell (no extra column; at the start so a long name's … never hides it, and the sparks line up) */
   const trendCell = (p) => `<span class="trc">${spark(p, 48, 16)}${trendOnly(p)}</span>`;
-  const mspark = (p) => `<span class="mspark">${spark(p, 48, 16)}</span>`;
+  const mspark = (p) => ((p.weeks || []).some((w) => w.units > 0) ? `<span class="mspark">${spark(p, 48, 16)}</span>` : '');   // M9: no sales in 8 weeks = a row of rose dashes; the Why line says it
 
   /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
   const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
@@ -522,7 +522,9 @@
       { k: 'pattern', label: 'Pattern', f: pattern, val: (a) => a.small + a.repeat },
     ];
     return `
-      <section class="headline"><h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> in sales${t.hasCost ? ` · ${money(t.lostProfit)} profit` : ''}${t.stillOut && t.stillOutPerDay ? ` · ${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span>` : ''}</h1>
+      <section class="headline">${narrow() && t.stillOut && t.stillOutPerDay
+        ? `<h1>${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span></h1><p>${all.length} products ran out ${t.stockouts} times · <span class="lostv">${money(t.lost)}</span> in sales${t.hasCost ? ` · <span class="nw">${money(t.lostProfit)} profit</span>` : ''}</p>`   // M10: phones lead with the action
+        : `<h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> in sales${t.hasCost ? ` · ${money(t.lostProfit)} profit` : ''}${t.stillOut && t.stillOutPerDay ? ` · ${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span>` : ''}</h1>`}
         <details class="how exp"><summary>How we estimate this</summary><p>Hours out of stock, weighted by when this store usually sells, × the product’s normal sales per hour × the average price paid. Open a product for each stock-out.</p></details></section>
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
@@ -559,7 +561,7 @@
   function mktBar(rows, f) {
     if (f !== 'pause' && f !== 'push') return '';
     const n = f === 'pause' ? `${inr.format(rows.filter((p) => p.orderQty > 0).length)} to reorder · ${inr.format(rows.filter((p) => p.status === 'Slow seller').length)} slow` : `${money(rows.reduce((a, p) => a + (p.excessValue || 0), 0))} stuck`;
-    return `<div class="mktbar"><span title="${esc(MKT_TIP[f])}">${n}</span>${rows.length ? `<button class="btn ghost xs" id="copy-skus">Copy ${inr.format(rows.length)} SKUs</button><button class="btn ghost xs" id="csv-mkt">CSV</button>` : ''}</div>`;
+    return `<div class="mktbar"><span title="${esc(MKT_TIP[f])}">${n}</span>${rows.length ? `<button class="btn ghost xs" id="copy-skus">Copy ${inr.format(rows.length)} SKUs</button>` : ''}</div>`;   // the list's CSV is in ⋯ (M5)
   }
   function downloadMktCsv(f) {
     const head = f === 'pause' ? ['Product', 'SKU', 'Variant ID', 'Why', 'Back in stock', 'In stock', 'Days left'] : ['Product', 'SKU', 'Variant ID', 'Overstock ₹', 'In stock', 'Days left'];
@@ -611,11 +613,11 @@
     if (f === 'decide') cols = cols.filter((c) => !['status', 'orderQty', 'daysLeft'].includes(c.k)).concat([{ k: 'decide', label: 'Decide', f: decideCell, val: (p) => decideOf().get(p.id)?.value || 0 }, ...(viewOnly() ? [] : [{ k: 'act', label: '', f: decideBtns }])]);
     const moreOn = PRODUCT_MORE.some(([k]) => k === f);
     return `
-      <section class="headline"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
+      <section class="headline"><h1>Products</h1><p>${inr.format(rows.length)} shown · <span class="nw">${money(tot.sold)} sold</span> · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
         <span class="hfind">${viewSelect()}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       <div class="toolbar"><div class="chips">${groupChip()}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}"${MKT_TIP[k] ? ` title="${esc(MKT_TIP[k])}"` : ''}>${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
-        ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products')}</div>
+        ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products', null, (f === 'pause' || f === 'push') && rows.length ? `<button class="linkbtn" id="csv-mkt">Download this list (CSV)</button>` : '')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
         <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${status(p)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'pause' ? `<div class="mfacts"><span>${esc(p.backIn || '')}</span></div>` : ''}${f === 'decide' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
@@ -679,7 +681,7 @@
     const allBtn = state.allColl ? '<button class="chip on" id="g-all">Showing all-products collections<span aria-hidden="true">×</span></button>'
       : d.hidden.length ? `<button class="chip" id="g-all" title="Collections holding 80% or more of products are hidden">Show ${d.hidden.length === 1 ? `“${esc(d.hidden[0].label)}”` : `${d.hidden.length} all-products collections`}</button>` : '';
     const sub = `${inr.format(rows.length)} ${LENS_MANY[lens]}`;   // overlap lenses: no grand total, only the footnote
-    return `${head(d.overlap ? sub : `${sub} · <b>${inr.format(t.needOrder)}</b> to order today · ${money(t.sold)} sold · <span class="lostv">${money(t.lost)} lost</span>`)}
+    return `${head(d.overlap ? sub : `${sub} · <b>${inr.format(t.needOrder)}</b> to order today · <span class="nw">${money(t.sold)} sold</span> · <span class="lostv">${money(t.lost)} lost</span>`)}
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
         <header><h3><span class="pname">${esc(g.label)}</span></h3><div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
@@ -812,6 +814,10 @@
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
     $('#view').classList.toggle('calm', !render._animate); render._animate = false;   // bars animate when a page opens, not on every filter or keystroke
     $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>' : '');
+    if (narrow()) {   // M3: phones scroll the chips row sideways; keep the active chip in view (pure DOM: the page doesn't move)
+      const on = $('.wrap > .toolbar .chips .on');
+      if (on) { const c = on.parentElement, a = on.getBoundingClientRect(), b = c.getBoundingClientRect(); if (a.left < b.left || a.right > b.right) c.scrollLeft += a.left - b.left - 10; }
+    }
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
     render._caret = null;

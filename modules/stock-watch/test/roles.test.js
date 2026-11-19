@@ -52,6 +52,16 @@ test('css removes exactly the role’s parts and re-flows the tiles', () => {
   assert.doesNotMatch(founder, /tiles/);                     // all 4 tiles stay
 });
 
+test('phones: an odd number of tiles (3) lets the last one span the row, so no half-empty row (critic M7)', () => {
+  const mkt = R.css('marketing');                             // lost, best sellers at risk, overstock
+  assert.match(mkt, /@media \(max-width: 760px\) \{ #view > \.tiles\.t4 > \.tile\[data-filter="over"\] \{ grid-column: 1 \/ -1; \} \}/);
+  assert.doesNotMatch(R.css('ceo'), /grid-column: 1 \/ -1/);  // 2 tiles: even
+  for (const r of R.ORDER) {
+    const kept = ['tile:lost', 'tile:order', 'tile:bestrisk', 'tile:over'].filter((k) => !R.ROLES[r].hide.includes(k)).length;
+    assert.equal(/grid-column: 1 \/ -1/.test(R.css(r)), kept === 3, r);
+  }
+});
+
 test('digest cadence follows the RACI "Pushed to them" column', () => {
   const c = Object.fromEntries(R.ORDER.map((k) => [k, R.ROLES[k].digest]));
   assert.deepEqual(c, { ceo: 'monday', founder: 'daily', ops: 'daily', buyer: null, marketing: 'daily', finance: 'monday', warehouse: null });

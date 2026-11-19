@@ -544,4 +544,35 @@ table.fixed td:first-child { max-width: none; }
 .dg-h { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: var(--soft); }
 .dg-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
 .okv { color: var(--ok); font-weight: 600; }
-@media (max-width: 760px) { .share .menu { right: 0; left: auto; } .share > summary.btn, .share .menu .linkbtn { min-height: 44px; } .dg-roles label { min-height: 44px; } }
+@media (max-width: 760px) { .share > summary.btn, .share .menu .linkbtn { min-height: 44px; } .dg-roles label { min-height: 44px; } }
+
+/* ---- phones, critic round 2 (M1–M10). Everything below is inside ≤760 px (or ≤380 px): desktop untouched. ---- */
+@media (max-width: 760px) {
+  /* M1: the Share menu spans the headline (it opened off-screen to the left when Share wrapped to the left edge) */
+  .headline { position: relative; }
+  .headline .share { position: static; }
+  .headline .share .menu { left: 0; right: 0; min-width: 0; }
+  /* M8: Yesterday and Share on one row under the decision h1 */
+  .headline .yday { flex: 1 1 220px; order: 2; }
+  .headline .share { order: 3; margin-left: auto; }
+  /* M2: ticked cards → the bulk bar sits above the bottom bar, so "Mark N ordered" is on screen wherever you tick */
+  .wrap > .bulk { position: fixed; left: 10px; right: 10px; bottom: calc(62px + 8px + env(safe-area-inset-bottom)); z-index: 25; box-shadow: 0 8px 24px -8px rgba(14, 22, 38, .35); }
+  .wrap > .bulk .muted { flex-basis: 100%; order: 3; font-size: 12px; }
+  .wrap:has(> .bulk) { padding-bottom: 140px; }
+  /* M4: 44 px touch targets left over from SW-023 */
+  .search, .search.sel, .field input, .field select { min-height: 44px; }
+  .pm { width: 44px; min-height: 44px; }
+  .pin input { min-height: 44px; }
+  .fold-in > summary { display: flex; align-items: center; min-height: 44px; margin: 0; }
+  .panel-head a { padding: 12px; margin: -12px; }
+  label.muted:has(> input[type=checkbox]) { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+  .pf { flex: 1 1 100%; justify-content: space-between; } .pf .pin { flex: none; }
+  .top .brand { min-width: 44px; min-height: 44px; justify-content: center; }
+  /* M5: Pause / Push count line + Copy SKUs + ⋯ on one row (the CSV moved into ⋯) */
+  .wrap > .toolbar:has(> .mktbar) .chips { flex-basis: 100%; }
+  .wrap > .toolbar .mktbar { flex: 1 1 auto; min-width: 0; }
+  /* M10: money never breaks mid-number */
+  .headline .lostv, .headline .amberv, .headline p b, .headline .nw { white-space: nowrap; }
+}
+/* M9: on small phones the name gets the card's width (the 8-week bars are in the drawer) */
+@media (max-width: 380px) { .mcard header .mspark { display: none; } }
