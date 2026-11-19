@@ -30,7 +30,7 @@ const blankShopify = () => ({ lastQty: {}, ordersCursor: null, lastSync: null, l
 
 function blank() {
   return { settings: { ...DEFAULT_SETTINGS, ingestKey: crypto.randomBytes(16).toString('hex'), sheetStockCsv: '', sheetOrderCsv: '' },
-    stock: [], orders: [], source: 'empty', lastSync: null, lastSyncError: null, shopify: blankShopify() };
+    stock: [], orders: [], catalog: {}, source: 'empty', lastSync: null, lastSyncError: null, shopify: blankShopify() };
 }
 
 /** Thrown when store.json exists but can't be read and there's no good backup. The server exits on it. */
@@ -69,6 +69,7 @@ function load() {
   db = data;
   db.settings = { ...blank().settings, ...db.settings };
   db.shopify = { ...blankShopify(), ...db.shopify };
+  if (!db.catalog || typeof db.catalog !== 'object') db.catalog = {};
   if (!db.settings.ingestKey) db.settings.ingestKey = crypto.randomBytes(16).toString('hex');
   if (db.source === 'live') db.everLive = true;   // stores saved before everLive existed
   db._stockKeys = new Set(db.stock.map(stockKey));
@@ -154,11 +155,59 @@ function add(kind, rows, src) {
   return n;
 }
 
-function prune() {
-  const cut = Date.now() - KEEP_DAYS * 864e5;
+/*
+ * Retention (SW-002, ADR-0010): order lines and stock changes older than KEEP_DAYS are dropped,
+ * except, per variant, the newest stock row (its stock now, even if it hasn't moved in months) and
+ * the row that opened a stock-out still running. A variant deleted from Shopify more than KEEP_DAYS
+ * ago loses all its old rows and its catalog entry.
+ */
+function pruneStock(rows, cut, catalog = {}) {
+  if (!rows.some((r) => r.t < cut)) return rows;
+  const gone = (id) => { const c = catalog[id]; return !!c && c.status === 'DELETED' && c.inactiveSince < cut; };
+  const by = new Map();
+  for (const r of rows) { const id = String(r.variantId); if (!by.has(id)) by.set(id, []); by.get(id).push(r); }
+  const keep = new Set();
+  for (const [id, list] of by) {
+    if (gone(id)) continue;
+    list.sort((a, b) => a.t - b.t);
+    let i = list.length - 1; keep.add(list[i]);
+    if (Number(list[i].now) <= 0) { while (i > 0 && Number(list[i - 1].now) <= 0) i--; keep.add(list[i]); }   // the stock-out's first row
+  }
+  return rows.filter((r) => r.t >= cut || keep.has(r));
+}
+
+let lastPrune = 0;
+/** Runs at most once an hour (it walks every row), or now with force. */
+function prune(force = false, now = Date.now()) {
+  if (!force && now - lastPrune < 3600e3) return;
+  lastPrune = now;
+  const cut = now - KEEP_DAYS * 864e5;
   const d = load();
-  if (d.stock.some((r) => r.t < cut)) { d.stock = d.stock.filter((r) => r.t >= cut); d._stockKeys = new Set(d.stock.map(stockKey)); }
+  const stock = pruneStock(d.stock, cut, d.catalog);
+  if (stock.length !== d.stock.length) { d.stock = stock; d._stockKeys = new Set(d.stock.map(stockKey)); }
   if (d.orders.some((r) => r.t < cut)) { d.orders = d.orders.filter((r) => r.t >= cut); d._orderKeys = new Set(d.orders.map(orderKey)); }
+  if (d.catalog) for (const [id, c] of Object.entries(d.catalog)) if (c.status === 'DELETED' && c.inactiveSince < cut) delete d.catalog[id];
+}
+
+/*
+ * The current-stock snapshot (SW-002, ADR-0010): every variant Shopify returned on this pull, with
+ * its stock now, price, cost, type, tags and status, replaced whole on each pull. Engine reads stock
+ * and attributes from here; stock rows are history only. A variant that turns inactive (archived,
+ * draft, untracked) keeps the time it was first seen inactive; one that disappears (deleted) is kept
+ * as a DELETED entry, and so is any variant with stock rows that Shopify no longer returns.
+ */
+function setCatalog(next, now = Date.now()) {
+  const d = load(); const prev = d.catalog || {}; const out = {};
+  for (const [id, c] of Object.entries(next)) {
+    const p = prev[id];
+    out[id] = c.active !== false ? c : { ...c, inactiveSince: p && p.active === false && p.status !== 'DELETED' && p.inactiveSince ? p.inactiveSince : now };
+  }
+  const tomb = (id, base) => { out[id] = { ...base, active: false, status: 'DELETED', inactiveSince: base.status === 'DELETED' && base.inactiveSince ? base.inactiveSince : now, stock: base.stock ?? null }; };
+  for (const [id, p] of Object.entries(prev)) if (!out[id]) tomb(id, p);
+  for (const r of d.stock) { const id = String(r.variantId); if (!out[id]) tomb(id, { product: r.product, variant: r.variant, sku: r.sku, stock: null, seenAt: r.t }); }
+  d.catalog = out;
+  save();
+  return out;
 }
 
 /** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
@@ -179,6 +228,7 @@ function replaceAll(stock, orders, source) {
   d.stock = stock; d.orders = orders; d.source = source;
   d._stockKeys = new Set(stock.map(stockKey)); d._orderKeys = new Set(orders.map(orderKey));
   d.shopify = blankShopify();   // re-read everything from Shopify on the next pull
+  d.catalog = {};
   save(true);
 }
 
@@ -193,4 +243,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { SOURCES, load, add, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, health, StoreLoadError, FILE, BAK, DATA_DIR, KEEP_DAYS };
+module.exports = { SOURCES, load, add, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, health, StoreLoadError, FILE, BAK, DATA_DIR, KEEP_DAYS };

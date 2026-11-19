@@ -13,7 +13,7 @@ One file per decision, Nygard format (`0000-template.md`). Number in order; neve
 | 0007 | Five critics every dev cycle | Accepted |
 | 0008 | Shared packages for multi-module logic | Proposed |
 | 0009 | One authoritative data source per store | Accepted |
-| 0010 | Current-stock snapshot separate from change history | Proposed |
+| 0010 | Current-stock snapshot separate from change history | Accepted |
 | 0011 | Auth: one admin password, signed cookie, hardened | Accepted |
 | 0012 | Single instance on Railway, deploy from a clean main | Accepted |
 | 0013 | Performity look and feel | Accepted |

@@ -19,6 +19,7 @@ Google Sheet CSV / upload ───┘
 - **Stock row:** `{ t, variantId, sku, product, variant, before, now, price, src }`, one per stock change.
 - **Order row:** `{ t, order, variantId, sku, qty, price, src }`, one per order line.
 - **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs.
+- **Catalog** (`store.json` → `catalog`, Shopify only): `{variantId → productId, product, variant, sku, type, tags, price, cost, status, tracked, active, stock, seenAt, inactiveSince}`, replaced on every pull (ADR-0010). Engine takes stock now and attributes from it; inactive variants are left out of reorder and overstock.
 - **Engine** (`src/engine.js`, pure functions): stock-out episodes, in-stock sales rate, ₹ lost (weighted by the store's hour-of-day sales pattern), reorder status and quantity.
 
 ## Files
@@ -31,7 +32,7 @@ Google Sheet CSV / upload ───┘
 | `src/rows.js` | CSV / sheet / webhook → rows |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
-| `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
+| `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |

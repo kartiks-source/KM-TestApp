@@ -229,3 +229,99 @@ test('server: Clear and import wait while a Shopify pull runs (409)', async () =
     await new Promise((r) => server.close(r));
   }
 });
+
+/* ---------- SW-002: current stock never disappears; inactive items left out ---------- */
+const E = require('../src/engine');
+const SH = require('../src/shopify');
+const DAYMS = 864e5;
+
+test('a variant unchanged for 130 days keeps its stock and counts in overstock ₹', () => {
+  const s = freshStore(tmpDir()); const now = Date.now();
+  s.add('stock', [{ t: now - 130 * DAYMS, variantId: 'A', product: 'Dead stock', before: null, now: 50, price: 1000, cost: 400 },
+    { t: now - 2 * DAYMS, variantId: 'B', product: 'Seller', before: 10, now: 9, price: 100 }], 'csv');
+  s.prune(true, now);
+  const d = s.load();
+  assert.deepEqual(d.stock.map((r) => r.variantId).sort(), ['A', 'B']);
+  const r = E.report(d.stock, d.orders, {}, { now, catalog: d.catalog });
+  const a = r.products.find((p) => p.id === 'A');
+  assert.equal(a.stock, 50); assert.equal(a.overstock, true); assert.equal(a.excessValue, 20000);
+  assert.equal(r.totals.excessValue >= 20000, true);
+});
+
+test('a stock-out open for 130 days keeps its opening row and stays in the out-now list', () => {
+  const s = freshStore(tmpDir()); const now = Date.now();
+  s.add('stock', [
+    { t: now - 140 * DAYMS, variantId: 'X', before: 3, now: 5 },
+    { t: now - 130 * DAYMS, variantId: 'X', before: 5, now: 0 },
+    { t: now - 125 * DAYMS, variantId: 'X', before: 0, now: -1 },
+  ], 'csv');
+  s.prune(true, now);
+  const d = s.load();
+  assert.deepEqual(d.stock.map((r) => r.t - now).sort((a, b) => a - b), [-130 * DAYMS, -125 * DAYMS]);
+  const r = E.report(d.stock, d.orders, {}, { now });
+  const so = r.stockouts.find((x) => x.id === 'X');
+  assert.equal(so.open, true); assert.equal(so.start, now - 130 * DAYMS);
+  assert.equal(r.totals.stillOut, 1);
+  assert.equal(r.products.find((p) => p.id === 'X').stock, -1);
+});
+
+const gv = (id, qty, extra = {}, product = {}) => ({ id: `gid://shopify/ProductVariant/${id}`, sku: `S${id}`, title: 'Default Title', price: '1000.00', inventoryQuantity: qty,
+  inventoryItem: { tracked: true, unitCost: { amount: '400.00' } }, product: { id: `gid://shopify/Product/${id}0`, title: `P${id}`, status: 'ACTIVE', productType: 'Decor', tags: ['gift'], ...product }, ...extra });
+
+test('pull: catalog lists every variant with status; inactive ones get no stock rows', () => {
+  const r = SH.diffStock([gv(1, 5), gv(2, 7, {}, { status: 'ARCHIVED' }), gv(3, 4, { inventoryItem: { tracked: false } })], {}, 1000);
+  assert.deepEqual(r.rows.map((x) => x.variantId), ['1']);
+  assert.deepEqual(Object.keys(r.catalog), ['1', '2', '3']);
+  assert.deepEqual([r.catalog['1'].active, r.catalog['2'].status, r.catalog['3'].status], [true, 'ARCHIVED', 'UNTRACKED']);
+  assert.deepEqual([r.catalog['1'].productId, r.catalog['1'].tags, r.catalog['1'].cost, r.catalog['1'].stock], ['10', ['gift'], 400, 5]);
+});
+
+test('an archived variant is left out of overstock and reorder, and shown as excluded', () => {
+  const s = freshStore(tmpDir()); const now = Date.now();
+  const p = SH.diffStock([gv(1, 500), gv(2, 100, {}, { status: 'ARCHIVED' })], {}, now - 3 * DAYMS);
+  s.add('stock', p.rows, 'shopify'); s.setCatalog(p.catalog, now - 3 * DAYMS);
+  const d = s.load();
+  const r = E.report(d.stock, d.orders, {}, { now, catalog: d.catalog });
+  assert.equal(r.products.some((x) => x.id === '2'), false);
+  assert.equal(r.reorder.some((x) => x.id === '2'), false);
+  assert.equal(r.totals.excessValue, 500 * 400);   // variant 1 only
+  assert.deepEqual(r.data.excluded, { variants: 1, pcs: 100, byStatus: { ARCHIVED: 1 } });
+});
+
+test('a cost change shows on the next pull without a stock move', () => {
+  const s = freshStore(tmpDir()); const now = Date.now();
+  const a = SH.diffStock([gv(1, 5)], {}, now - DAYMS);
+  s.add('stock', a.rows, 'shopify'); s.setCatalog(a.catalog, now - DAYMS);
+  const b = SH.diffStock([gv(1, 5, { inventoryItem: { tracked: true, unitCost: { amount: '650.00' } } })], a.lastQty, now);
+  assert.equal(b.rows.length, 0);
+  s.setCatalog(b.catalog, now);
+  const d = s.load();
+  assert.equal(E.report(d.stock, d.orders, {}, { now, catalog: d.catalog }).products.find((x) => x.id === '1').cost, 650);
+});
+
+test('catalog: inactive time is kept across pulls; deleted variants are tombstoned, then pruned after 120 days', () => {
+  const s = freshStore(tmpDir()); const now = Date.now();
+  s.add('stock', [{ t: now - 200 * DAYMS, variantId: '9', before: null, now: 4 }], 'shopify');
+  s.setCatalog(SH.diffStock([gv(1, 5, {}, { status: 'DRAFT' })], {}, now - 10 * DAYMS).catalog, now - 10 * DAYMS);
+  s.setCatalog(SH.diffStock([gv(1, 5, {}, { status: 'DRAFT' })], {}, now).catalog, now);
+  let c = s.load().catalog;
+  assert.equal(c['1'].inactiveSince, now - 10 * DAYMS);
+  assert.equal(c['9'].status, 'DELETED');   // has rows, not returned by Shopify
+  c['9'].inactiveSince = now - 121 * DAYMS;
+  s.prune(true, now);
+  c = s.load().catalog;
+  assert.equal(c['9'], undefined);
+  assert.equal(s.load().stock.some((r) => r.variantId === '9'), false);
+});
+
+test('a stock-out on a product that went inactive ends then, and is not "still out"', () => {
+  const now = Date.now();
+  const stock = [{ t: now - 20 * DAYMS, variantId: '1', before: 2, now: 0 }];
+  const orders = [{ t: now - 25 * DAYMS, order: '#1', variantId: '1', qty: 10, price: 100 }];
+  const catalog = { 1: { product: 'P', variant: '', stock: 0, active: false, status: 'ARCHIVED', inactiveSince: now - 15 * DAYMS } };
+  const r = E.report(stock, orders, {}, { now, catalog });
+  const so = r.stockouts.find((x) => x.id === '1');
+  assert.equal(so.open, false); assert.equal(so.end, now - 15 * DAYMS); assert.equal(so.small, false);
+  assert.equal(r.totals.stillOut, 0);
+  assert.equal(r.products.find((x) => x.id === '1').status, 'Inactive');
+});
