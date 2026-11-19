@@ -53,11 +53,16 @@
     $('#store-name').textContent = s.storeName || 'Store';
     $('#n-reorder').textContent = r.totals.outNow + r.totals.orderNow || '';
     $('#n-stockouts').textContent = r.totals.stockouts || '';
-    const src = state.source, d = r.data;
-    const badge = src.kind === 'demo' ? '<span class="badge demo">Demo data</span>' : src.kind === 'live' ? '<span class="badge live">● Live data</span>' : '<span class="badge empty">No data yet</span>';
+    const src = state.source, d = r.data, sh = state.shopify || {};
+    const err = sh.lastError || src.err;
+    const pill = $('#sync-pill');
+    pill.className = 'sync-pill ' + (err ? 'err' : src.kind === 'demo' ? 'demo' : src.kind === 'live' ? 'ok' : '');
+    pill.querySelector('span').textContent = err ? 'Sync issue' : src.kind === 'demo' ? 'Demo data' : sh.running ? 'Syncing…' : 'Data Sync';
+    pill.title = err || (src.kind === 'demo' ? 'Showing demo data' : 'Data is syncing');
+    const badge = src.kind === 'demo' ? '<span class="badge demo">Demo data</span>' : src.kind === 'live' ? '<span class="badge live">Live data</span>' : '<span class="badge empty">No data yet</span>';
     $('#source').innerHTML = `${badge}<span>${inr.format(d.stockRows)} stock changes · ${inr.format(d.orderRows)} order lines</span>`
-      + (d.lastStock ? `<span>last stock change ${dt(d.lastStock)}</span>` : '')
-      + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>sheet synced ${dt(src.lastSync)}</span>` : '')
+      + (d.lastStock ? `<span>Last stock change: ${dt(d.lastStock)}</span>` : '')
+      + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
       + shopifyBadge();
     $$('.range button').forEach((b) => b.classList.toggle('on', +b.dataset.days === state.days));
   }
@@ -67,7 +72,7 @@
     if (!sh.source) return '';
     if (sh.running) return '<span>Shopify: pulling now…</span>';
     if (sh.lastError) return `<span class="badge err">Shopify: ${esc(sh.lastError)}</span>`;
-    return sh.lastSync ? `<span>Shopify read ${dt(sh.lastSync)}</span>` : '<span>Shopify: first pull pending</span>';
+    return sh.lastSync ? `<span>Shopify synced: ${dt(sh.lastSync)}</span>` : '<span>Shopify: first pull pending</span>';
   }
   function shopifyPanel() {
     const sh = state.shopify || {};
@@ -82,7 +87,7 @@
     const where = sh.source === 'vault' ? `Azure Key Vault, secret <span class="mono">${esc(sh.secretName)}</span>` : 'Railway variables (stop-gap)';
     return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · ${esc(sh.store || '')}</h2>
       <dl class="kv"><dt>Key from</dt><dd>${where}</dd>
-        <dt>Status</dt><dd>${!sh.ready ? `<span style="color:#D9623B">Missing: ${esc(sh.missing.join(', '))}</span>` : sh.running ? 'Pulling now…' : sh.lastError ? `<span style="color:#D9623B">${esc(sh.lastError)}</span>${sh.lastTry ? ` · tried ${dt(sh.lastTry)}` : ''}` : sh.lastSync ? `OK · last read ${dt(sh.lastSync)}` : 'First pull pending'}</dd>
+        <dt>Status</dt><dd>${!sh.ready ? `<span style="color:#E0506E">Missing: ${esc(sh.missing.join(', '))}</span>` : sh.running ? 'Pulling now…' : sh.lastError ? `<span style="color:#E0506E">${esc(sh.lastError)}</span>${sh.lastTry ? ` · tried ${dt(sh.lastTry)}` : ''}` : sh.lastSync ? `OK · last read ${dt(sh.lastSync)}` : 'First pull pending'}</dd>
         <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 15 minutes' : 'Loads the last 60 days on the first pull'}</dd>
         <dt>Reads only</dt><dd>${scopes} · API ${esc(sh.apiVersion || '')}</dd></dl>
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
@@ -110,13 +115,13 @@
     const bw = (W - L - R) / daily.length;
     const every = Math.ceil(daily.length / 10);
     let g = '';
-    for (let v = 0; v <= top + 1; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E4DCCD" stroke-width="1"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${esc(money(v))}</text>`;
+    for (let v = 0; v <= top + 1; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E7EBF2" stroke-width="1"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${esc(money(v))}</text>`;
     daily.forEach((d, i) => {
       const x = L + i * bw + bw * 0.14, w = bw * 0.72;
       const ys = y(d.sold), yl = y(d.sold + d.lost);
       g += `<g><title>${dayLabel(d.day)}: sold ${moneyFull(d.sold)}, lost ${moneyFull(d.lost)}${d.outSkus ? ` · ${d.outSkus} product(s) out` : ''}</title>`
-        + `<rect x="${x}" y="${ys}" width="${w}" height="${Math.max(0, y(0) - ys)}" rx="2" fill="#3E7C59"/>`
-        + (d.lost > 0 ? `<rect x="${x}" y="${yl}" width="${w}" height="${Math.max(1, ys - yl)}" rx="2" fill="#D9623B"/>` : '') + '</g>';
+        + `<rect x="${x}" y="${ys}" width="${w}" height="${Math.max(0, y(0) - ys)}" rx="2" fill="#0978BE"/>`
+        + (d.lost > 0 ? `<rect x="${x}" y="${yl}" width="${w}" height="${Math.max(1, ys - yl)}" rx="2" fill="#E0506E"/>` : '') + '</g>';
       if (i % every === 0 || i === daily.length - 1) g += `<text x="${x + w / 2}" y="${H - 12}" text-anchor="middle">${dayLabel(d.day)}</text>`;
     });
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily sales and sales lost to stock-outs">${g}</svg>`;
@@ -133,20 +138,20 @@
     let path = `M${x(tl[0].t)},${y(tl[0].stock)}`, bands = '';
     for (let i = 1; i < tl.length; i++) {
       path += ` H${x(tl[i].t)} V${y(tl[i].stock)}`;
-      if (tl[i - 1].stock <= 0) bands += `<rect x="${x(tl[i - 1].t)}" y="${T}" width="${Math.max(1, x(tl[i].t) - x(tl[i - 1].t))}" height="${H - T - B}" fill="#FBE7DD"/>`;
+      if (tl[i - 1].stock <= 0) bands += `<rect x="${x(tl[i - 1].t)}" y="${T}" width="${Math.max(1, x(tl[i].t) - x(tl[i - 1].t))}" height="${H - T - B}" fill="#FCE9ED"/>`;
     }
     let ticks = '';
-    for (let v = 0; v <= top; v += niceStep(max / 4)) ticks += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E4DCCD"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    for (let v = 0; v <= top; v += niceStep(max / 4)) ticks += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E7EBF2"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
     const days = Math.round((to - from) / 864e5); let xl = '';
     for (let i = 0; i <= days; i += Math.max(1, Math.ceil(days / 6))) { const t = from + i * 864e5; const d = local(t); xl += `<text x="${x(t)}" y="${H - 8}" text-anchor="middle">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</text>`; }
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stock over time; shaded = out of stock">${bands}${ticks}<path d="${path}" fill="none" stroke="#2B2A6B" stroke-width="2"/>${xl}</svg>`;
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stock over time; shaded = out of stock">${bands}${ticks}<path d="${path}" fill="none" stroke="#0978BE" stroke-width="2"/>${xl}</svg>`;
   }
   function unitsChart(rows) {
     const W = 680, H = 140, L = 46, R = 8, T = 8, B = 24;
     const max = Math.max(1, ...rows.map((r) => r.units));
     const bw = (W - L - R) / rows.length;
     const y = (v) => T + (H - T - B) * (1 - v / max);
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Units sold per day">${rows.map((r, i) => `<rect x="${L + i * bw + bw * 0.15}" y="${y(r.units)}" width="${bw * 0.7}" height="${Math.max(0, y(0) - y(r.units))}" rx="2" fill="#3E7C59"><title>${dayLabel(r.day)}: ${r.units} sold</title></rect>`).join('')}
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Units sold per day">${rows.map((r, i) => `<rect x="${L + i * bw + bw * 0.15}" y="${y(r.units)}" width="${bw * 0.7}" height="${Math.max(0, y(0) - y(r.units))}" rx="2" fill="#0978BE"><title>${dayLabel(r.day)}: ${r.units} sold</title></rect>`).join('')}
       <text x="${L - 6}" y="${y(max) + 4}" text-anchor="end">${max}</text><text x="${L - 6}" y="${y(0)}" text-anchor="end">0</text></svg>`;
   }
 
@@ -173,7 +178,7 @@
         <button class="tile plum" data-go="stockouts" data-filter="again"><b>${t.repeats}</b><span>out again within a week</span></button>
       </section>
       <section class="panel chart">
-        <div class="panel-head"><h2>Sold vs lost to stock-outs, per day</h2><div class="legend"><span><i style="background:#3E7C59"></i>Sold</span><span><i style="background:#D9623B"></i>Lost to stock-outs</span></div></div>
+        <div class="panel-head"><h2>Sold vs lost to stock-outs, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold</span><span><i style="background:#E0506E"></i>Lost to stock-outs</span></div></div>
         ${dailyChart(r.daily)}
       </section>
       <section class="grid2">
@@ -193,7 +198,7 @@
   function daysCell(p) {
     if (p.daysLeft == null) return p.stock <= 0 ? '<span class="st out">0</span>' : '–';
     const S = state.settings, warn = S.leadDays + S.safetyDays;
-    const color = p.daysLeft <= 3 ? '#D9623B' : p.daysLeft <= warn ? '#B7791F' : '#2B2A6B';
+    const color = p.daysLeft <= 3 ? '#E0506E' : p.daysLeft <= warn ? '#E8902A' : '#0978BE';
     return `<span class="days"><span class="num">${n1(p.daysLeft)}</span><span class="meter"><i style="width:${Math.min(100, (p.daysLeft / (warn + 7)) * 100)}%;background:${color}"></i></span></span>`;
   }
 
@@ -216,7 +221,7 @@
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
         { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'orderValue', label: 'Order value', r: 1, f: (p) => money(p.orderValue) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#D9623B;font-weight:700">${money(p.lost)}</span>` : '–') },
+        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#E0506E;font-weight:700">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
       ], rows, 'Nothing to order in this view.')}`;
   }
@@ -237,7 +242,7 @@
         { k: 'end', label: 'Back in', f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
         { k: 'hours', label: 'Out for', r: 1, f: (s) => dur(s.hours) },
         { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
-        { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b style="color:#D9623B">${money(s.lost)}</b>` },
+        { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b style="color:#E0506E">${money(s.lost)}</b>` },
         { k: 'topUp', label: 'Refilled with', r: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
         { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small">Small top-up</span>' : '', s.repeat ? '<span class="st again">Out again within a week</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
       ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.')}`;
@@ -256,7 +261,7 @@
         { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
         { k: 'price', label: 'Avg price', r: 1, f: (p) => moneyFull(p.price) },
         { k: 'sold', label: `Sold (${state.days} d)`, r: 1, f: (p) => money(p.sold) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#D9623B;font-weight:700">${money(p.lost)}</span>` : '–') },
+        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#E0506E;font-weight:700">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
       ], rows, 'No products yet.')}`;
   }
@@ -272,7 +277,7 @@
           <dl class="kv"><dt>Source</dt><dd>${src.kind === 'demo' ? 'Demo data: Sammsara’s public product list, with invented stock and sales' : src.kind === 'live' ? 'Live store data' : 'Nothing yet'}</dd>
             <dt>Stock changes</dt><dd>${inr.format(d.stockRows)} ${d.firstStock ? `· ${dt(d.firstStock)} → ${dt(d.lastStock)}` : ''}</dd>
             <dt>Order lines</dt><dd>${inr.format(d.orderRows)} ${d.firstOrder ? `· ${dt(d.firstOrder)} → ${dt(d.lastOrder)}` : ''}</dd>
-            <dt>Sheet sync</dt><dd>${src.err ? `<span style="color:#D9623B">${esc(src.err)}</span>` : src.lastSync ? dt(src.lastSync) : 'not set up'}</dd></dl>
+            <dt>Sheet sync</dt><dd>${src.err ? `<span style="color:#E0506E">${esc(src.err)}</span>` : src.lastSync ? dt(src.lastSync) : 'not set up'}</dd></dl>
           <div class="toolbar">${state.shopify?.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button><a class="btn ghost" href="/logout">Sign out</a></div>
           <div id="clear-confirm"></div>
         </div>
@@ -329,7 +334,7 @@
         </section>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
         <div class="panel chart"><h2>Units sold per day</h2>${unitsChart(d.dailyUnits)}</div>
-        <div class="panel"><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#D9623B">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again within a week</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div>`;
+        <div class="panel"><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again within a week</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div>`;
     } catch (e) { body.innerHTML = `<p>Couldn’t load this product: ${esc(e.message)}</p>`; }
   }
   const closeDrawer = () => { $('#drawer').hidden = true; };

@@ -31,7 +31,7 @@ Google Sheet CSV / upload ───┘
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
-| `public/` | the page (plain JS, no build step) |
+| `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |
 
 ## Shopify access (decided 19 Nov 2026)
