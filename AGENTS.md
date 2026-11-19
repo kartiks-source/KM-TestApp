@@ -25,7 +25,7 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 
 1. **Read the module's `AGENTS.md` before touching it**, and work inside that one folder. A task that spans modules is split into one task per module.
 2. **Context lives in Markdown, in the repo.** When you change how a module works, update its `AGENTS.md` in the same commit: what it does, its files, its status, what's next. The next agent should never have to rediscover anything.
-3. **Log every change** in `docs/DEVLOG.md`: date, module, what changed and why, and anything left open. Newest first, a few lines each.
+3. **Log every change** in `docs/DEVLOG.md`: date, module, what changed and why, and anything left open. Newest first, a few lines each. Add the same line to the shared dev log page, Catalys Modules: Dev Log (https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq), which the team reads.
 4. **Record decisions** that outlive one change (data access, hosting, security) in `docs/DECISIONS.md`, with the date and who decided.
 5. **Tests before push:** `npm test` at the root runs every module's tests. Add a test for each new behaviour.
 6. **No secrets in git, ever.** Keys go in Railway variables or Azure Key Vault. Never in code, Markdown, logs or Google Sheets.

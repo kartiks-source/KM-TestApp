@@ -1,6 +1,7 @@
 # Dev log
 
 Newest first. Date · module · what changed and why · anything open.
+Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
 ## 2026-11-19 · repo
 - Restructured into `modules/<name>/` with an `AGENTS.md` per module (+ `CLAUDE.md` importing it) so any tool picks up the context. Root `Dockerfile` builds `modules/stock-watch` for Railway.
