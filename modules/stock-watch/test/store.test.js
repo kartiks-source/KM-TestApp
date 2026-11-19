@@ -123,3 +123,44 @@ test('server: SIGTERM saves and exits 0', async () => {
   assert.ok(fs.existsSync(path.join(dir, 'store.json')));
 });
 
+
+/* ---------- SW-007: demo data never mixes with real data ---------- */
+
+test('first real row clears the demo and marks the store as ever live', () => {
+  const s = freshStore(tmpDir());
+  s.replaceAll([{ t: Date.now(), variantId: 'demo1', before: 1, now: 2 }], [{ t: Date.now(), order: '#d', variantId: 'demo1', qty: 1, price: 1 }], 'demo');
+  s.add('orders', [{ t: Date.now(), order: '#1', variantId: '9', qty: 2, price: 100 }]);
+  const d = s.load();
+  assert.equal(d.source, 'live'); assert.equal(d.everLive, true);
+  assert.deepEqual(d.orders.map((o) => o.order), ['#1']);
+  assert.equal(d.stock.length, 0);
+});
+
+test('server: demo → ingest → restart with a new demo version → real row still there', async () => {
+  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  let s = await startServer(dir);
+  const set = await (await fetch(s.base + '/api/settings')).json();
+  assert.equal(set.source, 'demo');
+  const r = await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': set.settings.ingestKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ order: '#REAL1', variant_id: '777', qty: 3, price: 250 }) });
+  assert.equal(r.status, 200);
+  assert.equal(await stop(s), 0);
+  let j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(j.source, 'live'); assert.equal(j.everLive, true);
+  assert.deepEqual(j.orders.map((o) => o.order), ['#REAL1']);
+  j.settings.demoVersion = 'an-older-demo'; fs.writeFileSync(file, JSON.stringify(j));   // as if the demo version were bumped
+  s = await startServer(dir);
+  await stop(s);
+  j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(j.source, 'live');
+  assert.deepEqual(j.orders.map((o) => o.order), ['#REAL1']);
+});
+
+test('server: cleared live store stays empty after restart (no demo)', async () => {
+  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  fs.writeFileSync(file, JSON.stringify({ stock: [], orders: [], source: 'empty', everLive: true, settings: {} }));
+  const s = await startServer(dir);
+  await stop(s);
+  const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(j.source, 'empty'); assert.equal(j.orders.length, 0);
+});

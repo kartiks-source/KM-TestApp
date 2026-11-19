@@ -70,9 +70,24 @@ function load() {
   db.settings = { ...blank().settings, ...db.settings };
   db.shopify = { ...blankShopify(), ...db.shopify };
   if (!db.settings.ingestKey) db.settings.ingestKey = crypto.randomBytes(16).toString('hex');
+  if (db.source === 'live') db.everLive = true;   // stores saved before everLive existed
   db._stockKeys = new Set(db.stock.map(stockKey));
   db._orderKeys = new Set(db.orders.map(orderKey));
   return db;
+}
+
+/*
+ * Demo data never mixes with real data (SW-007): the first real rows to arrive (Flow, Sheet, CSV,
+ * Shopify) clear the demo first. everLive is kept for good, so demo data never comes back at start-up.
+ */
+function goLive(d, rows) {
+  if (!rows.length) return;
+  if (d.source === 'demo') {
+    d.stock = []; d.orders = []; d._stockKeys = new Set(); d._orderKeys = new Set(); d.shopify = blankShopify();
+    console.log('store: real data arrived, demo data cleared');
+  }
+  if (d.source !== 'live') d.source = 'live';
+  d.everLive = true;
 }
 
 /* ---------- saving: temp file, fsync, rename; the file it replaces stays as store.json.bak ---------- */
@@ -123,12 +138,14 @@ function health() {
 /** Add rows, skipping ones already stored. Returns how many were new. */
 function add(kind, rows) {
   const d = load();
+  goLive(d, rows);
   const list = kind === 'stock' ? d.stock : d.orders;
   const keys = kind === 'stock' ? d._stockKeys : d._orderKeys;
   const keyOf = kind === 'stock' ? stockKey : orderKey;
   let n = 0;
   for (const r of rows) { const k = keyOf(r); if (keys.has(k)) continue; keys.add(k); list.push(r); n++; }
-  if (n) { if (d.source === 'empty') d.source = 'live'; prune(); save(); }
+  if (n) prune();
+  if (rows.length) save();
   return n;
 }
 
@@ -142,10 +159,10 @@ function prune() {
 /** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
 function replaceOrders(names, rows) {
   const d = load(); const set = new Set(names);
+  goLive(d, rows);
   const before = d.orders.length;
   d.orders = d.orders.filter((r) => !set.has(r.order)).concat(rows);
   d._orderKeys = new Set(d.orders.map(orderKey));
-  if (rows.length && d.source === 'empty') d.source = 'live';
   prune(); save();
   return { added: rows.length, removed: before - (d.orders.length - rows.length) };
 }

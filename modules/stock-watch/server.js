@@ -198,7 +198,6 @@ async function api(req, res, url) {
   if (p === '/api/import' && req.method === 'POST') {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     const parsed = rows.fromCsv(await readBody(req), kind);
-    if (d.source === 'demo' && url.searchParams.get('replaceDemo') === '1') store.replaceAll([], [], 'empty');
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows);
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
   }
@@ -292,7 +291,8 @@ if (require.main === module) {
     process.exit(1);
   }
   const stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
-  if (!keys.status().source && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
+  /* demo only on a store that has never held real data (SW-007) */
+  if (!keys.status().source && !d.everLive && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
     loadDemo();
     console.log('Loaded demo data (replace it from Data & settings).');
   }
