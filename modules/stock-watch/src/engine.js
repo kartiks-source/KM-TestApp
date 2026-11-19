@@ -14,6 +14,13 @@ const DAY = 864e5;
 
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
 const round = (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; };
+/** Smallest and largest `key(x)` in one loop. Never spread a big array into Math.min/max: past ~120k
+ *  items that throws "Maximum call stack size exceeded". Empty → { min: Infinity, max: -Infinity }. */
+function minMax(arr, key = (x) => x) {
+  let min = Infinity, max = -Infinity;
+  for (const x of arr) { const v = key(x); if (v < min) min = v; if (v > max) max = v; }
+  return { min, max };
+}
 
 /** Local calendar day (YYYY-MM-DD) for a UTC ms timestamp, at a fixed offset in minutes (India = 330). */
 function dayKey(t, offMin) { return new Date(t + offMin * 60e3).toISOString().slice(0, 10); }
@@ -62,11 +69,58 @@ function episodes(changes, now) {
 
 const overlap = (a, b, from, to) => Math.max(0, Math.min(b, to) - Math.max(a, from));
 
-/** Sales per day while the product could be bought: units ÷ in-stock days (at least one day). */
+/** Sales per day while the product could be bought: units ÷ in-stock days (at least one day).
+ *  rawDays = in-stock days before the one-day floor. */
 function demandPerDay(units, from, to, eps) {
   const outMs = eps.reduce((s, e) => s + overlap(e.start, e.end, from, to), 0);
-  const days = Math.max(1, (to - from - outMs) / DAY);
-  return { perDay: units / days, inStockDays: days };
+  const rawDays = Math.max(0, (to - from - outMs) / DAY);
+  const days = Math.max(1, rawDays);
+  return { perDay: units / days, inStockDays: days, rawDays };
+}
+
+/** History the engine may look back over for a long stock-out (matches the store's retention, src/store.js). */
+const KEEP_DAYS = 120;
+/** Fewer in-stock days than this in the demand window and the window can't say what the product sells. */
+const MIN_IN_STOCK_DAYS = 7;
+
+/** Earliest t ≥ histFrom such that [t, to) holds `wantMs` of in-stock time (eps sorted, oldest first).
+ *  histFrom when there isn't that much. */
+function inStockStart(eps, histFrom, to, wantMs) {
+  let need = wantMs, t = to;
+  for (let i = eps.length - 1; i >= -1 && t > histFrom; i--) {
+    const e = eps[i];
+    const gapFrom = Math.max(histFrom, e ? e.end : -Infinity);          // in stock over [gapFrom, t)
+    if (gapFrom < t) { if (t - gapFrom >= need) return t - need; need -= t - gapFrom; }
+    t = e ? Math.min(t, e.start) : histFrom;
+  }
+  return histFrom;
+}
+
+/**
+ * The sales rate a product's numbers rest on (LOGIC.md §3).
+ *   window:   units ÷ in-stock days over [winFrom, now], the normal case.
+ *   history:  under MIN_IN_STOCK_DAYS in stock in the window (a long stock-out): the most recent
+ *             `wantDays` in-stock days since histFrom, so a best seller out for a month keeps its demand.
+ *   before-out: no in-stock time since histFrom at all: the `wantDays` before the stock-out began.
+ * Returns the lines the rate was measured on too, so the average price comes from the same sales.
+ */
+function demandRate(lines, eps, { winFrom, histFrom, now, wantDays, first = -Infinity }) {
+  const measure = (a, b, hi = Infinity) => {        // orders in [a, hi); in-stock days over [a, b]
+    const use = lines.filter((o) => o.t >= a && o.t < hi);
+    const units = use.reduce((s, o) => s + num(o.qty), 0);
+    return { ...demandPerDay(units, a, b, eps), units, lines: use, from: a };
+  };
+  const win = measure(winFrom, now);
+  if (win.rawDays >= MIN_IN_STOCK_DAYS || histFrom >= winFrom) return { ...win, basis: 'window' };
+  const start = inStockStart(eps, histFrom, now, wantDays * DAY);
+  const hist = measure(start, now);
+  if (hist.rawDays > 0) return { ...hist, basis: 'history' };
+  const cur = eps[eps.length - 1];                    // out since before histFrom
+  if (cur) {
+    const a = Math.max(cur.start - wantDays * DAY, first);
+    if (a < cur.start) { const pre = measure(a, cur.start, cur.start); if (pre.rawDays > 0) return { ...pre, basis: 'before-out' }; }
+  }
+  return { ...win, basis: 'window' };
 }
 
 /**
@@ -168,10 +222,11 @@ function report(stock, orders, settings = {}, opts = {}) {
     p.lines.push(o);
   }
 
-  const firstOrder = orders.length ? Math.min(...orders.map((o) => o.t)) : now;
+  const orderSpan = minMax(orders, (o) => o.t), stockSpan = minMax(stock, (r) => r.t);
+  const firstOrder = orders.length ? orderSpan.min : now;
   const demandFrom = Math.max(now - S.demandWindowDays * DAY, firstOrder);
   /* a product's data starts at its first stock record or first order; before that it didn't exist for us */
-  for (const p of P.values()) p.first = Math.min(p.changes.length ? p.changes[0].t : Infinity, ...p.lines.map((o) => o.t));
+  for (const p of P.values()) p.first = Math.min(p.changes.length ? p.changes[0].t : Infinity, minMax(p.lines, (o) => o.t).min);
 
   /* one bucket per local day touched by the period, the partial first day included, so the daily
      chart adds up to the same totals as the product rows */
@@ -188,12 +243,14 @@ function report(stock, orders, settings = {}, opts = {}) {
   for (const p of P.values()) {
     const name = [p.product, p.variant && p.variant !== 'Default Title' ? p.variant : ''].filter(Boolean).join(' · ') || p.sku || p.id;
     const eps = episodes(p.changes, now);
-    const pFrom = Math.max(demandFrom, Number.isFinite(p.first) ? p.first : demandFrom);   // a new launch isn't diluted by days before it existed
-    const recent = p.lines.filter((o) => o.t >= pFrom);
-    const units = recent.reduce((s, o) => s + num(o.qty), 0);
-    const revenue = recent.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
+    const pFirst = Number.isFinite(p.first) ? p.first : demandFrom;
+    const pFrom = Math.max(demandFrom, pFirst);   // a new launch isn't diluted by days before it existed
+    /* a long stock-out (under 7 in-stock days in the window) looks further back, so it keeps its demand */
+    const rate = demandRate(p.lines, eps, { winFrom: pFrom, histFrom: Math.max(now - KEEP_DAYS * DAY, firstOrder, pFirst), now, wantDays: S.demandWindowDays, first: pFirst });
+    const units = rate.units;
+    const revenue = rate.lines.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
     const price = units ? revenue / units : p.price;
-    const { perDay } = demandPerDay(units, pFrom, now, eps);
+    const { perDay } = rate;
     const perSellingHour = perDay / 24;
 
     let lost = 0, unitsLost = 0, outs = 0, smallTopUps = 0, repeats = 0;
@@ -228,12 +285,13 @@ function report(stock, orders, settings = {}, opts = {}) {
       daysLeft: pl && Number.isFinite(pl.daysLeft) ? round(pl.daysLeft, 1) : null,
       status: pl ? (selling ? pl.status : 'Slow seller') : 'No stock data',
       orderQty: pl && selling ? pl.qty : 0, orderValue: pl && selling ? Math.round(pl.qty * (p.cost || price)) : 0,   // cash to commit: unit cost when known
+      rateBasis: rate.basis, rateFrom: rate.from,   // which sales the rate was measured on (LOGIC.md §3)
       lost: Math.round(lost), unitsLost: round(unitsLost, 1), outs, smallTopUps, repeats,
       sold: Math.round(p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty) * num(o.price), 0)),
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '',
     };
-    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price }, enumerable: false });
+    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0) }, enumerable: false });
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
     row.cost = p.cost ? Math.round(p.cost) : null;
@@ -251,14 +309,16 @@ function report(stock, orders, settings = {}, opts = {}) {
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }
 
-  /* best sellers (ABC by revenue in the period): A = the products making the first 80% of sales,
-     B = the next 15%, C = the rest and anything that didn't sell */
-  const bySold = products.slice().sort((a, b) => b.sold - a.sold);
-  const allSold = bySold.reduce((s, p) => s + p.sold, 0);
+  /* best sellers (ABC by ₹ demand a day: the sales rate × average price paid, both from the demand
+     window, so the rank and every order quantity stay put when the period buttons change):
+     A = the products making the first 80% of demand, B = the next 15%, C = the rest and anything with none */
+  const demandOf = (p) => p._plan.demand;
+  const byDemand = products.slice().sort((a, b) => demandOf(b) - demandOf(a) || String(a.id).localeCompare(String(b.id)));
+  const allDemand = byDemand.reduce((s, p) => s + demandOf(p), 0);
   let run = 0;
-  for (const p of bySold) {
-    const before = allSold ? run / allSold : 1; run += p.sold;
-    p.abc = !p.sold ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
+  for (const p of byDemand) {
+    const before = allDemand ? run / allDemand : 1; run += demandOf(p);
+    p.abc = !(demandOf(p) > 0) ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
   }
   /* a best seller is never "slow": it earns its place by ₹ even when it sells few units (e.g. furniture) */
   for (const p of products) {
@@ -313,10 +373,10 @@ function report(stock, orders, settings = {}, opts = {}) {
     daily: dailyRows, reorder, stockouts, products,
     data: {
       stockRows: stock.length, orderRows: orders.length,
-      firstStock: stock.length ? Math.min(...stock.map((r) => r.t)) : null,
-      lastStock: stock.length ? Math.max(...stock.map((r) => r.t)) : null,
+      firstStock: stock.length ? stockSpan.min : null,
+      lastStock: stock.length ? stockSpan.max : null,
       firstOrder: orders.length ? firstOrder : null,
-      lastOrder: orders.length ? Math.max(...orders.map((o) => o.t)) : null,
+      lastOrder: orders.length ? orderSpan.max : null,
     },
   };
 }
@@ -345,4 +405,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  trend, TREND_MIN_UNITS, report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  trend, TREND_MIN_UNITS, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

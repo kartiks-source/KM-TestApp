@@ -77,6 +77,14 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 
 Setting: *Sales history used* [28 days]. If the store's data starts later than 28 days ago, the window starts with the data. **A product's own window starts at its first stock record or first order**, so a product launched 5 days ago is measured over those 5 days, not diluted by 23 days before it existed. (Without this, a new launch looked like a slow, overstocked product.)
 
+**Long stock-outs (fewer than 7 in-stock days in the window):** the window can't say what the product sells, so the rate looks further back:
+1. **The most recent 28 in-stock days** within the history we keep (120 days), skipping the time it was out: units sold over that stretch ÷ the in-stock days in it.
+2. **If it hasn't been in stock at all in that history**, the 28 days before the stock-out began.
+
+The average price paid (section 4) comes from the same sales. A product launched recently, or a store whose data starts recently, has no older history, so for it nothing changes. The product's `rateBasis` says which rule gave the rate (`window`, `history` or `before-out`) and `rateFrom` when that stretch starts.
+
+*Why:* without this, a best seller out for the whole 28 days sold 0 in the window, so it got a rate of 0: it showed as a Slow seller with ₹0 lost and dropped off the reorder list. The costliest stock-outs vanished from exactly the lists meant to catch them. Example: 5 a day at ₹1,000, out for the last 30 days → still 5 a day, **Out now**, order 5 × 40 = 200, ₹ lost ≈ 30 × 5 × ₹1,000 = ₹1,50,000 over a 30-day view. *Why 7 days:* under a week, one good or bad day swings the rate too much, and weekdays aren't all covered. *Considered:* a fixed 90-day window for everyone (too slow to follow a season) and carrying the last rate forward from before the stock-out (ignores any in-stock days since). *When it can be wrong:* if demand really fell while the product was out (season over, trend passed), the older rate over-orders; check the product's sales chart before a big order.
+
 **Why in-stock days, not calendar days:** a product that sold 28 units but was out of stock for 7 of the 28 days really sells 28 ÷ 21 = 1.33 a day, not 1.0. Dividing by 28 would make every stock-out shrink the next order, and the product would run out sooner the next time, a loop that keeps getting worse. Removing the out-of-stock time breaks that loop.
 
 **Why 28 days:** four full weeks, so every weekday counts equally, and it's recent enough to follow a trend. We considered 7 days (too jumpy for slow sellers) and 90 days (too slow to react to a season or a campaign).
@@ -187,7 +195,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Rule:** a product selling below *Ignore below* [0.2 units a day, about 6 a month] is a **Slow seller**. Slow sellers are left out of the reorder list and alerts, but their stock-outs and ₹ lost are still counted.
 
-**Exception: a best seller (A, section 7a) is never a slow seller.** A ₹90,000 sofa selling one a month can be in the top 80% of revenue; it stays on the reorder list.
+**Exception: a best seller (A, section 7a) is never a slow seller.** A ₹90,000 sofa selling one a month can be in the top 80% of ₹ demand; it stays on the reorder list.
 
 **Why:** for a product selling one unit a month, "days left" and "order quantity" swing wildly with a single order, and filling the reorder list with them hides the products that matter. It's not marked "not selling" because these products do sell, just slowly. A product with no sales at all is never "Out now" or on the reorder list, whatever the cutoff.
 
@@ -195,14 +203,18 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 ## 7a. Best sellers (A / B / C)
 
-**Rule:** products are ranked by ₹ sold in the selected period. Going down that list, the products that together make the **first 80% of sales are A (best sellers)**, the next 15% are B, and the rest, plus anything that didn't sell, are C. A products show a small **A** badge everywhere.
+**Rule:** products are ranked by **₹ demand a day** = sales per day (section 3) × average price paid (section 4), both from the 28-day sales history, **not** the selected period. Going down that list, the products that together make the **first 80% of demand are A (best sellers)**, the next 15% are B, and the rest, plus anything with no demand, are C. A products show a **Best seller** tag everywhere.
 
 - **Best sellers at risk** = A products that are Out now, Critical or Order now.
 - The reorder list puts A products first within each status.
 
 **Why:** a stock-out on an A product costs the most and is usually the one ads are pushing. 80 / 15 / 5 is the standard ABC split in inventory management.
 
-**When it can be wrong:** a launch or a heavily discounted product can jump into A for one period. Switch the period (7 / 30 / 60 days) to see whether it holds.
+**Why demand, and why not the selected period:** the rank decides who stays on the reorder list (section 7) and comes first in it, so it has to rest on the same 28 days as the order quantity. Ranked by the selected period, switching 7 → 60 days changed who was a best seller and so the cash to order (demo: order value ₹46.3 lakh at 7 days vs ₹46.8 lakh at 60). Demand rather than ₹ sold, because ₹ sold drops for a product while it's out of stock: a best seller out for three weeks fell to C and out of **Best sellers at risk**, exactly when it was most at risk. For a product in stock the whole time, demand a day is just its ₹ sold ÷ days, so the order is the same as ranking by sales.
+
+*Considered:* ₹ sold over the 28-day window (simpler, but has the stock-out problem above).
+
+**When it can be wrong:** a launch or a heavily discounted product can jump into A while its 28 days are dominated by the launch or the sale. Its rate has the same lag (section 3).
 
 ## 7b. Profit lost and margin
 
@@ -270,7 +282,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Column | Rule |
 |---|---|
 | Units / Sold / Lost | inside the selected period (7 / 14 / 30 / 60 days) |
-| Sells / day, Avg price | over the last 28 days, whatever period is selected, so the reorder maths doesn't change when you switch the view |
+| Sells / day, Avg price | over the last 28 days (further back for a long stock-out, section 3), whatever period is selected, so the reorder maths doesn't change when you switch the view |
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
@@ -302,7 +314,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
-- The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
+- The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
 - Returns and cancellations aren't netted out of sales.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
 

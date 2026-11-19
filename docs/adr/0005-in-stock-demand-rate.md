@@ -11,7 +11,7 @@ Reorder qty, ₹ lost and trend all rest on "sales per day". Dividing by calenda
 ## Decision
 
 - Rate = units sold in the last 28 days ÷ days in stock in those 28 days (min 1). A product's window starts at its first record, so new launches aren't diluted.
-- Amendment (SW-003): when the product had < 7 in-stock days in the window, use its most recent 28 in-stock days within KEEP_DAYS; if none, the rate before the stock-out began. Without this, a best seller out for a month shows rate 0, ₹0 lost and no reorder.
+- Amendment (SW-003): when the product had < 7 in-stock days in the window, use its most recent 28 in-stock days within KEEP_DAYS; if none, the rate before the stock-out began. Without this, a best seller out for a month shows rate 0, ₹0 lost and no reorder. Implemented in `demandRate()` (src/engine.js); 28 = the *Sales history used* setting; each product reports `rateBasis` (window / history / before-out).
 - Trend uses the same principle: 14 vs 14 in-stock days against a median-product baseline, not week-on-week.
 
 ## Consequences

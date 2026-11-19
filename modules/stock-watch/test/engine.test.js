@@ -225,3 +225,123 @@ test('store: replacing an order removes its old lines (cancellation / refund pic
   store.replaceOrders(['#2'], []);                                                                            // cancelled
   assert.deepEqual(store.load().orders.map((o) => [o.order, o.qty]), [['#1', 1]]);
 });
+
+/* ---- SW-001: report survives any data size ---- */
+test('minMax: one loop, no spread; empty gives ±Infinity', () => {
+  assert.deepEqual(E.minMax([3, 1, 2]), { min: 1, max: 3 });
+  assert.deepEqual(E.minMax([{ t: 5 }, { t: 2 }], (x) => x.t), { min: 2, max: 5 });
+  assert.deepEqual(E.minMax([]), { min: Infinity, max: -Infinity });
+});
+
+test('no spread into Math.min/max anywhere in src/', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const dir = path.join(__dirname, '../src');
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
+    assert.doesNotMatch(fs.readFileSync(path.join(dir, f), 'utf8'), /Math\.(min|max)\([^)]*\.\.\./, f);
+  }
+});
+
+test('report on 300k order lines + 200k stock rows: < 1.5 s, no throw, no NaN/Infinity', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const V = 1000, stock = [], orders = [];
+  for (let v = 0; v < V; v++) {
+    let s = 50;
+    for (let i = 0; i < 200; i++) {
+      const b = s; s = rnd() < 0.1 ? 0 : Math.floor(rnd() * 100);
+      stock.push({ t: now - 120 * D + i * (120 * D / 200) + Math.floor(rnd() * H), variantId: 'v' + v, sku: 'S' + v, product: 'P' + v, before: b, now: s, price: 500, cost: 200 });
+    }
+  }
+  for (let i = 0; i < 300000; i++) orders.push({ t: now - Math.floor(rnd() * 120 * D), order: '#' + i, variantId: 'v' + Math.floor(rnd() * V), qty: 1 + Math.floor(rnd() * 3), price: 500 });
+  const start = process.hrtime.bigint();
+  const r = E.report(stock, orders, {}, { days: 90, now });
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  assert.ok(ms < 1500, `report took ${Math.round(ms)} ms`);
+  assert.equal(r.data.stockRows, 200000); assert.equal(r.data.orderRows, 300000);
+  assert.ok(r.data.firstOrder <= r.data.lastOrder && r.data.firstStock <= r.data.lastStock);
+  const bad = [];
+  const walk = (x, at) => {
+    if (typeof x === 'number') { if (!Number.isFinite(x)) bad.push(at); return; }
+    if (x && typeof x === 'object' && !(x instanceof Set)) for (const [k, v] of Object.entries(x)) walk(v, `${at}.${k}`);
+  };
+  walk({ totals: r.totals, daily: r.daily, data: r.data, stockouts: r.stockouts }, 'r');
+  walk(r.products, 'r.products');                                  // daysLeft is null (not Infinity) when nothing sells
+  assert.deepEqual(bad.slice(0, 5), []);
+});
+
+/* ---- SW-003: long stock-outs keep their demand ---- */
+test('a best seller out for the last 30 days stays Out now, on Reorder, with ₹ lost at its earlier rate', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'best', sku: 'B', product: 'Best', before: 400, now: 400, price: 1000 },
+    { t: now - 30 * D, variantId: 'best', sku: 'B', product: 'Best', before: 1, now: 0, price: 1000 }];
+  const orders = [];
+  for (let d = 31; d <= 90; d++) for (let k = 0; k < 5; k++) orders.push({ t: now - d * D + (2 + 4 * k) * H, order: `#${d}-${k}`, variantId: 'best', qty: 1, price: 1000 });
+  const r = E.report(stock, orders, S0, { days: 30, now });
+  const p = r.products[0];
+  assert.equal(p.rateBasis, 'history');
+  assert.ok(Math.abs(p.perDay - 5) < 0.01, `perDay ${p.perDay}`);
+  assert.equal(p.status, 'Out now');
+  assert.ok(p.orderQty > 0); assert.equal(p.orderQty, 5 * (7 + 30 + 3));
+  assert.ok(Math.abs(p.lost - 30 * 5 * 1000) <= 0.05 * 30 * 5 * 1000, `lost ${p.lost}`);
+  assert.ok(r.reorder.some((x) => x.id === 'best'));
+});
+
+test('7+ in-stock days in the window: rate unchanged (window basis)', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'v', sku: 'V', product: 'V', before: 400, now: 400, price: 100 },
+    { t: now - 20 * D, variantId: 'v', sku: 'V', product: 'V', before: 1, now: 0, price: 100 }];   // 8 in-stock days in the 28
+  const orders = [];
+  for (let d = 21; d <= 90; d++) orders.push({ t: now - d * D + H, order: `#${d}`, variantId: 'v', qty: d <= 28 ? 1 : 5, price: 100 });
+  const p = E.report(stock, orders, S0, { days: 30, now }).products[0];
+  assert.equal(p.rateBasis, 'window');
+  assert.ok(Math.abs(p.perDay - 1) < 0.01, `perDay ${p.perDay}`);    // 8 units ÷ 8 in-stock days
+});
+
+test('in-stock lookback: most recent 28 in-stock days, skipping stock-outs; capped at history start', () => {
+  const now = 100 * D;
+  const eps = [{ start: 40 * D, end: 50 * D }, { start: 80 * D, end: now }];
+  assert.equal(E.inStockStart(eps, 0, now, 28 * D), 52 * D);    // the open stock-out is skipped; 28 of the 30 in-stock days 50→80
+  assert.equal(E.inStockStart(eps, 0, now, 40 * D), 30 * D);    // 30 (50→80) + 10 (30→40)
+  assert.equal(E.inStockStart(eps, 45 * D, now, 40 * D), 45 * D);
+});
+
+test('out since before the history starts: rate from the days before the stock-out began', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const lines = []; for (let d = 1; d <= 28; d++) lines.push({ t: now - 150 * D - d * D, qty: 3 });
+  const eps = [{ start: now - 150 * D, end: now, open: true }];
+  const r = E.demandRate(lines, eps, { winFrom: now - 28 * D, histFrom: now - 120 * D, now, wantDays: 28, first: now - 200 * D });
+  assert.equal(r.basis, 'before-out');
+  assert.ok(Math.abs(r.perDay - 3) < 0.01, `perDay ${r.perDay}`);
+});
+
+/* ---- SW-031: best-seller rank doesn't move with the period buttons ---- */
+test('ABC rank and order value are the same at 7 / 30 / 60 days', () => {
+  const now = Date.parse('2026-11-19T07:30:00Z');
+  const g = require('../src/demo').generate({ now });
+  const runs = [7, 30, 60].map((days) => E.report(g.stock, g.orders, {}, { days, now }));
+  const key = (r) => Object.fromEntries(r.products.map((p) => [p.id, [p.abc, p.status, p.orderQty, p.orderValue]]));
+  const base = key(runs[0]);
+  for (const r of runs.slice(1)) {
+    assert.deepEqual(key(r), base);
+    assert.equal(r.totals.orderValueAll, runs[0].totals.orderValueAll);
+    assert.equal(r.totals.orderValueNow, runs[0].totals.orderValueNow);
+    assert.equal(r.totals.bestsellers, runs[0].totals.bestsellers);
+    assert.equal(r.totals.bestAtRisk, runs[0].totals.bestAtRisk);
+  }
+});
+
+test('ABC ranks on demand: a best seller out of stock most of the window stays A', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'best', sku: 'B', product: 'Best', before: 400, now: 400, price: 1000 },
+    { t: now - 25 * D, variantId: 'best', sku: 'B', product: 'Best', before: 1, now: 0, price: 1000 },
+    { t: now - 90 * D, variantId: 'small', sku: 'S', product: 'Small', before: 400, now: 400, price: 100 }];
+  const orders = [];
+  for (let d = 1; d <= 90; d++) {
+    if (d > 25) orders.push({ t: now - d * D + H, order: `#b${d}`, variantId: 'best', qty: 5, price: 1000 });
+    orders.push({ t: now - d * D + H, order: `#s${d}`, variantId: 'small', qty: 2, price: 100 });
+  }
+  const r = E.report(stock, orders, S0, { days: 7, now });   // 'best' sold nothing in the last 7 or 25 days
+  const P = Object.fromEntries(r.products.map((p) => [p.id, p]));
+  assert.equal(P.best.sold, 0); assert.equal(P.best.abc, 'A');
+  assert.equal(P.small.abc, 'C');                             // 200 of 5,200 ₹/day: under the last 5%
+});
