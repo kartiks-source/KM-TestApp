@@ -3,6 +3,18 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · critic round 1 fixes
+stock-watch + stock-watch-sheets, on `main` (afa2336, 965e965, c9a7437; not pushed, not deployed). Fixed:
+- F1 (P0): a blank *Stock before* read as 0. Now = previous row's *Stock now* (engine `episodes`, `onOrderNow`; Sheet `episodes`); first row still 0. CSV with no before column, 10/0 ×3: outs 1 → 3, Still out 0 → 1. Shopify variant reactivated at 0 opens a stock-out. 30 → 27 after a PO no longer counts 27 received. Kept a present *Stock before* (always using the previous row broke the on-order fixture, which skips rows). LOGIC §2, §6b; 3 tests.
+- X1 (P1): Sheet `SW.rate` now `SW.demandRate` (window → latest in-stock days within 120 d → before-out), price from the same lines. SW-003 case (5/day ₹1,000, out 30 d): Sheet Rs 0 / off Reorder → Out now, 200, ≈ ₹1.5 L, same as web. Parity fixtures 6 → 8 (out last 30 d; 3 in-stock days). Sheets LOGIC/AGENTS.
+- S1 (P1): chip colour = engine `trendCall` (10+ points vs median trend; vs 0 when < 5 trends); *Selling faster/slower* filters use it; Typical-product toolbar chip removed, value in the Trend header and chip tooltips. 1440 Reorder All: red 32/45 → 15/44. Kept the raw % as chip text (finding suggested tooltip only) so the number a manager sees is the product's own; arrows dropped since a green −20% with ▲ read wrong. LOGIC §7d; test.
+- S2 (P1): per-row *Mark ordered* / *Edit order* / *Undo* buttons and the act column removed; tick + bulk bar (*Mark 1 ordered*), drawer for edit/remove. 1280: Best seller tags clipped 16/41 → 6/41 (Reorder), 7/40 → 5/40 (Products). LOGIC §6b, AGENTS.
+- SEC-1 (P1): global cap (100/15 min) no longer hard-blocks: password still checked, right one passes, wrong one 429. Per-IP block unchanged. Test: 100 global fails, then Basic 200 + form 303, wrong 429. SECURITY.md, AGENTS.
+- QA-1 (P1): `POST /api/demo` 409 while source is `live`; button hidden there, confirm before reload elsewhere. Allowed again after Clear. Test. SECURITY.md.
+- Mobile M1–M9: ⋯/Columns menu spans the toolbar (360: R 381/473 → 350, sw 360); Reorder cards get a 44×44 tick (no drawer on tap), bulk bar works per card; 44 px targets (bar/Moving rows 44, All 48×45, Undo 60×45, fold summary 45, range/sync 44, top 56); fields 16 px (no iOS zoom); Columns desktop-only, ⋯ on the chips row (390 first card y 357 → 307); no status pill on Order today/This week cards (late/on-order tag kept); Moving rows drop the spark; toast bottom 770 < bar 782; Back closes the drawer and stays on the page, drawer `overscroll-behavior: contain`.
+- Checked: headless Chrome, sideways scroll 0 at 360/390/1280/1440/1920 on all 5 pages, no console errors. `npm test` 112/112.
+Skipped: none. Open: 6/41 Best seller tags still clipped at 1280 (name cell max 230 px, pre-existing); the shared Dev Log page row not added (publishing left to the integrator); critics not re-run on these fixes.
+
 ## 2026-11-19 · Sprint 1 · A-engine
 stock-watch engine (branch `sprint1/A-engine`):
 - SW-001 (d93edff): `minMax()` loop replaces every `Math.min/max(...arr)` in engine.js (threw past ~120k rows → Report, drawer, CSV 500). 300k order lines + 200k stock rows: report ~0.4 s, no NaN/Infinity. Guard test fails if a spread returns to `src/`.
