@@ -120,8 +120,8 @@
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
         <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
-    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span><span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</summary>
-      <div class="pbody">${fields}</div></details>`;
+    return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span>' : ''}</summary>
+      <div class="pbody">${fields}${trial ? '<span class="pact"><button class="btn" id="what-save">Save as default</button><button class="btn ghost" id="what-reset">Reset</button></span>' : ''}</div></details>`;
   }
   let whatTimer = null;
   function setWhat(k, v) {

@@ -252,7 +252,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .pm:hover { background: var(--brand-wash); color: var(--brand); }
 .pimpact { display: inline-flex; gap: 14px; margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--soft); flex-wrap: wrap; }
 .pimpact b { color: var(--ink); }
-.pact { display: inline-flex; gap: 6px; margin-left: 6px; }
+.pact { display: inline-flex; gap: 6px; margin-left: auto; }
 .pact .btn { padding: 5px 12px; }
 
 /* resizable columns */
