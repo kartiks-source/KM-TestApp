@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · E-ui
+Module stock-watch, branch `sprint1/E-ui`.
+- SW-011: plan bar Save as default / Reset moved out of `<summary>` (they were dead). Playwright 1440: lead 10 → Reset → headline back (₹33.20 L / 74); lead 10 → Save → reload keeps 10. (2805329)
+- SW-012: "Mark ordered". New `src/onorder.js` (`DATA_DIR/onorder.json`, `GET/POST /api/onorder`), engine `opts.onOrder`: units still to come count while not past ETA and landing before the shelf empties or by today + lead (+1 day). Covered → status "Ordered · lands 26 Nov", off Order today; too little → only the extra; past ETA → back in Order today with a red "Late" tag. Row button (Undo in toast), tick boxes + "Mark N ordered", Ordered tab, drawer form. LOGIC.md §6b, `test/onorder.test.js` (9). Demo: 4 marked → Order today 74 → 70, ₹33.20 L → ₹31.44 L. (84d78bd)
+- SW-021: trend in the decision rows (Trend cell ≥ 1400 px, inline spark below, phone header), dated hover labels, baseline in Products toolbar, 8 weekly numbers in the drawer, Overview "Moving" by ₹ effect (rate change × avg price × 30). LOGIC.md §7d/§9, `test/trend.test.js`. (d0968d3)
+- SW-019 (UI only): red "Data is X h old" banner when the Shopify pull is > 45 min old; reads `/status` if present, else the report. (1567912)
+- Open: SW-021 group rows wait for SW-022; Playwright checks ran from a scratch script (repo smoke is SW-014); five-critic pass and shared dev log page row not done by this stream.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).
