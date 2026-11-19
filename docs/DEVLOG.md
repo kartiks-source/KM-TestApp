@@ -3,6 +3,13 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · A-engine
+stock-watch engine (branch `sprint1/A-engine`):
+- SW-001 (d93edff): `minMax()` loop replaces every `Math.min/max(...arr)` in engine.js (threw past ~120k rows → Report, drawer, CSV 500). 300k order lines + 200k stock rows: report ~0.4 s, no NaN/Infinity. Guard test fails if a spread returns to `src/`.
+- SW-003 (1504ce5): under 7 in-stock days in the 28-day window, the rate uses the latest 28 in-stock days within 120 days; if none, the 28 days before the stock-out. Rows carry `rateBasis` / `rateFrom`. 5/day at ₹1,000 out 30 days → Out now, order 200, lost ≈ ₹1.5 L. Demo (30 d): 5 products Slow seller → Out now; lost ₹9.77 L → ₹12.29 L. LOGIC.md §3/§9/§11, ADR-0005.
+- SW-031 (61637d1): ABC ranked on ₹ demand a day (rate × avg price, demand window), not ₹ sold in the period. ABC, status, order qty and value now identical at 7/30/60 d; an out-of-stock best seller stays A. LOGIC.md §7/§7a.
+- Open: `public/app.js` best-seller tooltip still says "top 80% of sales"; drawer could show `rateBasis` ("rate from earlier sales"); module AGENTS.md/CHANGELOG not touched (outside this stream's files); five critics not yet run on the diff.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).
