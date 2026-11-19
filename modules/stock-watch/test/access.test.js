@@ -109,6 +109,11 @@ test('routes: VIEW_PASSWORD session reads everything, every write route is 403 a
   const set = await (await s.req('/api/settings', { headers: view })).json();
   assert.equal(set.role, 'view');
   assert.equal(set.settings.ingestKey, undefined);
+  assert.deepEqual(set.changes, []);   // the log holds sheet links; viewers have no Data page
+  const key = (await (await s.req('/api/settings', { headers: basic(ADMIN) })).json()).settings.ingestKey;
+  assert.ok(key);
+  for (const p of ['/api/report', '/api/product/x', '/api/export/reorder.csv']) assert.ok(!(await (await s.req(p, { headers: view })).text()).includes(key), `no ingest key in ${p}`);
+  assert.equal((await (await s.req('/api/report', { headers: view })).json()).settings.ingestKey, undefined);
   const writes = [['PUT', '/api/settings', '{"leadDays":99}'], ['POST', '/api/import?kind=stock', 'Time,Variant ID\n'], ['POST', '/api/sync'], ['POST', '/api/demo'], ['POST', '/api/clear'], ['POST', '/api/shopify/sync'], ['POST', '/api/onorder', '{}'], ['DELETE', '/api/onorder/1']];
   for (const [method, p, body] of writes) {
     const r = await s.req(p, { method, headers: view, body });
@@ -121,7 +126,7 @@ test('routes: VIEW_PASSWORD session reads everything, every write route is 403 a
   assert.ok((await (await s.req('/api/report', { headers: view })).json()).data.orderRows > 0, 'clear was refused');
 });
 
-test('routes: admin writes are logged with who/when/old→new and shown to every role', async (t) => {
+test('routes: admin writes are logged with who/when/old→new; last plan change shown to every role', async (t) => {
   const s = await start({ ADMIN_PASSWORD: ADMIN, VIEW_PASSWORD: VIEW }); t.after(s.stop);
   const admin = await signIn(s, ADMIN);
   assert.match(admin.cookie, /^sw_session=\d+\.[^.]+$/);
@@ -130,7 +135,10 @@ test('routes: admin writes are logged with who/when/old→new and shown to every
   assert.equal(put.status, 200);
   await s.req('/api/settings', { method: 'PUT', headers: { ...basic(ADMIN), 'content-type': 'application/json' }, body: JSON.stringify({ newIngestKey: true }) });
   const view = await signIn(s, VIEW);
-  const j = await (await s.req('/api/settings', { headers: view })).json();
+  const v = await (await s.req('/api/settings', { headers: view })).json();
+  assert.deepEqual(v.changes, []);   // the full log is admin-only (Data page)
+  assert.equal(v.lastPlanChange.key, 'coverDays');   // "Last changed" under Plan settings is for every role
+  const j = await (await s.req('/api/settings', { headers: admin })).json();
   assert.equal(j.changes.length, 2);   // leadDays didn't change, so it isn't logged
   assert.deepEqual({ ...j.changes[1], at: 0 }, { at: 0, by: 'admin', key: 'coverDays', old: before.coverDays, new: before.coverDays + 5 });
   assert.ok(Math.abs(j.changes[1].at - Date.now()) < 60e3);

@@ -87,7 +87,7 @@ const PLAN_KEYS = ['leadDays', 'coverDays', 'safetyDays'];   // the three shown 
 const clampSetting = (k, v) => (v == null || String(v).trim() === '' || !Number.isFinite(+v) ? undefined : Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], +v)));
 /** Saved settings, with any ?leadDays=… style trial values on top (not saved). */
 function settingsFor(url, saved) {
-  const out = { ...saved };
+  const out = access.visibleSettings(saved, access.VIEW);   // reports echo these back; they never need the Flow key, for any role (SW-029)
   for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, url.searchParams.get(k)); if (v !== undefined) out[k] = v; }
   return out;
 }
@@ -196,7 +196,7 @@ async function api(req, res, url) {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: audit.recent(d, 50), lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
     const run = syncShopify();

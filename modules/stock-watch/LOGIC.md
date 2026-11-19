@@ -319,18 +319,18 @@ Code: `src/access.js`, `src/audit.js` (SW-029, ADR-0011). Tests: `test/access.te
 **Rule.**
 - Two shared passwords. `ADMIN_PASSWORD` signs in as **admin** (sees and changes everything). `VIEW_PASSWORD` (optional) signs in as **view**: every number, page and CSV export is the same, but nothing can be changed.
 - The server decides, not the page: any `POST`, `PUT`, `PATCH` or `DELETE` to `/api/…` from a view session (cookie or Basic auth) is refused with **403** before any route runs. That covers settings, Plan settings "Save as default", imports, sheet sync, Shopify "Pull now", demo, clear, and any write route added later (e.g. "Mark ordered").
-- A view session never receives the Flow ingest key (it would let them write through `/ingest`).
+- A view session never receives the Flow ingest key (it would let them write through `/ingest`): not in `/api/settings`, and the `settings` echoed in `/api/report` and `/api/product/…` never carry it for any role. View sessions get an empty change log (it holds old and new sheet links; the log is on the Data page, which they don't have).
 - The page hides what a viewer can't use (ADR-0006: role views only remove): no Data page, no "Save as default". Trying values in Plan settings still works (it changes nothing stored); Reset is kept.
 - The role is inside the signed session cookie, with a fingerprint of `VIEW_PASSWORD`: a view cookie can't be edited into admin, and changing or removing `VIEW_PASSWORD` signs all view sessions out. Admin cookies keep their old form, so existing sign-ins stay valid.
 - The server refuses to start when `VIEW_PASSWORD` is set without `ADMIN_PASSWORD` (nobody would need to sign in) or equals it.
 - **Change log:** every settings save writes one entry per setting whose value actually changed: `{ at, by, key, old, new }`. `by` is the role (`admin`), with "(script)" when the change came with Basic auth instead of a sign-in. Numbers are compared as numbers (14 and "14" are the same). The ingest key is never logged: it shows as "(old key) → (new key)". Newest first, last 200 kept in `store.json` (`settingsLog`).
-- **Shown:** the latest change to lead time, stock should last or buffer under Plan settings ("Last changed … by … · old → new"), for every role; the last 50 changes under Data → Settings → "Advanced: change log" (admin).
+- **Shown:** the latest change to lead time, stock should last or buffer under Plan settings ("Last changed … by … · old → new"), for every role; the last 50 changes under Data → Settings → "Advanced: change log" (admin only; view sessions get `changes: []`).
 
 **Why.** RACI: CEO and finance view, they don't change assumptions or data. A page that only hides buttons can be bypassed with one `curl`, so the check sits on the server. The log answers "who changed cover days and when" when a reorder number moves.
 
 **Considered.** Named users (needs a user store or Performity SSO, later ADR). Per-route checks (easy to forget on a new route; one gate before every write is safer).
 
-**Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords.
+**Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords. A viewer sees the "Sync issue" pill without its link (no Data page), so the error text is only its hover tooltip, which phones don't show.
 
 ## 14. Sync progress and run history
 

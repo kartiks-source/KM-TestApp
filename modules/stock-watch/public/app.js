@@ -546,9 +546,9 @@
   const VIEWS = { overview, reorder, stockouts, products, data: dataView };
   function render() {
     if (!state.report) return;
+    if (state.view === 'data' && viewOnly()) { state.view = 'overview'; history.replaceState(null, '', '#overview'); }
     $$('#tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === state.view));
     $('#view').classList.toggle('calm', !render._animate); render._animate = false;   // bars animate when a page opens, not on every filter or keystroke
-    if (state.view === 'data' && viewOnly()) state.view = 'overview';
     $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<p class="phone-only"><a class="btn ghost" href="/logout">Sign out</a></p>' : '');
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
