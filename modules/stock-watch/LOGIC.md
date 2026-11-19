@@ -192,6 +192,8 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 
+Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it.
+
 ---
 
 ## 10. Demo data (not real)

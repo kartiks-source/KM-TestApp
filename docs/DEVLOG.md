@@ -3,6 +3,9 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · stock-watch (fit the screen)
+- Tables fit the screen with no sideways scroll at 1280–1920px (measured): short column labels with hover explanations, compact status pills, "This week" for "Order this week", refill as "30 · 2.7 d", Avg price moved to CSV only, low-priority columns hide below 1400px / 1180px (still in CSV). Products filter bar fits one line at 1280px.
+
 ## 2026-11-19 · stock-watch (Products page + logic docs)
 - Products: status tabs with counts (All, Out now, Critical, Order now, This week, OK, Slow sellers, Lost sales), category filter, CSV of what's shown, new columns (category, days left, units, % lost, order qty). Category comes from the product type (Shopify `productType`, CSV/Flow `type`, demo catalog).
 - Product column pinned while tables scroll sideways; long names/categories cut with … (full text on hover).

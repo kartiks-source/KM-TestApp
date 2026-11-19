@@ -150,8 +150,8 @@ button.tile:hover { border-color: var(--brand); }
 
 /* tables: dense, Performity-style */
 .tbl { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { font-size: 12.5px; color: var(--ink-2); font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; background: #F6F8FB; position: sticky; top: 0; }
 th.r, td.r { text-align: right; font-variant-numeric: tabular-nums; }
 tbody tr:nth-child(even) { background: #FBFCFE; }
@@ -174,7 +174,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .st.again { background: var(--lost-soft); color: var(--lost); }
 .st.open { background: var(--lost); color: #fff; }
 .days { display: inline-flex; align-items: center; gap: 8px; }
-.days .meter { width: 48px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.days .meter { width: 36px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
 .days .meter i { display: block; height: 100%; }
 
 /* data & settings */
@@ -209,8 +209,8 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .pname { color: var(--brand); font-weight: 500; }
 .sku { margin-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.search.sel { flex: 0 1 200px; min-width: 150px; cursor: pointer; }
-.toolbar .search { flex: 1 1 200px; }
+.search.sel { flex: 0 1 190px; min-width: 130px; cursor: pointer; }
+.toolbar .search { flex: 1 1 150px; min-width: 110px; }
 /* one line per row: long names and categories are cut with … (full text on hover) */
 .tbl td:first-child { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 /* product column stays pinned while the table scrolls sideways */
@@ -220,7 +220,10 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .tbl tbody tr:hover td:first-child { background: var(--brand-wash2); }
 .tbl th { z-index: 2; }
 .tbl td .cat { display: inline-block; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-.tbl td .st { white-space: nowrap; }
+.tbl td .st { white-space: nowrap; font-size: 11.5px; padding: 2px 8px; }
+/* fit the screen: lower-priority columns step aside on narrower laptops (all of them stay in the CSV) */
+@media (max-width: 1400px) { .tbl .p3 { display: none; } .tbl td:first-child { max-width: 230px; } }
+@media (max-width: 1180px) { .tbl .p2 { display: none; } .tbl td:first-child { max-width: 200px; } .tbl td .sku { display: none; } }
 .headline p .lostv { font-weight: 600; }
 .ov-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .note .panel-head .btn { padding: 4px 12px; }

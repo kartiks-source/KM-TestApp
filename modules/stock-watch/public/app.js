@@ -30,7 +30,8 @@
 
   const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Slow seller': 'idle', 'No stock data': 'idle' };
   const narrow = () => window.innerWidth < 760;
-  const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}">${esc(s)}</span>`;
+  const SHORT = { 'Order this week': 'This week', 'No stock data': 'No stock' };
+  const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}" title="${esc(s)}">${esc(SHORT[s] || s)}</span>`;
 
   /* ---------- server ---------- */
   async function api(path, opt = {}) {
@@ -104,8 +105,8 @@
       rows = rows.slice().sort((a, b) => { const x = v(a), y = v(b); return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
-    const desk = `<div class="tbl desk"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}" data-k="${c.k}">${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    const desk = `<div class="tbl desk"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.tip ? ` title="${esc(c.tip)}"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk;
     const cur = s ? `${s.k}|${s.dir}` : '';
     const opts = cols.filter((c) => c.sortable !== false).flatMap((c) => [[`${c.k}|-1`, `${c.label}: high → low`], [`${c.k}|1`, `${c.label}: low → high`]]);
@@ -232,13 +233,13 @@
       ${table('reorder', [
         { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
-        { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
+        { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => inr.format(p.stock) },
-        { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
-        { k: 'orderValue', label: 'Order value', r: 1, f: (p) => money(p.orderValue) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
-        { k: 'outs', label: 'Stock-outs', r: 1 },
+        { k: 'perDay', label: 'Per day', r: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+        { k: 'orderValue', label: 'Value', r: 1, tip: 'Order quantity × average price paid', f: (p) => money(p.orderValue) },
+        { k: 'lost', label: 'Lost', r: 1, tip: `₹ lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
+        { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
       ], rows, 'Nothing to order in this view.', (p) => `
         <header><h3>${esc(p.name)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${pill(p.status)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${inr.format(p.stock)}</b> in stock</span><span><b>${n1(p.perDay)}</b>/day</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}<span class="sku">${esc(p.sku)}</span></div>`)}`;
@@ -256,19 +257,19 @@
         <input class="search" id="q-stockouts" placeholder="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
       ${table('stockouts', [
         { k: 'name', label: 'Product', f: (s) => `<span class="pname" title="${esc(s.name)}">${esc(s.name)}</span><span class="sku">${esc(s.sku)}</span>` },
-        { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
+        { k: 'lost', label: 'Lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
         { k: 'hours', label: 'Out for', r: 1, nw: 1, f: (s) => dur(s.hours) },
         { k: 'start', label: 'Went out', nw: 1, f: (s) => dt(s.start) },
         { k: 'end', label: 'Back in', nw: 1, f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
-        { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small">Small top-up</span>' : '', s.repeat ? '<span class="st again">Out again within a week</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
-        { k: 'topUp', label: 'Refilled with', r: 1, nw: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
-        { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
+        { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small" title="Refilled with less than a week of sales">Small top-up</span>' : '', s.repeat ? '<span class="st again" title="Out again within a week">Again &lt;7d</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
+        { k: 'topUp', label: 'Refill', r: 1, nw: 1, tip: 'Pieces added when it came back, and how many days of sales that covers', f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} <span class="muted">· ${n1(s.topUpDays)} d</span>`), val: (s) => s.topUp ?? -1 },
+        { k: 'unitsLost', label: 'Units lost', r: 1, pr: 3, f: (s) => n1(s.unitsLost) },
       ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.', (s) => `
         <header><h3>${esc(s.name)}</h3><div class="mq"><b class="lostv">${money(s.lost)}</b><small>lost</small></div></header>
         <div class="mfacts"><span class="${s.open ? 'bad' : ''}">out <b>${dur(s.hours)}</b></span><span>${dt(s.start)} → ${s.open ? '<span class="st open">Still out</span>' : dt(s.end)}</span>${s.topUp == null ? '' : `<span>refilled <b>${inr.format(s.topUp)}</b> (${n1(s.topUpDays)} d)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`)}`;
   }
 
-  const PRODUCT_TABS = [['all', 'All'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['OK', 'OK'], ['Slow seller', 'Slow sellers'], ['lost', 'Lost sales']];
+  const PRODUCT_TABS = [['all', 'All'], ['Out now', 'Out now'], ['Critical', 'Critical'], ['Order now', 'Order now'], ['Order this week', 'This week'], ['OK', 'OK'], ['Slow seller', 'Slow'], ['lost', 'Lost sales']];
   const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : p.status === f);
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
@@ -277,18 +278,18 @@
   const PRODUCT_COLS = () => [
     { k: 'name', label: 'Product', f: (p) => `<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span><span class="sku">${esc(p.sku)}</span>`, csv: (p) => p.name },
     { k: 'sku', label: 'SKU', hide: 1 },
-    { k: 'type', label: 'Category', f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
+    { k: 'type', label: 'Category', pr: 2, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
     { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => p.status },
     { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
     { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1, csv: (p) => p.daysLeft ?? '' },
-    { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
-    { k: 'unitsSold', label: `Units (${state.days} d)`, r: 1, f: (p) => inr.format(p.unitsSold || 0) },
-    { k: 'price', label: 'Avg price', r: 1, f: (p) => moneyFull(p.price) },
-    { k: 'sold', label: `Sold (${state.days} d)`, r: 1, f: (p) => money(p.sold) },
-    { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
-    { k: 'lostPct', label: '% lost', r: 1, f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
-    { k: 'outs', label: 'Outs', r: 1 },
-    { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
+    { k: 'perDay', label: 'Per day', r: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+    { k: 'unitsSold', label: 'Units', r: 1, pr: 3, tip: `Units sold in the last ${state.days} days`, f: (p) => inr.format(p.unitsSold || 0) },
+    { k: 'price', label: 'Avg price', hide: 1 },
+    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (p) => money(p.sold) },
+    { k: 'lost', label: 'Lost', r: 1, tip: `₹ lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
+    { k: 'lostPct', label: '% lost', r: 1, tip: 'Lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `<span class="${p.lostPct >= 10 ? 'lostv' : ''}">${n1(p.lostPct)}%</span>` : '–') },
+    { k: 'outs', label: 'Outs', r: 1, pr: 3, tip: 'Stock-outs in the period' },
+    { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order now', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
   ];
   function products() {
     const r = state.report, f = state.filter.products, ty = state.filter.type;
@@ -300,7 +301,7 @@
       <section class="headline ex"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock. Click one for its stock history.</p></section>
       <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${esc(k)}">${l}<span class="c">${inShape(inType, k)}</span></button>`).join('')}<button class="btn ghost" id="csv-products" title="Download what's shown as CSV">CSV</button></div>
         ${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
-        <input class="search" id="q-products" placeholder="Search name, SKU, category" value="${esc(state.q.products)}"></div>
+        <input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></div>
       ${table('products', PRODUCT_COLS().filter((c) => !c.hide), rows, 'No products match.', (p) => `
         <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${n1(p.perDay)}</b>/day</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost (${n1(p.lostPct)}%)</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.type ? `<span class="sku">${esc(p.type)}</span>` : ''}</div>`)}`;
