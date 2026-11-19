@@ -138,6 +138,9 @@ button.tile:hover { border-color: var(--brand); }
 .chip { border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 5px 10px; font-weight: 500; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
 .chip.on { border-color: var(--brand); background: var(--brand-wash); color: var(--brand); font-weight: 600; }
 .chip .c { font-variant-numeric: tabular-nums; opacity: .75; }
+/* Group by (SW-022): removable filter chip, footnote under group rows */
+.gchip span[aria-hidden], #g-all span[aria-hidden] { font-size: 15px; line-height: 1; margin-left: 2px; }
+.gnote { margin: 0; color: var(--soft); font-size: 12.5px; max-width: 900px; }
 .search { flex: 1; min-width: 200px; max-width: 340px; border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 7px 12px; }
 .search:focus, .field input:focus, .field select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-wash); }
 .btn { border: 1px solid var(--brand); background: var(--brand); color: #fff; border-radius: 8px; padding: 7px 14px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
