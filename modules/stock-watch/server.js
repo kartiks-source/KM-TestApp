@@ -3,7 +3,8 @@
  * Catalys · Stock-out Watch — server. Plain Node, no dependencies.
  *
  *   npm start            → http://localhost:4400
- *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected.
+ *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected,
+ *                          and with NODE_ENV=production (at least 12 characters).
  *   PORT, DATA_DIR       → optional
  *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
  */
@@ -20,8 +21,12 @@ const shopify = require('./src/shopify');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
+const PROD = process.env.NODE_ENV === 'production';
+const MIN_PASSWORD = 12;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // same folder as src/store.js
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
+const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 /* ---------- helpers ---------- */
@@ -32,32 +37,84 @@ const send = (res, code, body, type = 'application/json; charset=utf-8', extra =
 const fail = (res, code, message) => send(res, code, { ok: false, error: message });
 const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
   let size = 0; const chunks = [];
-  req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Too large'), { code: 413 })); req.destroy(); } else chunks.push(c); });
+  req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Upload too large'), { status: 413 })); req.removeAllListeners('data'); req.resume(); } else chunks.push(c); });
   req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   req.on('error', reject);
 });
-const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
-/* Login: a normal sign-in page sets a signed cookie (works in every browser, including
- * embedded ones that never show a Basic-auth pop-up). Basic auth still works for scripts. */
+/* Constant-time compare: HMAC both sides with a per-process key, so neither the content nor the length leaks through timing. */
+const CMP_KEY = crypto.randomBytes(32);
+const mac = (x) => crypto.createHmac('sha256', CMP_KEY).update(String(x)).digest();
+const safeEqual = (a, b) => crypto.timingSafeEqual(mac(a), mac(b));
+const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
+/** A JSON object body, else 400 (bad JSON, null, an array or a number are refused). */
+function jsonObject(raw) {
+  let b; try { b = JSON.parse(raw || '{}'); } catch { throw badRequest('The body must be JSON'); }
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw badRequest('The body must be a JSON object');
+  return b;
+}
+
+/* ---------- login ----------
+ * A sign-in page sets a signed cookie (works in every browser, including embedded ones that never
+ * show a Basic-auth pop-up). Basic auth still works for scripts. One limiter covers both.
+ * Session cookies are signed with a key made from a random secret in DATA_DIR/secret (mode 600)
+ * plus a fingerprint of the password, so changing ADMIN_PASSWORD signs everyone out. */
 const COOKIE = 'sw_session';
 const SESSION_DAYS = 30;
-const sign = (exp) => crypto.createHmac('sha256', 'stock-watch-session|' + PASSWORD).update(String(exp)).digest('base64url');
+function loadSecret() {
+  const file = path.join(DATA_DIR, 'secret');
+  try { const v = fs.readFileSync(file, 'utf8').trim(); if (v.length >= 32) { try { fs.chmodSync(file, 0o600); } catch { /* read-only volume: still usable */ } return v; } }
+  catch (e) { if (e.code !== 'ENOENT') console.warn('session secret unreadable, making a new one:', e.code || e.message); }
+  const v = crypto.randomBytes(32).toString('hex');
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(file, v + '\n', { mode: 0o600 }); }
+  catch (e) { console.warn('session secret not saved (sign-ins end on restart):', e.code || e.message); }
+  return v;
+}
+let sessionKey = null;
+const keyOf = () => sessionKey || (sessionKey = crypto.createHmac('sha256', loadSecret()).update('password|' + crypto.createHash('sha256').update(PASSWORD).digest('hex')).digest());
+const sign = (exp) => crypto.createHmac('sha256', keyOf()).update('session|' + exp).digest('base64url');
 const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
 function sessionOk(req) {
   const [exp, sig] = cookieOf(req, COOKIE).split('.');
   return !!exp && +exp > Date.now() && !!sig && safeEqual(sig, sign(exp));
 }
-function authed(req) {
-  if (!PASSWORD) return true;
-  if (sessionOk(req)) return true;
-  const m = String(req.headers.authorization || '').match(/^Basic (.+)$/);
-  if (!m) return false;
-  const [, pass = ''] = Buffer.from(m[1], 'base64').toString().split(':');
-  return safeEqual(pass, PASSWORD);
-}
 const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
-const fails = new Map();   // ip → { n, until }: slow down password guessing
-const ipOf = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+/** Client IP: the last X-Forwarded-For hop (added by Railway's proxy; earlier hops are whatever the client sent), else the socket. */
+const ipOf = (req) => { const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); return hops.length ? hops[hops.length - 1] : String(req.socket.remoteAddress || ''); };
+
+/* Wrong-password limiter for the sign-in form and Basic auth: 10 per IP per 15 minutes, 100 across all IPs. */
+const LIMIT = { window: 15 * 60e3, perIp: 10, global: 100, maxIps: 10000 };
+const fails = new Map();   // ip → { n, until }
+let globalFails = [];      // times of the latest wrong passwords (at most LIMIT.global)
+let lastSweep = 0;
+const limiter = {
+  blocked(ip, now = Date.now()) {
+    if (now - lastSweep > 60e3) { lastSweep = now; for (const [k, f] of fails) if (now >= f.until) fails.delete(k); }
+    globalFails = globalFails.filter((t) => now - t < LIMIT.window);
+    const f = fails.get(ip);
+    return (!!f && f.n >= LIMIT.perIp && now < f.until) || globalFails.length >= LIMIT.global;
+  },
+  fail(ip, now = Date.now()) {
+    const f = fails.get(ip); const n = (f && now < f.until ? f.n : 0) + 1;
+    fails.delete(ip); fails.set(ip, { n, until: now + LIMIT.window });
+    while (fails.size > LIMIT.maxIps) fails.delete(fails.keys().next().value);   // oldest first
+    globalFails.push(now); if (globalFails.length > LIMIT.global) globalFails.shift();
+  },
+  ok(ip) { fails.delete(ip); },
+};
+/** 'ok' | 'none' (no credentials) | 'bad' (wrong password) | 'limited' (too many wrong tries). */
+function auth(req) {
+  if (!PASSWORD) return 'ok';
+  if (sessionOk(req)) return 'ok';
+  const m = String(req.headers.authorization || '').match(/^Basic\s+(\S+)$/i);
+  if (!m) return 'none';
+  const ip = ipOf(req);
+  if (limiter.blocked(ip)) return 'limited';
+  const raw = Buffer.from(m[1], 'base64').toString('utf8'); const i = raw.indexOf(':');
+  const pass = i >= 0 ? raw.slice(i + 1) : '';   // everything after the first ":" (passwords may contain ":")
+  if (safeEqual(pass, PASSWORD)) { limiter.ok(ip); return 'ok'; }
+  limiter.fail(ip); return 'bad';
+}
+const TOO_MANY = 'Too many wrong passwords. Wait 15 minutes.';
 function loginPage(error = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Stock-out Watch</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -103,7 +160,9 @@ async function syncSheet() {
       if (!/^https:\/\/docs\.google\.com\//.test(url)) throw new Error('Sheet links must be Google Sheets "Publish to web" CSV links');
       const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
       if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
-      const parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order');
+      let parsed;
+      try { parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order', { tzOffsetMin: s.tzOffsetMin, keepDays: KEEP_DAYS }); }
+      catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows, 'sheet'); else out.orders = store.add('orders', parsed.rows, 'sheet');
     }
     store.setSync({ lastSync: Date.now(), lastSyncError: null });
@@ -180,32 +239,43 @@ function statusBody() {
 }
 
 /* ---------- API ---------- */
+const SETTINGS_LIMIT = 64 * 1024;   // settings bodies are tiny; anything bigger is refused (413)
+const MAX_INGEST_ROWS = 500;   // Flow sends one change per request; a leaked key can't flood the store
+let keyInUrlWarned = 0;
 async function api(req, res, url) {
   const p = url.pathname;
   const d = store.load();
   const days = Number(url.searchParams.get('days')) || 30;
 
-  /* Shopify Flow → "Send HTTP request" (no login; protected by the ingest key) */
+  /* Shopify Flow → "Send HTTP request" (no login; protected by the X-Ingest-Key header) */
   const ingest = p.match(/^\/ingest\/(stock|order)$/);
   if (ingest && req.method === 'POST') {
-    const key = url.searchParams.get('key') || req.headers['x-ingest-key'];
+    let key = req.headers['x-ingest-key'];
+    if (!key && url.searchParams.has('key')) {   // old URLs: still accepted, but the key ends up in proxy and Flow logs
+      key = url.searchParams.get('key');
+      if (Date.now() - keyInUrlWarned > 3600e3) { keyInUrlWarned = Date.now(); console.warn('ingest: key in the URL (?key=) is deprecated, send the X-Ingest-Key header instead'); }
+    }
     if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
     const raw = await readBody(req, 2e6);
     let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
-    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1]));
+    if (Array.isArray(body) && body.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
+    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1], { tzOffsetMin: d.settings.tzOffsetMin }));
+    if (list.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
     const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list, 'flow');
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
 
-  if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
+  const a = auth(req);
+  if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
+  if (a !== 'ok') return send(res, 401, { ok: false, error: 'Login needed' });
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
-    const id = decodeURIComponent(p.slice('/api/product/'.length));
+    let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog }) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
@@ -217,20 +287,21 @@ async function api(req, res, url) {
     return done.error ? fail(res, 502, done.error) : send(res, 200, { ok: true, ...done });
   }
   if (p === '/api/settings' && req.method === 'PUT') {
-    const b = JSON.parse(await readBody(req) || '{}'); const patch = {};
+    const b = jsonObject(await readBody(req, SETTINGS_LIMIT)); const patch = {};
     for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, b[k]); if (v !== undefined) patch[k] = v; }
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
-    if (b.newIngestKey === true) patch.ingestKey = crypto.randomBytes(16).toString('hex');
+    if (b.newIngestKey === true) { patch.ingestKey = crypto.randomBytes(16).toString('hex'); patch.ingestKeyAt = Date.now(); }
     return send(res, 200, { ok: true, settings: store.setSettings(patch) });
   }
   if (p === '/api/import' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
     if (shopifyRun) return fail(res, 409, PULL_RUNNING);
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
-    const parsed = rows.fromCsv(await readBody(req), kind);
+    // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself (SW-007).
+    const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
-    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
+    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
   }
   if (p === '/api/sync' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
@@ -245,8 +316,7 @@ async function api(req, res, url) {
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
     const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
-    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
-    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(q).join(',')).join('\n');
+    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(rows.csvCell).join(',')).join('\n');
     return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
   }
   return fail(res, 404, 'Not found');
@@ -254,44 +324,74 @@ async function api(req, res, url) {
 
 /* ---------- static ---------- */
 function serveStatic(req, res, url) {
-  if (!authed(req)) {
+  if (auth(req) !== 'ok') {
     if (url.pathname === '/favicon.svg') { res.writeHead(200, { 'content-type': TYPES['.svg'] }); return fs.createReadStream(path.join(PUBLIC, 'favicon.svg')).pipe(res); }
     return send(res, 302, '', 'text/plain', { location: '/login' });
   }
   let file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
-  if (!file.startsWith(PUBLIC)) return send(res, 403, 'Forbidden', 'text/plain');
+  if (file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'Forbidden', 'text/plain');   // not public-evil/…
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
   fs.createReadStream(file).pipe(res);
 }
 
+/* ---------- security headers + same-origin writes ---------- */
+const CSP = ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src https://fonts.gstatic.com",
+  "img-src 'self' data: blob:", "connect-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].join('; ');
+function securityHeaders(req, res) {
+  res.setHeader('content-security-policy', CSP);
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('x-frame-options', 'DENY');
+  if (req.headers['x-forwarded-proto'] === 'https') res.setHeader('strict-transport-security', 'max-age=15552000');
+}
+/** A browser write from another site (CSRF). Modern browsers say so in Sec-Fetch-Site; otherwise Origin must match
+ *  our host (X-Forwarded-Host behind a proxy). Scripts (curl, Flow) send neither and pass. */
+function crossSite(req) {
+  const site = String(req.headers['sec-fetch-site'] || '');
+  if (site && site !== 'same-origin' && site !== 'none') return true;   // cross-site, or same-site (another *.up.railway.app app)
+  const origin = req.headers.origin;
+  if (!origin || site === 'same-origin') return false;
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+  try { return new URL(origin).host.toLowerCase() !== host; } catch { return true; }   // includes Origin: null
+}
+const isWrite = (req) => !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://local');
+  securityHeaders(req, res);
+  let url;
+  try { url = new URL(req.url, 'http://local'); } catch { return fail(res, 400, 'Bad address'); }
   try {
+    if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
+      return fail(res, 403, 'Cross-site request refused');
+    }
     if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
     if (url.pathname === '/health') { const h = store.health(); return send(res, h.ok ? 200 : 503, { ok: h.ok, ...(h.ok ? {} : { error: h.loadError || `Saving data fails: ${h.lastSaveError?.message}` }) }); }
     if (url.pathname === '/login' && req.method === 'GET') {
-      if (!PASSWORD || authed(req)) return send(res, 302, '', 'text/plain', { location: '/' });
+      if (auth(req) === 'ok') return send(res, 302, '', 'text/plain', { location: '/' });
       return send(res, 200, loginPage(), 'text/html; charset=utf-8');
     }
     if (url.pathname === '/login' && req.method === 'POST') {
-      const ip = ipOf(req); const f = fails.get(ip);
-      if (f && f.n >= 10 && Date.now() < f.until) return send(res, 429, loginPage('Too many tries. Wait 15 minutes.'), 'text/html; charset=utf-8');
+      if (!PASSWORD) return send(res, 303, '', 'text/plain', { location: '/' });
+      const ip = ipOf(req);
+      if (limiter.blocked(ip)) return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
-      if (!PASSWORD || !safeEqual(pass, PASSWORD)) {
-        const n = (f && Date.now() < f.until ? f.n : 0) + 1; fails.set(ip, { n, until: Date.now() + 15 * 60e3 });
-        return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
-      }
-      fails.delete(ip);
+      if (!safeEqual(pass, PASSWORD)) { limiter.fail(ip); return send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8'); }
+      limiter.ok(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
       return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
     }
-    if (url.pathname === '/logout') return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
+    if (url.pathname === '/logout') {   // POST only, so a link or image elsewhere can't sign people out
+      if (req.method !== 'POST') return send(res, 303, '', 'text/plain', { location: '/' });
+      return send(res, 303, '', 'text/plain', { location: '/login', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure(req)}` });
+    }
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
+    if (e instanceof URIError) return fail(res, 400, 'Bad address');
+    if (e.status >= 400 && e.status < 500) return fail(res, e.status, e.message);
     console.error(e);
-    return fail(res, e.code === 413 ? 413 : 500, e.code === 413 ? 'Upload too large' : 'Something went wrong on the server');
+    return fail(res, 500, 'Something went wrong on the server');
   }
 });
 
@@ -314,6 +414,10 @@ async function shutdown(signal) {
 }
 
 if (require.main === module) {
+  if (PROD && PASSWORD.length < MIN_PASSWORD) {
+    console.error(`Refusing to start: NODE_ENV=production needs ADMIN_PASSWORD set, at least ${MIN_PASSWORD} characters.`);
+    process.exit(1);
+  }
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
