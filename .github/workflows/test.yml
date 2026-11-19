@@ -1,0 +1,25 @@
+# CI gate (SW-014): npm test on every push and pull request. Deploy only a green main (docs/RUNBOOK.md).
+# Plain Node, no dependencies, so there is no install step. The Playwright smoke
+# (modules/stock-watch/test/smoke/smoke.js) needs a browser and runs on demand, not here.
+name: test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node: [20, 22]   # package engines >= 20; the Docker image runs 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
