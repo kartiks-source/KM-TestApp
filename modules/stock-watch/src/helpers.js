@@ -180,10 +180,30 @@ function vendorMap(stock = [], catalog = null) {
   return m;
 }
 
-/** The Reorder tab's rows: tab filter (today | week | ordered | all) and search over name and SKU, as on the page. */
+/**
+ * Reorder → Ordered tab (LOGIC.md §6b, §16): every open purchase order, whatever the status: one that covers the need
+ * ("Ordered"), a part order (still in Order today), a late one and one landing too late to count. Late first (oldest
+ * due date first), then by landing date. `products` = report.products (an OK product can still have stock on order).
+ */
+const onOrderRows = (products) => products.filter((p) => p.onOrder)
+  .sort((a, b) => (b.onOrder.late - a.onOrder.late) || a.onOrder.eta - b.onOrder.eta);
+/** What the warehouse needs: open orders, how many are late, how many land in the next 7 days, the next landing date. */
+function onOrderSummary(products, now) {
+  const rows = onOrderRows(products), due = rows.filter((p) => !p.onOrder.late);
+  return {
+    lines: rows.length, late: rows.length - due.length,
+    week: due.filter((p) => p.onOrder.eta <= now + 7 * DAY).length,
+    pcs: rows.reduce((s, p) => s + p.onOrder.remaining, 0),
+    next: due.length ? due[0].onOrder.eta : null,
+  };
+}
+
+/** The Reorder tab's rows: tab filter (today | week | ordered | all) and search over name and SKU, as on the page.
+ *  "ordered" = every open order (onOrderRows), so pass the report's products for it. */
 function reorderRows(reorder, { filter = 'all', q = '' } = {}) {
   const f = ['today', 'week', 'ordered'].includes(filter) ? filter : 'all', s = String(q || '').toLowerCase().trim();
-  return reorder.filter((p) => (f === 'all' || tabOf(p.status) === f) && (!s || `${p.name} ${p.sku}`.toLowerCase().includes(s)));
+  const list = f === 'ordered' ? onOrderRows(reorder) : reorder;
+  return list.filter((p) => (f === 'all' || f === 'ordered' || tabOf(p.status) === f) && (!s || `${p.name} ${p.sku}`.toLowerCase().includes(s)));
 }
 
 const PO_HEAD = ['Vendor', 'Product', 'SKU', 'Variant ID', 'Order qty', 'Unit cost', 'Order value', 'Status', 'Why', 'Order by', 'Stock now', 'Sells per day', 'Days left', 'Sales lost (₹)'];
@@ -193,7 +213,7 @@ const PO_HEAD = ['Vendor', 'Product', 'SKU', 'Variant ID', 'Order qty', 'Unit co
  */
 function poLines(r, { filter, q, vendors = {} } = {}) {
   const off = r.settings.tzOffsetMin ?? 330;
-  const rows = reorderRows(r.reorder, { filter, q });
+  const rows = reorderRows(filter === 'ordered' ? r.products : r.reorder, { filter, q });
   const vOf = (p) => vendors[String(p.id)] || '';
   const sorted = rows.map((p, i) => [p, i]).sort(([a, i], [b, j]) => {
     const x = vOf(a), y = vOf(b);
@@ -219,5 +239,5 @@ const fileDate = (now, offMin = 330) => localDay(now, offMin);
 
 module.exports = {
   money, dayName, dateShort, statusLabel, tabOf, why, mktList, backIn, mktSort, decideKind, salesChanged, DECIDE_CHANGE, DECIDE_FLOOR, DECISIONS,
-  enrich, enrichDetail, vendorMap, reorderRows, poLines, PO_HEAD, csvCell, csvText, fileDate,
+  enrich, enrichDetail, vendorMap, reorderRows, onOrderRows, onOrderSummary, poLines, PO_HEAD, csvCell, csvText, fileDate,
 };

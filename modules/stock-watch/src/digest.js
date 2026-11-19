@@ -105,11 +105,13 @@ const BUILD = {
       L.lostPeriod(ctx.week || r, null),
     ];
   },
+  /* warehouse receives: what is due to land (Reorder → Ordered, LOGIC.md §6b / §16), late first; never "order today" */
   warehouse: (r) => {
-    const today = orderToday(r), pcs = today.reduce((s, p) => s + p.orderQty, 0);
+    const s = H.onOrderSummary(r.products, r.generatedAt), off = r.settings.tzOffsetMin;
+    if (!s.lines) return ['Nothing on order.'];
     return [
-      today.length ? `Order today: ${plural(today.length, 'product')}, ${inr.format(pcs)} pcs in all.` : 'Nothing needs ordering today.',
-      ...L.topOrders(r, 3, (p) => `${cut(p.name)}: ${inr.format(p.orderQty)} pcs.`),
+      `On order: ${plural(s.lines, 'line')}, ${inr.format(s.pcs)} pcs to come · ${inr.format(s.week)} due this week${s.late ? ` · ${inr.format(s.late)} late` : ''}.`,
+      ...H.onOrderRows(r.products).slice(0, 3).map((p) => `${cut(p.name)}: ${inr.format(p.onOrder.remaining)} pcs · ${p.onOrder.late ? `late, was due ${dateLabel(p.onOrder.eta, off)}` : `lands ${dateLabel(p.onOrder.eta, off)}`}.`),
     ];
   },
 };

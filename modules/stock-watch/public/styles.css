@@ -287,6 +287,9 @@ table.fixed td:first-child { max-width: none; }
 @media (max-width: 1700px) { .tbl .p4 { display: none; } }
 @media (max-width: 1400px) { .tbl .p3 { display: none; } .tbl td:first-child { max-width: 230px; } }
 @media (max-width: 1180px) { .tbl .p2 { display: none; } .tbl td:first-child { max-width: 200px; } .tbl td .sku { display: none; } }
+/* Reorder 1181–1400: the name cell also holds tick + spark + dot (~85 px), and Why needs ≤ 370 px; give the name the slack
+   (critic UI-2: 1280 cut 48/50 names, incl. the variant suffix → 3/50) */
+@media (min-width: 1181px) and (max-width: 1400px) { .tbl table[data-table="reorder"] td:first-child { max-width: 420px; } }
 .headline p .lostv { font-weight: 600; }
 .hfind { margin-left: auto; display: inline-flex; gap: 6px; align-self: center; }
 .hfind .search { flex: none; width: 200px; }

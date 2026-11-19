@@ -174,12 +174,14 @@ function storeTrend(products) {
   return round(v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2, 1);
 }
 
-/** 'up' | 'down' | 'flat' for a product's trend read against the typical product (null: no trend to call). */
+/** 'up' | 'down' | 'flat' for a product's trend (null: no trend to call). Up / down only when the product's own %
+ *  points that way AND it is 10+ points better / worse than the typical product (LOGIC.md §7d): a fall is never
+ *  green, a rise never red (critic UI-1), and a store-wide fall doesn't turn every row red (critic S1). */
 const TREND_BAND = 10;
 function trendCall(pct, base) {
   if (pct == null) return null;
   const d = pct - (base == null ? 0 : base);
-  return d >= TREND_BAND ? 'up' : d <= -TREND_BAND ? 'down' : 'flat';
+  return d >= TREND_BAND && pct > 0 ? 'up' : d <= -TREND_BAND && pct < 0 ? 'down' : 'flat';
 }
 
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered', 'OK'];

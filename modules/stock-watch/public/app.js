@@ -227,18 +227,21 @@
   }
   function trendChip(p) {
     if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="In stock but no sales in the 14 days before; 3 or more sold since">New</span>' : '<span class="tr low" title="Not enough sales yet to call a trend">–</span>';
-    /* colour = the engine's call against the typical product (LOGIC.md §7d), text = this product's own change */
+    /* colour = the engine's call (LOGIC.md §7d): green / red only when the product's own % points that way and it is
+       10+ points off the typical product; text = this product's own change. The tooltip says how it compares. */
     const v = p.trendPct, cls = p.trendCall || 'flat', base = state.report.totals.storeTrendPct;
     const pct = (x) => `${x > 0 ? '+' : ''}${n1(x)}%`;
+    const gap = base == null ? 0 : v - base;
     const verdict = base == null ? (cls === 'up' ? 'Selling faster' : cls === 'down' ? 'Selling slower' : 'About flat')
-      : cls === 'up' ? 'Doing better than the typical product' : cls === 'down' ? 'Doing worse than the typical product' : 'In line with the typical product';
+      : cls === 'up' ? 'Selling faster, and better than the typical product' : cls === 'down' ? 'Selling slower, and worse than the typical product'
+        : gap >= 10 ? 'Falling, but less than the typical product' : gap <= -10 ? 'Rising, but less than the typical product' : 'In line with the typical product';
     return `<span class="tr ${cls}" title="${verdict}: ${pct(v)}${base != null ? ` vs typical ${pct(base)}` : ''}. Sales per in-stock day, last 14 days vs the 14 before; out-of-stock days are left out, so a stock-out doesn't look like falling demand.">${pct(v)}</span>`;
   }
 
   /* Trend column tip: % = the product's own change; colour = against the typical product (median trend, LOGIC.md §7d) */
   const trendTip = () => {
     const b = state.report.totals.storeTrendPct;
-    return `Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before. Green / red = 10 points or more better / worse than the typical product${b != null ? ` (${b > 0 ? '+' : ''}${n1(b)}% over the same days)` : ''}`;
+    return `Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse${b != null ? ` (${b > 0 ? '+' : ''}${n1(b)}% over the same days)` : ''}`;
   };
 
   /* which priority columns the CSS shows at this width (mirrors the @media rules in styles.css) */
@@ -412,10 +415,10 @@
       </section>
       <section class="grid2 grid3">
         <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder" data-go="reorder" data-filter="today">All ${t.orderToday}</a></div>
-          ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
+          ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
         </div>
         <div class="panel"><div class="panel-head"><h2>Biggest losses</h2><a href="#products" data-go="products" data-filter="lost">All</a></div>
-          ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
+          ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
         </div>
         ${moving()}
       </section>
@@ -430,20 +433,36 @@
     const ps = state.report.products.filter((p) => p.trendValue);
     const up = ps.filter((p) => p.trendValue > 0).sort((a, b) => b.trendValue - a.trendValue).slice(0, 3);
     const down = ps.filter((p) => p.trendValue < 0).sort((a, b) => a.trendValue - b.trendValue).slice(0, 3);
-    const row = (p) => `<div class="mv-row" data-product="${esc(p.id)}" title="${esc(p.name)}"><span class="name">${outDot(p)}${esc(p.name)}</span>${spark(p, 40, 12)}${trendOnly(p)}<span class="mv-v ${p.trendValue > 0 ? 'up' : 'down'}">${p.trendValue > 0 ? '+' : '−'}${money(Math.abs(p.trendValue))}</span></div>`;
+    const row = (p) => `<div class="mv-row" data-product="${esc(p.id)}" tabindex="0" role="button" title="${esc(p.name)}"><span class="name">${outDot(p)}${esc(p.name)}</span>${spark(p, 40, 12)}${trendOnly(p)}<span class="mv-v ${p.trendValue > 0 ? 'up' : 'down'}">${p.trendValue > 0 ? '+' : '−'}${money(Math.abs(p.trendValue))}</span></div>`;
     const list = (h, l) => (l.length ? `<h3 class="mv-h">${h}</h3>${l.map(row).join('')}` : '');
     return `<div class="panel"><div class="panel-head"><h2>Moving</h2><span class="muted small" title="Change in sales per in-stock day (last 14 days vs the 14 before) × average price × 30">₹ a month at the new pace</span></div>
       ${up.length || down.length ? `<div class="mv">${list('Selling faster', up)}${list('Selling slower', down)}</div>` : '<p class="muted">Not enough sales yet to call a trend.</p>'}</div>`;
   }
 
+  /* Ordered tab = every open purchase order (part, late, landing too late too), late first: same rule as
+     src/helpers.js onOrderRows / onOrderSummary (LOGIC.md §6b, §16) */
+  const onOrderRows = (products) => products.filter((p) => p.onOrder).sort((a, b) => (b.onOrder.late - a.onOrder.late) || a.onOrder.eta - b.onOrder.eta);
+  const landsCell = (p) => {
+    const o = p.onOrder; if (!o) return '–';
+    const extra = [o.remaining < o.qty ? `${inr.format(o.qty - o.remaining)} of ${inr.format(o.qty)} in` : '', o.late ? '' : !o.counts ? 'after it runs out' : '', p.orderQty > 0 ? `order ${inr.format(p.orderQty)} more` : ''].filter(Boolean).join(' · ');
+    const txt = `${o.late ? `Late · was due ${dateShort(o.eta)}` : `Lands ${dateShort(o.eta)}`}${extra ? ` · ${extra}` : ''}`;
+    return `<span class="why${o.late ? ' out' : ''}" title="${esc(`${txt}. Ordered ${inr.format(o.qty)} pcs${o.by ? ` by ${o.by}` : ''} on ${dateShort(o.at)}`)}">${esc(txt)}</span>`;
+  };
   function reorder() {
     const r = state.report, t = r.totals, f = state.filter.reorder, q = state.q.reorder.toLowerCase();
     const week = r.reorder.filter((p) => p.status === 'Order this week').length;
-    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(t.ordered || f === 'ordered' ? [['ordered', 'Ordered', t.ordered]] : []), ['all', 'All', r.reorder.length]];
-    const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
+    const open = onOrderRows(r.products), ordered = f === 'ordered';
+    const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(open.length || ordered ? [['ordered', 'Ordered', open.length]] : []), ['all', 'All', r.reorder.length]];
+    const rows = (ordered ? open : r.reorder.filter((p) => f === 'all' || group(p.status) === f)).filter((p) => !q || `${p.name} ${p.sku}`.toLowerCase().includes(q));
     const canPick = (p) => !viewOnly() && !p.onOrder && p.orderQty > 0;   // view-only sign-in can't mark ordered (SW-029)
     const pickable = rows.filter(canPick);
-    const cols = [
+    const cols = ordered ? [
+      { k: 'name', label: 'Product', f: (p) => nameCell(p, true, true) },
+      { k: 'lands', label: 'Lands', tip: 'Expected landing date; late = past it with less than 90% received', f: landsCell, val: (p) => (p.onOrder.late ? -1e15 : 0) + p.onOrder.eta },
+      { k: 'onOrder', label: 'On order (pcs)', r: 1, tip: 'Still to come: ordered minus what has arrived since the order was marked', f: (p) => `<b>${inr.format(p.onOrder.remaining)}</b>`, val: (p) => p.onOrder.remaining },
+      { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
+      { k: 'stock', label: 'In stock', r: 1, f: (p) => inr.format(p.stock) },
+    ] : [
       { k: 'name', label: 'Product', f: (p) => (canPick(p) ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : (viewOnly() ? '' : '<span class="pick-sp"></span>')) + nameCell(p, true, true) },
       ...(f === 'all' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
       { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: whyCell, val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
@@ -457,16 +476,25 @@
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
     ];
     const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && canPick(p)));
+    /* the Ordered tab's question is "what lands, what's late" (warehouse home), not "what to order" (critic SIMP-1, M6) */
+    const late = open.filter((p) => p.onOrder.late).length, due = open.filter((p) => !p.onOrder.late), now = Date.now();
+    const soon = due.filter((p) => p.onOrder.eta <= now + 7 * 864e5).length;
+    const head = ordered
+      ? `<h1>${open.length ? `${inr.format(open.length)} on order · ${inr.format(soon)} due this week${late ? ` · <span class="lost">${inr.format(late)} late</span>` : ''}` : 'Nothing on order'}</h1>
+        ${due.length ? `<p class="exp">Next lands ${dateShort(due[0].onOrder.eta)}. Late = past its date with less than 90% received: chase the supplier.</p>` : ''}`
+      : `<h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
+        <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p>`;
     return `
-      <section class="headline"><h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
-        <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p></section>
+      <section class="headline">${head}</section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
-      ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
+      ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
+        <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.onOrder.remaining)} pcs</b><small>on order</small></div></header>
+        <div class="mfacts">${landsCell(p)}${bestTag(p)}</div>` : `
         <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <div class="mfacts">${f === 'all' ? status(p) : f === 'ordered' ? '' : poTag(p).trim()}${whyCell(p)}${bestTag(p)}</div>`)}`;   // Ordered tab: the Why cell already says "Ordered · lands …"
+        <div class="mfacts">${f === 'all' ? status(p) : poTag(p).trim()}${whyCell(p)}${bestTag(p)}</div>`))}`;
   }
 
   /* stock-outs, one row per product (the individual stock-outs are in the product drawer) */
@@ -821,7 +849,7 @@
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
     }
-    if (t.dataset.product) { openProduct(t.dataset.product); return; }
+    if (t.dataset.product) { lastRow = t; openProduct(t.dataset.product); return; }
     if (t.matches('tr[data-id], .mcard[data-id]') && t.closest('.groups')) { openGroup(t.dataset.id); return; }
     if (t.matches('tr[data-id], .mcard[data-id]')) { lastRow = t; openProduct(t.dataset.id); return; }
     if (t.id === 'drawer-close') { closeDrawer(); return; }
@@ -925,6 +953,7 @@
     if (e.key === 'Escape') closeDrawer();
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.mcard[data-id], tr[data-id]')) { e.preventDefault(); if (e.target.closest('.groups')) { openGroup(e.target.dataset.id); return; } lastRow = e.target; openProduct(e.target.dataset.id); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('th[data-k]')) { e.preventDefault(); e.target.click(); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('div[data-product]')) { e.preventDefault(); lastRow = e.target; openProduct(e.target.dataset.product); }   // Overview rows (critic UI-3)
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);

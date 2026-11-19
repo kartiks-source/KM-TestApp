@@ -36,7 +36,9 @@ test('"New" products get a ₹ effect from zero', () => {
 test('trend call: red only 10+ points below the typical product', () => {
   assert.equal(E.trendCall(-20, -25), 'flat', '−20% when typical is −25%: holding up');
   assert.equal(E.trendCall(-36, -25), 'down');
-  assert.equal(E.trendCall(-14, -25), 'up');
+  assert.equal(E.trendCall(-14, -25), 'flat', 'better than typical but still falling: never green (critic UI-1)');
+  assert.equal(E.trendCall(14, 40), 'flat', 'worse than typical but still rising: never red');
+  assert.equal(E.trendCall(12, -25), 'up');
   assert.equal(E.trendCall(-12, null), 'down', 'no baseline: against 0');
   assert.equal(E.trendCall(null, -25), null);
   /* in a report: 6 products, all falling; red only for the one 10+ points below the median */
@@ -45,6 +47,6 @@ test('trend call: red only 10+ points below the typical product', () => {
   const r = E.report(ids.map(stockRow), ids.flatMap((id) => lines(id, ...falls[id])), {}, { now });
   const by = Object.fromEntries(r.products.map((p) => [p.id, p]));
   assert.equal(r.totals.storeTrendPct, -40);
-  assert.deepEqual(ids.map((id) => by[id].trendCall), ['flat', 'flat', 'flat', 'flat', 'up', 'down']);   // e −30% beats typical −40% by 10 points
+  assert.deepEqual(ids.map((id) => by[id].trendCall), ['flat', 'flat', 'flat', 'flat', 'flat', 'down']);   // e −30% beats typical −40% by 10 points but is falling: grey
   assert.ok(ids.every((id) => by[id].trendPct <= -30), 'every raw trend is a fall');
 });

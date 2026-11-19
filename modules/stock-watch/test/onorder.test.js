@@ -123,3 +123,28 @@ test('on-order store: validates, saves to DATA_DIR/onorder.json, qty 0 removes',
   assert.deepEqual(OO.mark([{ id: 'v2', qty: 0 }], { now }), { ok: true, saved: 0, removed: 1 });
   assert.equal(OO.all().v2, undefined);
 });
+
+test('Ordered tab = every open order (part, late, covered), late first, with what is still to come; warehouse digest says the same', () => {
+  /* critic SIMP-1: the tab listed status "Ordered" only, so a part order or a late one never showed to the warehouse */
+  const H = require('../src/helpers');
+  const Dg = require('../src/digest');
+  const lamp = fixture();                                            // v1: out, needs 200
+  const vase = { stock: lamp.stock.map((r) => ({ ...r, variantId: 'v2', sku: 'S2', product: 'Vase' })), orders: lamp.orders.map((o) => ({ ...o, variantId: 'v2', sku: 'S2' })) };
+  const bowl = { stock: lamp.stock.map((r) => ({ ...r, variantId: 'v3', sku: 'S3', product: 'Bowl' })), orders: lamp.orders.map((o) => ({ ...o, variantId: 'v3', sku: 'S3' })) };
+  const onOrder = {
+    v1: { qty: 200, eta: now + 5 * D, at: now - 36e5 },               // covers the need → Ordered
+    v2: { qty: 12, eta: now + 3 * D, at: now - 36e5 },                // part order → stays Out now
+    v3: { qty: 200, eta: now - 2 * D, at: now - 9 * D },              // late
+  };
+  const r = H.enrich(E.report([...lamp.stock, ...vase.stock, ...bowl.stock], [...lamp.orders, ...vase.orders, ...bowl.orders], {}, { now, onOrder }));
+  const rows = H.reorderRows(r.products, { filter: 'ordered' });
+  assert.deepEqual(rows.map((p) => p.id), ['v3', 'v2', 'v1']);       // late first, then by landing date
+  assert.deepEqual(rows.map((p) => p.status), ['Out now', 'Out now', 'Ordered']);
+  assert.equal(rows.find((p) => p.id === 'v2').onOrder.remaining, 12);
+  assert.equal(H.poLines(r, { filter: 'ordered' }).length, 1 + 3);   // the CSV of the tab has the same rows
+  assert.deepEqual(H.onOrderSummary(r.products, now), { lines: 3, late: 1, week: 2, pcs: 412, next: now + 3 * D });
+  const d = Dg.build({ report: r, role: 'warehouse', now });
+  assert.match(d.lines[1], /^On order: 3 lines, 412 pcs to come · 2 due this week · 1 late\.$/);
+  assert.match(d.lines[2], /^Bowl.*: 200 pcs · late, was due /);
+  assert.ok(!/Order today/.test(d.text), 'the warehouse digest never says "order today"');
+});
