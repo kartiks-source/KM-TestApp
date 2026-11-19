@@ -34,11 +34,13 @@ const SW = (() => {
   const num = (x) => (Number.isFinite(+x) ? +x : 0);
   const vid = (x) => String(x || '').replace(/\D/g, '');
   /** Stock-out episodes from one variant's stock changes (sorted by time). An episode starts when stock
-   * drops to 0 or below and ends when it rises above 0; one still open ends "now". */
+   * drops to 0 or below and ends when it rises above 0; one still open ends "now". A blank "Stock before" is
+   * read as the previous row's "Stock now", never as 0 (as the web app). */
   function episodes(changes, now) {
     const out = []; let open = null;
-    for (const c of changes) {
-      const was = num(c.before), is = num(c.now);
+    for (let i = 0; i < changes.length; i++) {
+      const c = changes[i], gap = c.before == null || String(c.before).trim() === '';
+      const was = gap && i > 0 ? num(changes[i - 1].now) : num(c.before), is = num(c.now);
       if (!open && is <= 0 && (was > 0 || !out.length)) open = { start: c.t };
       else if (open && is > 0) { out.push({ start: open.start, end: c.t, topUp: is, open: false }); open = null; }
     }
@@ -47,11 +49,44 @@ const SW = (() => {
   }
   /** Hours of [a,b) inside [from,to). */
   const overlap = (a, b, from, to) => Math.max(0, Math.min(b, to) - Math.max(a, from));
-  /** Daily rate = units sold ÷ days the product could be bought (stock-out time removed). */
+  /** Daily rate = units sold ÷ days the product could be bought (stock-out time removed, at least 1 day). */
   function rate(units, from, now, eps) {
     const outMs = eps.reduce((s, e) => s + overlap(e.start, e.end, from, now), 0);
     const days = Math.max(1, (now - from - outMs) / DAY);
     return units / days;
+  }
+  const inStockDays = (from, to, eps) => Math.max(0, (to - from - eps.reduce((s, e) => s + overlap(e.start, e.end, from, to), 0)) / DAY);
+  const KEEP_DAYS = 120, MIN_IN_STOCK_DAYS = 7;   // same as the web app (engine.js)
+  /** Earliest t ≥ histFrom such that [t, to) holds `wantMs` of in-stock time (eps oldest first); histFrom when there isn't that much. */
+  function inStockStart(eps, histFrom, to, wantMs) {
+    let need = wantMs, t = to;
+    for (let i = eps.length - 1; i >= -1 && t > histFrom; i--) {
+      const e = eps[i];
+      const gapFrom = Math.max(histFrom, e ? e.end : -Infinity);
+      if (gapFrom < t) { if (t - gapFrom >= need) return t - need; need -= t - gapFrom; }
+      t = e ? Math.min(t, e.start) : histFrom;
+    }
+    return histFrom;
+  }
+  /** The rate a product's numbers rest on, as the web app (its LOGIC.md §3): the window; under 7 in-stock days
+   * there (a long stock-out), the latest `wantDays` in-stock days within the last 120 days; never in stock in
+   * that history, the `wantDays` before the stock-out began. Returns { perDay, units, revenue, basis }. */
+  function demandRate(lines, eps, o) {
+    const measure = (a, b, hi) => {
+      let units = 0, revenue = 0;
+      for (const l of lines) if (l.t >= a && l.t < (hi == null ? Infinity : hi)) { units += l.qty; revenue += l.qty * l.price; }
+      return { perDay: rate(units, a, b, eps), units, revenue, raw: inStockDays(a, b, eps) };
+    };
+    const win = measure(o.winFrom, o.now);
+    if (win.raw >= MIN_IN_STOCK_DAYS || o.histFrom >= o.winFrom) return Object.assign(win, { basis: 'window' });
+    const hist = measure(inStockStart(eps, o.histFrom, o.now, o.wantDays * DAY), o.now);
+    if (hist.raw > 0) return Object.assign(hist, { basis: 'history' });
+    const cur = eps[eps.length - 1];
+    if (cur) {
+      const a = Math.max(cur.start - o.wantDays * DAY, o.first);
+      if (a < cur.start) { const pre = measure(a, cur.start, cur.start); if (pre.raw > 0) return Object.assign(pre, { basis: 'before-out' }); }
+    }
+    return Object.assign(win, { basis: 'window' });
   }
   /** Reorder status and quantity. */
   function plan({ stock, perDay, lead, cover, safety }) {
@@ -80,7 +115,7 @@ const SW = (() => {
   function compute(stock, orders, cfg, now, dayKey) {
     const from = now - cfg.window * DAY, lostFrom = now - 30 * DAY;
     const V = {};   // variant id → info
-    const v = (id) => (V[id] = V[id] || { id, sku: '', name: '', price: 0, changes: [], units: 0, revenue: 0, stock: null, first: Infinity });
+    const v = (id) => (V[id] = V[id] || { id, sku: '', name: '', price: 0, changes: [], lines: [], stock: null, first: Infinity });
     stock.slice().sort((a, b) => a[0] - b[0]).forEach((r) => {
       const x = v(vid(r[1])); x.sku = String(r[2] || x.sku); x.name = [r[3], r[4] && r[4] !== 'Default Title' ? r[4] : ''].filter(Boolean).join(' · ') || x.name;
       x.price = +r[7] || x.price; x.changes.push({ t: r[0], before: r[5], now: r[6] }); x.stock = +r[6]; x.first = Math.min(x.first, r[0]);
@@ -92,16 +127,17 @@ const SW = (() => {
       const qty = num(r[4]), price = num(r[5]);
       const x = v(vid(r[2])); x.first = Math.min(x.first, r[0]); x.sku = x.sku || String(r[3] || '');
       if (r[0] >= lostFrom) { const k = dayKey(r[0]); salesByDay[k] = (salesByDay[k] || 0) + qty * price; }
-      if (r[0] < from) return;
-      x.units += qty; x.revenue += qty * price;
+      x.lines.push({ t: r[0], qty, price });
     });
     const rateFrom = Math.max(from, firstOrder);
     const lostDay = {}, lost = [], reorder = [];
     Object.keys(V).forEach((id) => {
       const x = V[id];
       const eps = episodes(x.changes, now);
-      const perDay = rate(x.units, Math.max(rateFrom, x.first), now, eps);   // a new launch is measured from its first record
-      const price = x.units ? x.revenue / x.units : x.price;
+      /* a new launch is measured from its first record; a long stock-out looks further back (web LOGIC.md §3) */
+      const dr = demandRate(x.lines, eps, { winFrom: Math.max(rateFrom, x.first), histFrom: Math.max(now - KEEP_DAYS * DAY, firstOrder, x.first), now, wantDays: cfg.window, first: x.first });
+      const perDay = dr.perDay;
+      const price = dr.units ? dr.revenue / dr.units : x.price;
       const lostPerHour = (perDay / 24) * price;
       let lost30 = 0, outs = 0;
       eps.forEach((e, i) => {
@@ -126,7 +162,7 @@ const SW = (() => {
     const sold = days.reduce((s, d) => s + d.sold, 0), lostAll = days.reduce((s, d) => s + d.lost, 0);
     return { reorder, lost, days, totals: { sold, lost: lostAll } };
   }
-  return { episodes, rate, plan, lostByDay, overlap, compute, HOUR, DAY };
+  return { episodes, rate, demandRate, inStockStart, plan, lostByDay, overlap, compute, HOUR, DAY };
 })();
 if (typeof module !== 'undefined') module.exports = { SW };
 

@@ -71,6 +71,17 @@ const FIXTURES = [
     product({ id: 7, price: 650, perDay: 3, sellFrom: 10, stock: [[10, 0, 20], [4, 1, 0], [3, 0, 5], [1, 1, 0]] }),
     product({ id: 8, price: 200, perDay: 1, sellFrom: 40, stock: [[40, 0, 900]] }),
   ] },
+  /* SW-003 / X1: a long stock-out keeps its demand in both (the Sheet used to show ₹0 lost and drop it from Reorder) */
+  { name: 'best seller out for the last 30 days (SW-003 example)', products: [
+    product({ id: 10, price: 1000, perDay: 5, sellFrom: 90, stock: [[90, 0, 1000], [30, 1, 0]] }),
+  ], check: (web, sheet) => {
+    const w = web.reorder.find((x) => x.id === '10'), sh = sheet.reorder.find((x) => x.id === '10');
+    assert.equal(w.status, 'Out now'); assert.equal(w.orderQty, 200); assert.equal(w.rateBasis, 'history');
+    assert.ok(Math.abs(w.lost - 150000) < 1500, `web lost ${w.lost}`); assert.ok(near(sh.lost, 150000), `Sheet lost ${Math.round(sh.lost)}`);
+  } },
+  { name: 'only 3 in-stock days in the window', products: [
+    product({ id: 11, price: 700, perDay: 4, sellFrom: 70, stock: [[70, 0, 600], [26, 5, 0], [1, 0, 40]] }),
+  ], check: (web) => assert.equal(web.reorder.find((x) => x.id === '11').rateBasis, 'history') },
 ];
 
 /** Intended differences (see modules/stock-watch-sheets/LOGIC.md). Each must still differ, or it's stale. */

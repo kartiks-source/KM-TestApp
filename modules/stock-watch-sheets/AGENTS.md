@@ -18,8 +18,8 @@ Stock-out Watch with no server and no API key. The store's Shopify Flow writes e
 
 The web app (`modules/stock-watch`) can read this sheet's two tabs as published CSV links, so a brand can start here and move to the web app without losing history. Keep the column formats the same in both modules (see `modules/stock-watch/src/rows.js`).
 
-The maths lives in the pure `SW` block of `StockWatch.gs` (`SW.compute()` returns everything the tabs show; `refresh()` only reads the logs and writes tabs). `modules/stock-watch/test/parity.test.js` loads the .gs in a `vm` sandbox and checks it against the web app's engine on six fixtures; run `npm test` at the repo root after any change here.
+The maths lives in the pure `SW` block of `StockWatch.gs` (`SW.compute()` returns everything the tabs show; `refresh()` only reads the logs and writes tabs). `modules/stock-watch/test/parity.test.js` loads the .gs in a `vm` sandbox and checks it against the web app's engine on eight fixtures; run `npm test` at the repo root after any change here.
 
 ## Status
 
-Done; not deployed anywhere by us. Each brand runs its own copy. 19 Nov 2026 (SW-013): ₹ lost clipped to the last 30 days, launch window and no-sales rule aligned with the web app, parity test added. A brand on an older copy should paste the new `StockWatch.gs`.
+Done; not deployed anywhere by us. Each brand runs its own copy. 19 Nov 2026 (SW-013): ₹ lost clipped to the last 30 days, launch window and no-sales rule aligned with the web app, parity test added. A brand on an older copy should paste the new `StockWatch.gs`. 19 Nov 2026 (critic round 1): long stock-out rate (SW-003) ported, so a best seller out for weeks keeps its demand here too.

@@ -345,3 +345,47 @@ test('ABC ranks on demand: a best seller out of stock most of the window stays A
   assert.equal(P.best.sold, 0); assert.equal(P.best.abc, 'A');
   assert.equal(P.small.abc, 'C');                             // 200 of 5,200 ₹/day: under the last 5%
 });
+
+/* F1 (critic round 1): a blank "Stock before" never reads as 0. The stock before a change is the previous row's
+   "Stock now"; the row's own before is used only for the first row (LOGIC.md §2, §6b). */
+test('CSV without a Stock before column: every stock-out counts, the last one is still out', () => {
+  const now = Date.parse('2026-11-19T12:00:00Z');
+  const iso = (d) => new Date(now - d * D).toISOString();
+  const csv = ['Time,Variant ID,Stock now', ...[10, 0, 10, 0, 10, 0].map((q, i) => `${iso(25 - i * 4)},77,${q}`)].join('\n');
+  const stock = R.fromCsv(csv, 'stock').rows;
+  assert.ok(stock.every((r) => r.before == null));
+  const orders = []; for (let d = 25; d >= 1; d--) orders.push({ t: now - d * D, order: '#' + d, variantId: '77', qty: 1, price: 1000 });
+  const r = E.report(stock, orders, {}, { now, days: 30 });
+  assert.equal(r.products[0].outs, 3, 'three stock-outs, not one');
+  assert.equal(r.totals.stillOut, 1, 'the stock-out running now is still out');
+  assert.equal(r.products[0].status, 'Out now');
+});
+
+test('Shopify: a variant reactivated at 0 (before = blank) opens a new stock-out', () => {
+  const S = require('../src/shopify');
+  const v = (qty, status = 'ACTIVE') => ({ id: 'gid://shopify/ProductVariant/5', sku: 'S5', title: 'Default Title', price: '499.00', inventoryQuantity: qty, inventoryItem: { tracked: true }, product: { title: 'P5', status } });
+  const a = S.diffStock([v(3)], {}, t0);
+  const b = S.diffStock([v(0)], a.lastQty, t0 + D);              // out
+  const c = S.diffStock([v(8)], b.lastQty, t0 + 2 * D);          // back
+  const d = S.diffStock([v(8, 'DRAFT')], c.lastQty, t0 + 3 * D); // drafted: no row, forgotten
+  const e = S.diffStock([v(0)], d.lastQty, t0 + 4 * D);          // active again at 0
+  assert.deepEqual(e.rows.map((x) => [x.before, x.now]), [[null, 0]]);
+  const eps = E.episodes([...a.rows, ...b.rows, ...c.rows, ...e.rows], t0 + 6 * D);
+  assert.equal(eps.length, 2);
+  assert.equal(eps[1].open, true); assert.equal(eps[1].start, t0 + 4 * D);
+});
+
+test('on order: stock going down after the mark (rows with a blank before) is not counted as received', () => {
+  const now = t0 + 10 * D, at = t0 + D;
+  const ch = [
+    { t: t0, before: 300, now: 300 },
+    { t: t0 + 2 * D, before: null, now: 297 },
+    { t: t0 + 3 * D, before: null, now: 290 },
+    { t: t0 + 4 * D, before: null, now: 280 },
+  ];
+  const oo = E.onOrderNow({ qty: 300, eta: now + 5 * D, at }, ch, now, 280, 5, 7);
+  assert.ok(oo, 'the order is still open');
+  assert.equal(oo.remaining, 300);
+  const got = E.onOrderNow({ qty: 300, eta: now + 5 * D, at }, [...ch, { t: t0 + 5 * D, before: null, now: 560 }], now, 560, 5, 7);
+  assert.equal(got, null, 'a real arrival of 280 (≥ 90%) still completes it');
+});

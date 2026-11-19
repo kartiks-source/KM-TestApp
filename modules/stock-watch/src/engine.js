@@ -51,6 +51,11 @@ function sellingHours(a, b, profile, offMin) {
   return { total, byDay };
 }
 
+/** Stock just before change i: the row's own `before`; when that's blank (a CSV without the column, a Shopify
+ *  variant made active again), the previous row's `now`. A blank never reads as 0 (LOGIC.md §2). */
+const blank = (x) => x == null || (typeof x === 'string' && x.trim() === '');
+const wasBefore = (changes, i) => (!blank(changes[i].before) || i === 0 ? num(changes[i].before) : num(changes[i - 1].now));
+
 /**
  * Stock-out episodes from one product's stock changes (oldest first).
  * Out when stock drops to 0 or below; back when it rises above 0. One still open ends at `now`.
@@ -58,8 +63,8 @@ function sellingHours(a, b, profile, offMin) {
  */
 function episodes(changes, now) {
   const out = []; let open = null;
-  for (const c of changes) {
-    const was = num(c.before), is = num(c.now);
+  for (let i = 0; i < changes.length; i++) {
+    const c = changes[i], was = wasBefore(changes, i), is = num(c.now);
     if (!open && is <= 0 && (was > 0 || out.length === 0)) open = { start: c.t };
     else if (open && is > 0) { out.push({ start: open.start, end: c.t, topUp: is, open: false }); open = null; }
   }
@@ -184,14 +189,14 @@ function plan({ stock, perDay, lead, cover, safety }) {
 
 /**
  * A purchase order already placed ("Mark ordered", LOGIC.md §6b). rec = { qty, eta, at, by }.
- * Units received = stock increases recorded after `at`; still to come = qty − received (done at 90% received).
+ * Units received = stock increases recorded after `at` (from `before`, or the previous row's stock when blank: wasBefore); still to come = qty − received (done at 90% received).
  * It counts toward the plan while it's due (eta not past) and lands before the shelf empties,
  * or no later than an order placed today could (now + lead time), a day's grace either way since dates are whole
  * days. Past eta with units still to come = late.
  */
 function onOrderNow(rec, changes, now, stock, perDay, lead) {
   if (!rec || !(num(rec.qty) > 0)) return null;
-  const received = changes.reduce((s, c) => s + (c.t > num(rec.at) ? Math.max(0, num(c.now) - num(c.before)) : 0), 0);
+  const received = changes.reduce((s, c, i) => s + (c.t > num(rec.at) ? Math.max(0, num(c.now) - wasBefore(changes, i)) : 0), 0);
   const remaining = Math.max(0, Math.round(num(rec.qty) - received));
   if (received >= 0.9 * num(rec.qty)) return null;   // received (a short shipment of up to 10% counts as complete)
   const eta = num(rec.eta), late = eta < now;

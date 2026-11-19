@@ -95,6 +95,7 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 - **Stock-outs that started before the selected period:** ₹ lost and the "product-days with an empty shelf" count only the hours inside the period. The **Out for** column shows the stock-out's full length, so you can see how long it really lasted.
 - **A cancellation or return that puts stock back** can end a stock-out early, and if it's only a piece or two it shows up as a small top-up. Read small top-ups of 1–2 pieces with that in mind.
 - **A product whose first-ever record shows 0:** counted as out from that moment, because we have no evidence it was in stock.
+- **A blank *Stock before* = the previous row's *Stock now*,** never 0. *Stock before* can be blank: a CSV without that column, or a Shopify variant made active again (its last-seen stock was forgotten while it was draft). A blank used to read as 0, so every stock-out after the first was missed (one repro: 3 stock-outs showed as 1 and ₹ lost fell to a sixth, *Out now* with nothing *Still out*), and a variant reactivated at 0 was never counted as out. A blank on a product's first row is still 0 (no earlier evidence). *Considered:* always using the previous row's *Stock now* (wrong where a file skips rows: its *Stock before* is the better evidence) and refusing rows without *Stock before* (Shopify's own reactivation rows have none).
 
 **When it can be wrong:**
 - **Bundles or pre-orders** sold at 0 stock would look like stock-outs.
@@ -228,7 +229,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 **Rule:** when someone places a purchase order they press **Mark ordered** (on the Reorder row, in the product drawer, or for several ticked rows at once) and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
 
-> received = sum of stock increases recorded after the order was marked
+> received = sum of stock increases recorded after the order was marked, each measured from *Stock before*, or from the previous row's stock when that's blank (section 2), so a row with a blank *Stock before* isn't read as an increase from 0
 > still to come = ordered qty − received; once 90% has arrived the order is treated as complete and dropped
 > it **counts** when it's not past its date **and** lands before the shelf empties, or no later than an order placed today could (today + lead time), with a day's grace because dates are whole days
 > when it counts: the plan is worked out on stock now + still to come
