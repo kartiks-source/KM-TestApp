@@ -22,6 +22,7 @@ const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
+const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 /* ---------- helpers ---------- */
@@ -32,7 +33,7 @@ const send = (res, code, body, type = 'application/json; charset=utf-8', extra =
 const fail = (res, code, message) => send(res, code, { ok: false, error: message });
 const readBody = (req, limit = 25e6) => new Promise((resolve, reject) => {
   let size = 0; const chunks = [];
-  req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Too large'), { code: 413 })); req.destroy(); } else chunks.push(c); });
+  req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Upload too large'), { status: 413 })); req.removeAllListeners('data'); req.resume(); } else chunks.push(c); });
   req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   req.on('error', reject);
 });
@@ -96,7 +97,9 @@ async function syncSheet() {
       if (!/^https:\/\/docs\.google\.com\//.test(url)) throw new Error('Sheet links must be Google Sheets "Publish to web" CSV links');
       const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
       if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
-      const parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order');
+      let parsed;
+      try { parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order', { tzOffsetMin: s.tzOffsetMin, keepDays: KEEP_DAYS }); }
+      catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows); else out.orders = store.add('orders', parsed.rows);
     }
     store.setSync({ lastSync: Date.now(), lastSyncError: null });
@@ -164,7 +167,7 @@ async function api(req, res, url) {
     if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
     const raw = await readBody(req, 2e6);
     let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
-    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1]));
+    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1], { tzOffsetMin: d.settings.tzOffsetMin }));
     const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list);
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
@@ -197,10 +200,11 @@ async function api(req, res, url) {
   }
   if (p === '/api/import' && req.method === 'POST') {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
-    const parsed = rows.fromCsv(await readBody(req), kind);
+    // Throws status 400 naming any missing column, before anything is replaced or stored.
+    const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
     if (d.source === 'demo' && url.searchParams.get('replaceDemo') === '1') store.replaceAll([], [], 'empty');
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows);
-    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
+    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
   }
   if (p === '/api/sync' && req.method === 'POST') {
     try { return send(res, 200, { ok: true, ...(await syncSheet()) }); } catch (e) { return fail(res, 502, e.message); }
@@ -258,8 +262,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) return await api(req, res, url);
     return serveStatic(req, res, url);
   } catch (e) {
+    if (e.status >= 400 && e.status < 500) return fail(res, e.status, e.message);
     console.error(e);
-    return fail(res, e.code === 413 ? 413 : 500, e.code === 413 ? 'Upload too large' : 'Something went wrong on the server');
+    return fail(res, 500, 'Something went wrong on the server');
   }
 });
 

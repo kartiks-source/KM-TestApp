@@ -36,7 +36,25 @@ Two streams, nothing else:
 
 Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine: the same change can arrive twice at slightly different times, but a second "went to 0" while a product is already out (or a second "back in stock" after it's back) changes nothing, so stock-outs aren't double-counted. Exact repeats of a row are dropped.
 
-**Times without a time zone** (in a CSV or Flow row) are read as India time.
+**Times without a time zone** (in a CSV, Sheet or Flow row) are read in the store's time zone (setting *Time zone*, India by default).
+
+### 1a. CSV, Sheet and Flow rows: what's accepted and what's refused
+
+Bad rows feed reorder money, so a file is refused or a row skipped rather than guessed (`src/rows.js`, tests in `test/rows.test.js`).
+
+| Rule | Why | Considered instead |
+|---|---|---|
+| A CSV upload or Sheet tab must start with a header row. Required: stock `Time, Variant ID, Stock now`; orders `Time, Variant ID, Qty`. Missing ones → upload refused (400) naming them; Sheet sync shows the same message | a file with other headers used to import by position, as phantom stock-outs | guessing columns by position (silently wrong) |
+| Exact column names beat aliases (e.g. `Stock now` over `Inventory`); each column is used once. `Variant` is the variant title, never the ID; `Collection` is not a category | `Variant` was read as the ID, so whole files keyed on titles | first match wins (order-dependent) |
+| Numbers may carry `₹`, `Rs`, thousands commas and spaces (`₹1,299` = 1299). Text that isn't a number skips the row (*bad number*); a blank stock or qty skips the row; a blank price is ₹0 | `₹1,299` used to become ₹0, blank stock became 0 = a stock-out | treating blank as 0 |
+| Dates are day first: `15/11/2026 10:30`, or ISO `2026-11-15 10:30`. Month must be 1–12 and day 1–31 (and a real date), so US `11/15/2026` is refused, not guessed. A date with no time is 00:00 store time | a US date silently became a different day or a future date | guessing US vs Indian order per file |
+| CSV / Sheet: a row with no readable time, or a time more than 1 day in the future, is skipped (*bad time*). Only Shopify Flow rows with no readable time are stamped "now" (Flow fires at the moment of the change) | stamping a file's rows "now" made old history look like today's stock-outs | stamping all rows now |
+| Rows older than 120 days are skipped (*older than 120 days*), so the counts shown match what is kept | they'd be pruned on save anyway | importing and pruning silently |
+| `;`-separated files are detected from the first line | spreadsheet exports in some locales use `;` | asking the user |
+
+The upload message lists how many rows were read, new, and skipped for each reason.
+
+**When it can be wrong:** a day-first file where every date has day ≤ 12 (e.g. `05/11/2026`) can't be told apart from a US file and is read day first. Decimal commas (`1.299,50`) aren't supported.
 
 ### What counts as a sale
 
