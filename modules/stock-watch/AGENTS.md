@@ -31,7 +31,9 @@ Google Sheet CSV / upload ───┘
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
-| `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
+| `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented; demo product IDs, tags and collections (`catalog()`) |
+| `src/groups.js` | Group by (SW-022): rolls Products rows up by parent product, category, collection or tag, keyed by IDs (LOGIC.md §9a) |
+| `src/catalog.js` | variant → product ID, type, tags (from the stock pull) and collections + members (read-only, 24 h cache, resumable) in `DATA_DIR/catalog.json` (LOGIC.md §9b) |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |
 
@@ -60,6 +62,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 ## Status
 
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
+- Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). After the Sprint 1 merge, `catalog.js` variants can come from `store.catalog` (SW-002) instead of its own copy.
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next
