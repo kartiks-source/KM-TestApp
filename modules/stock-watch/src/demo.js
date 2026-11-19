@@ -18,6 +18,8 @@ const CATALOG = require('./demo-catalog.json').items;
 const VERSION = 'sammsara-6';           // bump to make running servers rebuild their demo data
 const STORE_NAME = 'Sammsara (demo)';
 
+const variantId = (i) => String(4710000000 + i * 97);   // demo variant IDs, shared with catalog()
+
 function rng(seed) {      // mulberry32: same demo every time
   let a = seed >>> 0;
   return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -57,7 +59,7 @@ function generate({ now = Date.now(), days = 60, seed = 11 } = {}) {
     const style = rank < 6 ? (['trickle', 'late', 'good'][rank % 3]) : pickStyle(r);
     const cover = style === 'heavy' ? 110 + r() * 140 : style === 'abandoned' ? 4 + r() * 6 : 12 + r() * 22;
     return {
-      id: String(4710000000 + i * 97), sku: c.sku || `SAM-${String(i + 1).padStart(4, '0')}`, product: c.product, variant: c.variant,
+      id: variantId(i), sku: c.sku || `SAM-${String(i + 1).padStart(4, '0')}`, product: c.product, variant: c.variant,
       type: c.type, price: c.price, cost: Math.round(c.price * (0.38 + r() * 0.17)), perDay, style, qty: Math.max(1, Math.round(perDay * cover)), outSince: null, trickles: 0,
     };
   });
@@ -116,4 +118,51 @@ function generate({ now = Date.now(), days = 60, seed = 11 } = {}) {
   return { stock, orders };
 }
 
-module.exports = { generate, VERSION, STORE_NAME };
+/*
+ * Product IDs, tags and collections for the demo (SW-022), set up the way a décor store would:
+ * variants of one product share a product ID; tags for furniture vs décor, finish, motif, festive
+ * gifting and price band; collections built on those, plus one "All products" catch-all.
+ * Derived from the catalog's product types and names; same every time. Shape: see src/catalog.js.
+ */
+const FURNITURE = /table$|console|ottoman/i;                    // by product type ('Table top & decorative accents' is décor)
+const GIFTING = /gift|candle|hurricane|platter|tray|incense|diya|lantern/i;
+const TAG_RULES = [[/gold/i, 'Gold'], [/silver/i, 'Silver'], [/brass/i, 'Brass'], [/marble/i, 'Marble'], [/glass/i, 'Glass'], [/wood|teak|mango/i, 'Wood'],
+  [/elephant|peacock|parrot|\bbee\b|bumble|butterfly|rabbit|zebra|leopard|tiger|swan|bird|horse|owl|fish|deer|monkey|flamingo|camel|lion/i, 'Animal motif'],
+  [/floral|flower|lotus|rose|magnolia|palm|leaf|petal/i, 'Floral']];
+function demoTags(c) {
+  const name = `${c.product} ${c.variant || ''}`;
+  const tags = [FURNITURE.test(c.type) ? 'Furniture' : 'Decor'];
+  for (const [re, tag] of TAG_RULES) if (re.test(name)) tags.push(tag);
+  if (GIFTING.test(c.type) || /gift|incense|diya|lantern/i.test(name)) tags.push('Diwali gifting');
+  if (c.price < 3000) tags.push('Under 3000');
+  if (c.price >= 8000) tags.push('Premium');
+  return tags;
+}
+const COLLECTIONS = [
+  ['All products', () => true],
+  ['Furniture', (c, tags) => tags.includes('Furniture')],
+  ['Home décor', (c, tags) => tags.includes('Decor')],
+  ['Tables', (c) => /table$|console/i.test(c.type)],
+  ['Candles & lighting', (c) => /candle|hurricane|lamp/i.test(c.type)],
+  ['Serveware', (c) => /platter|tray|bar set/i.test(c.type)],
+  ['Diwali gifting', (c, tags) => tags.includes('Diwali gifting')],
+  ['Gifts under ₹3,000', (c, tags) => tags.includes('Under 3000') && !tags.includes('Furniture')],
+  ['The gold edit', (c, tags) => tags.includes('Gold')],
+  ['New arrivals', (c, tags, n) => n % 9 === 4],
+];
+let demoCatalog = null;
+function catalog() {
+  if (demoCatalog) return demoCatalog;
+  const pid = new Map(); const variants = {}; const members = COLLECTIONS.map(() => new Set());
+  CATALOG.forEach((c, i) => {
+    if (!pid.has(c.product)) pid.set(c.product, String(8120000000 + pid.size * 13));
+    const productId = pid.get(c.product); const tags = demoTags(c);
+    variants[variantId(i)] = { productId, product: c.product, type: c.type, tags };
+    COLLECTIONS.forEach(([, rule], k) => { if (rule(c, tags, pid.size - 1)) members[k].add(productId); });
+  });
+  const collections = Object.fromEntries(COLLECTIONS.map(([title], k) => [String(298400000 + k * 7), { title, productIds: [...members[k]] }]));
+  demoCatalog = { variants, collections, variantsAt: null, collectionsAt: null, demo: true };
+  return demoCatalog;
+}
+
+module.exports = { generate, catalog, VERSION, STORE_NAME };

@@ -277,6 +277,44 @@ These two flags are the habits that turn one stock-out into many. They're counte
 
 Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them.
 
+## 9a. Group by: product, category, collection, tag (SW-022)
+
+"View: Products ▾" on the Products page rolls the product rows (one per variant) up into groups. Code: `src/groups.js`, tests: `test/groups.test.js`.
+
+| View | One row per | Key | Each variant is in |
+|---|---|---|---|
+| Parent products | Shopify product (its variants together) | product ID | exactly one group |
+| Categories | Shopify product type (`productType`, or the CSV/Flow `type` column) | the type itself | exactly one group ("No category" if blank) |
+| Collections | Shopify collection | collection ID | every collection its product is in ("Not in a collection" if none) |
+| Tags | product tag | the tag, case-folded | every tag its product has ("No tag" if none) |
+
+**Keys are IDs, never titles**, so two products or collections with the same name never merge, and a rename doesn't split a group. Category and tag have no ID in Shopify, so the value is the key; tags are case-folded because Shopify treats "Gold" and "gold" as one tag. A variant the catalog doesn't know yet (CSV/Flow data, or a product added since the last pull) is its own parent product, keyed by variant ID.
+
+Each group row adds up its variants' rows, with the same rules as the Products page (section 9):
+
+| Column | Rule |
+|---|---|
+| Products | variants in the group (the rows a click shows) |
+| Need order | variants whose status is Order today (out now, 3 days or less left, or order now), "x of n" |
+| Sold, Sales lost, Profit lost | sums over the selected period; Profit lost blank when no variant has a unit cost |
+| Order ₹ | order value of the Need-order variants (the same "Order today ₹" as the Overview) |
+| Overstock ₹ | cash beyond need, overstocked variants only (section 7c) |
+| Trend | the variants' sales per in-stock day added up, last 14 days vs the 14 before (the halves of section 7d), from each variant's weekly blocks. A variant without data in both halves, or with under 3 in-stock days in either, is left out; under 6 units in all: no trend |
+
+**Totals.** Parent products and categories add up to the report totals (sales, lost, order ₹, overstock ₹, profit lost; tested). Collections and tags overlap: a product with two tags counts in both rows, so there is **no grand total**, only a footnote with the distinct store total (each variant once).
+
+**Catch-all collections are hidden by default.** A collection holding 80% or more of the products in the report ("All products", "Home page") tells you nothing and would top every list; a button shows them. Products only in hidden collections fall into "Not in any other collection".
+
+**Why:** the client plans and sets targets by tag and collection (the DAWBU sheet), not by single variant. Summing variants keeps every number identical to the Products page, so a group can be checked by clicking it. **Considered:** recomputing each group as one big product (its own rate, its own stock-out hours); rejected because the group's lost would no longer equal the sum of its products' lost. **Can be wrong:** collection membership is up to 24 hours old (section 9b); tags and categories follow the last stock pull (15 minutes). The group trend counts a variant's first partial week as fully in stock.
+
+## 9b. Where groups come from (catalog, read-only)
+
+`src/catalog.js`, kept in `DATA_DIR/catalog.json`:
+- **Variant → product, category, tags:** from the stock pull (`STOCK_Q` reads `product { id tags productType }`), every 15 minutes.
+- **Collections and their products:** read once a day (24 h cache) with two read-only queries, `collections` and `collection.products`, through the same read-only guard as every Shopify call. Progress is saved after every page, so a restart carries on where it stopped instead of starting again; at most 400 pages per pull, the rest with the next pull. Smart and manual collections are read the same way (Shopify returns the current members of both).
+- Needs only `read_products`, which the app already has.
+- Demo data gets product IDs, tags and collections derived from the Sammsara catalog's product types and names (section 10).
+
 ---
 
 ## 10. Demo data (not real)
@@ -290,6 +328,7 @@ How it's generated, so the patterns look like a real store:
 - **Baskets:** about 25% of orders include a second item.
 - **Restocking habits** are assigned per product: proper restocks, late restocks, "a few pieces by hand" top-ups, overstocked slow movers, and a few never restocked.
 - **Small extras:** damage write-offs and returns at a low rate.
+- **Tags and collections (for Group by):** variants of one product share a product ID; tags say furniture or décor, finish (Gold, Brass, Marble, Glass…), motif (Animal motif, Floral), Diwali gifting and price band (Under 3000, Premium); ten collections are built on those, including an "All products" catch-all. Derived from the catalog's product types and names, not Sammsara's real tags.
 - **Fixed seed:** the same seed gives the same demo every time.
 
 The demo exists to show the screens with realistic shape. Its numbers say nothing about Sammsara's real business.
@@ -304,6 +343,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
 - Returns and cancellations aren't netted out of sales.
+- Group by: collection membership can be up to 24 hours old; tag and collection rows overlap, so they have no grand total (section 9a).
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
 
 ## 12. Differences in the Google Sheet version
