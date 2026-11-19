@@ -293,9 +293,35 @@ function serveStatic(req, res, url) {
   fs.createReadStream(file).pipe(res);
 }
 
+/* ---------- security headers + same-origin writes ---------- */
+const CSP = ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src https://fonts.gstatic.com",
+  "img-src 'self' data: blob:", "connect-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].join('; ');
+function securityHeaders(req, res) {
+  res.setHeader('content-security-policy', CSP);
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('x-frame-options', 'DENY');
+  if (req.headers['x-forwarded-proto'] === 'https') res.setHeader('strict-transport-security', 'max-age=15552000');
+}
+/** A browser write from another site (CSRF). Modern browsers say so in Sec-Fetch-Site; otherwise Origin must match
+ *  our host (X-Forwarded-Host behind a proxy). Scripts (curl, Flow) send neither and pass. */
+function crossSite(req) {
+  const site = String(req.headers['sec-fetch-site'] || '');
+  if (site && site !== 'same-origin' && site !== 'none') return true;   // cross-site, or same-site (another *.up.railway.app app)
+  const origin = req.headers.origin;
+  if (!origin || site === 'same-origin') return false;
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+  try { return new URL(origin).host.toLowerCase() !== host; } catch { return true; }   // includes Origin: null
+}
+const isWrite = (req) => !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+
 const server = http.createServer(async (req, res) => {
+  securityHeaders(req, res);
   const url = new URL(req.url, 'http://local');
   try {
+    if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
+      return fail(res, 403, 'Cross-site request refused');
+    }
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     if (url.pathname === '/login' && req.method === 'GET') {
       if (auth(req) === 'ok') return send(res, 302, '', 'text/plain', { location: '/' });

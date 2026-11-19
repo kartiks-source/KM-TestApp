@@ -153,3 +153,32 @@ test('ingest: X-Ingest-Key header; ?key= still works but logged as deprecated; >
   assert.notEqual(st.ingestKey, key); assert.ok(st.ingestKeyAt >= before);
   assert.equal((await post(row(3), { 'x-ingest-key': key })).status, 401, 'old key stops working');
 });
+
+test('security headers on every response; cross-site writes → 403 (SW-016)', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: PASSWORD }); t.after(s.stop);
+  for (const p of ['/login', '/api/settings', '/health', '/app.js']) {
+    const r = await s.req(p);
+    assert.match(r.headers.get('content-security-policy') || '', /frame-ancestors 'none'/, p);
+    assert.match(r.headers.get('content-security-policy'), /script-src 'self'/, p);
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff', p);
+    assert.equal(r.headers.get('referrer-policy'), 'no-referrer', p);
+    assert.equal(r.headers.get('strict-transport-security'), null, `${p}: no HSTS over plain http`);
+  }
+  assert.match((await s.req('/health', { headers: { 'x-forwarded-proto': 'https' } })).headers.get('strict-transport-security'), /max-age=\d+/);
+
+  const auth = basic(PASSWORD);
+  const put = (headers) => s.req('/api/settings', { method: 'PUT', headers: { ...auth, 'content-type': 'application/json', ...headers }, body: '{"storeName":"X"}' });
+  const host = new URL(s.base).host;
+  assert.equal((await put({ origin: 'https://evil.example' })).status, 403);
+  assert.equal((await put({ origin: 'null' })).status, 403);
+  assert.equal((await put({ 'sec-fetch-site': 'cross-site' })).status, 403);
+  assert.equal((await put({ 'sec-fetch-site': 'same-site', origin: 'https://other.up.railway.app' })).status, 403);
+  assert.equal((await put({ 'sec-fetch-site': 'same-origin', origin: 'https://web.example' })).status, 200, 'browser says same-origin (proxy rewrote Host)');
+  assert.equal((await put({ origin: `http://${host}` })).status, 200, 'same origin');
+  assert.equal((await put({ origin: 'https://web.example', 'x-forwarded-host': 'web.example' })).status, 200, 'same origin behind a proxy');
+  assert.equal((await put({})).status, 200, 'scripts send no Origin');
+  assert.equal((await s.req('/api/settings', { headers: { ...auth, origin: 'https://evil.example' } })).status, 200, 'reads are not blocked');
+  assert.equal((await s.req('/api/clear', { method: 'POST', headers: { ...auth, origin: 'https://evil.example' } })).status, 403);
+  assert.equal((await s.req('/login', { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/x-www-form-urlencoded' }, body: 'password=x' })).status, 403);
+  assert.equal((await s.req('/logout', { method: 'POST', headers: { origin: 'https://evil.example' } })).status, 403);
+});
