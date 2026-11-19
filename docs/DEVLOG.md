@@ -3,6 +3,17 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · C-security
+stock-watch, branch `sprint1/C-security` (commits c57e775, b8802b4, 7a9f505, a28b1a6, fe783fb, 86a7f96):
+- SW-010 CSV import: header row required for CSV/Sheet (missing Time / Variant ID / Stock now / Qty → 400 naming them); exact names beat aliases; `variant` no longer a Variant ID alias, `collection` no longer a type; `₹1,299` / commas / spaces parse; blank stock skips; day-first dates only (US 11/15/2026 refused), date-only = 00:00 store time (uses the Time zone setting, was fixed IST); bad/future time skipped (Flow only stamps now); `;` files read; skip reasons {badTime, badNumber, noId, tooOld} in response + toast. LOGIC.md §1a.
+- SW-017: `= + - @ tab CR` text cells get a leading `'` in reorder.csv and the Products CSV.
+- SW-008: one limiter (form + Basic; 10/IP, 100 global per 15 min; IP = last XFF hop; map swept, ≤ 10k); `:` in passwords; prod refuses to start without a ≥ 12-char `ADMIN_PASSWORD`; cookies signed with `DATA_DIR/secret` (600) + password fingerprint; logout is POST.
+- SW-009: Flow setup shows URL + `X-Ingest-Key` header (masked, Show/Copy, last rotation time); `?key=` still accepted, logged as deprecated hourly without the key; > 500 rows → 413.
+- SW-016: CSP, nosniff, Referrer-Policy, X-Frame-Options, HSTS on https; cross-site writes to /api, /login, /logout → 403.
+- SW-018: bad JSON / null / bad URI → 400; settings body ≤ 64 KB; HMAC-based constant-time compare; static path check uses `PUBLIC + path.sep`.
+- Tests: 28 → 46 (`test/rows.test.js`, new `test/server.test.js`). UI checked in headless Chromium at 1440 and 390 (no CSP errors, no sideways scroll, POST sign-out works); 1280/1920 screenshots and the five critics not run yet.
+- Open: Railway `ADMIN_PASSWORD` must be ≥ 12 chars before deploying this. Origin check trusts `X-Forwarded-Host`/`Host` when the browser sends no Sec-Fetch-Site; confirm on Railway after deploy. SECURITY.md (SW-015) should list `DATA_DIR/secret` and the ingest key rotation. Dev log page row not added (no deploy).
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).

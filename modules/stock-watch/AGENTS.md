@@ -29,13 +29,13 @@ Google Sheet CSV / upload ───┘
 | `LOGIC.md` | how every number is worked out and why; read it before changing `src/engine.js` |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
 | `src/engine.js` | all the maths (tested) |
-| `src/rows.js` | CSV / sheet / webhook → rows |
+| `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
-| `test/` | `node --test` |
+| `test/` | `node --test`: `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s) |
 
 ## Shopify access (decided 19 Nov 2026)
 
@@ -62,6 +62,8 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 ## Status
 
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
+- Sprint 1 security (SW-008/009/010/016/017/018): login limiter + prod password check, session secret in `DATA_DIR/secret`, POST logout, ingest key in the `X-Ingest-Key` header only (≤ 500 rows/request), strict CSV import, security headers + same-origin writes, CSV formula guard, 400s for bad input.
+- Before the next deploy: Railway `ADMIN_PASSWORD` must be ≥ 12 characters (the Dockerfile sets `NODE_ENV=production`, so a shorter one stops the app starting). Flow workflows using `?key=` keep working but should move to the header.
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next
