@@ -61,7 +61,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 ## Status
 
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
-- Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" on Reorder rows, ticked rows and the drawer, with an Ordered tab (SW-012).
+- Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" on Reorder rows, ticked rows and the drawer, with an Ordered tab (SW-012); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next

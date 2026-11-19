@@ -417,3 +417,34 @@ table.fixed td:first-child { max-width: none; }
   .poform label { flex: 1 1 140px; }
   .poform .btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
 }
+
+/* ---- trend in the decision rows (SW-021) ---- */
+.spark .hit { fill: transparent; }
+.ispark { display: none; margin-right: 8px; vertical-align: middle; }
+.ispark .spark { display: inline-block; vertical-align: middle; }
+@media (max-width: 1399.98px) { .tbl .pw { display: none; } .tbl .ispark { display: inline-flex; } }
+.tbl .trc .tr { min-width: 46px; }
+.mspark { flex: none; margin-left: auto; align-self: center; }
+.mcard header .mspark + .mq, .mcard header .mspark + .st { margin-left: 0; }
+.base { align-self: center; }
+/* overview: three panels across on wide screens */
+.grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid3 > :last-child { grid-column: 1 / -1; } }
+@media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } }
+.mv { display: flex; flex-direction: column; gap: 6px; }
+.mv-h { margin: 2px 0 0; font-size: 12px; font-weight: 600; color: var(--soft); }
+.mv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto minmax(60px, auto); gap: 8px; align-items: center; cursor: pointer; }
+.mv-row .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--brand); }
+.mv-row .tr { min-width: 50px; text-align: right; }
+.mv-v { text-align: right; white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mv-v.up { color: #15803D; } .mv-v.down { color: var(--lost); }
+/* drawer: the 8 weekly numbers under the spark */
+.wk { width: 320px; max-width: 100%; }
+.wk .spark { width: 100%; height: auto; }
+.wknums { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); text-align: center; margin-top: 4px; }
+.wknums span { display: flex; flex-direction: column; line-height: 1.2; }
+.wknums b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wknums small { font-size: 10px; color: var(--faint); white-space: nowrap; }
+.wknums .wo b { color: var(--lost); }
+.mcard h3 { min-width: 0; }
+#drawer-title { padding-right: 36px; }

@@ -262,7 +262,8 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 ## 7d. Trend (sparkline and % change)
 
 **Rule:**
-- **Bars:** units sold in each of the last 8 rolling 7-day blocks ending now, oldest on the left, scaled to that product's best week. A **rose mark** under a bar means the product was out of stock for part of that week (hover a bar for units and days out).
+- **Bars:** units sold in each of the last 8 rolling 7-day blocks ending now, oldest on the left, scaled to that product's best week. A **rose mark** under a bar means the product was out of stock for part of that week. Hovering a bar gives the dates, units and days out ("13–19 Nov: 54 sold, out 2.3 d"); a block is labelled by the 7 calendar days it ends on, so the last one ends today.
+- **Where it shows:** in the decision rows, not only the drawer. On Products and Reorder, screens 1400 px and wider get a Trend cell (bars + % chip); narrower screens get small bars inside the product name cell (no extra column); phone cards show the bars at the right of the card header. The drawer shows the 8 weekly numbers under the bars, with the date each week starts.
 - **% change** = sales per **in-stock** day in the last 14 days vs the 14 days before:
 
   > rate = units sold ÷ days in stock (in that 14-day half)
@@ -270,7 +271,13 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 
   ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = in stock for at least 7 days of the earlier half with no sales, and 3 or more sold since. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
 - **Only time we have data for counts.** Days before a product's first record are "no data" (an empty bar), never "in stock, sold 0". Without this, a store with 20 days of history showed every product at +133%.
-- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown next to the Products tabs and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
+- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown once in the Products toolbar ("Typical product −38%") and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
+
+- **₹ effect (Overview "Moving" card):** what the trend is worth, so the card ranks by money rather than by %:
+
+  > ₹ effect = (recent rate − earlier rate) × average price paid × 30
+
+  i.e. ₹ a month of sales at the new pace, with the rates as above (sales per in-stock day, last 14 days vs the 14 before). It's set only where there's a trend to call (a % or **New**; for New the earlier rate is 0). The card lists the top 3 up and the top 3 down by this number. A +200% on a ₹300 candle matters less than +20% on a ₹40,000 sofa; ranking by ₹ shows that.
 
 **Why it's built this way (and what's wrong with plain week-on-week, as in the DAWBU sheet):**
 - **Stock-outs aren't demand.** A product out for half of last week shows −50% week-on-week, though shoppers wanted it as much as ever. Dividing by in-stock days removes that. It's the same principle as section 3.
@@ -282,6 +289,7 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 **When it can be wrong:**
 - **Promotions in either half** distort it, and so do price changes.
 - **Gifting and decor seasons,** where the store baseline helps but doesn't remove the effect entirely.
+- **₹ effect** assumes the new pace holds for a month and uses today's average price; read it as a size, not a forecast.
 
 ## 8. Restocking patterns
 
@@ -304,6 +312,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
+| Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
 Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them.
 

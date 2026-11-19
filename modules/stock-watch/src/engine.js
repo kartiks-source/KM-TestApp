@@ -76,6 +76,7 @@ function demandPerDay(units, from, to, eps) {
  *   too little to say (fewer than 6 units over those 28 days, or under 3 in-stock days in either half).
  *   since: when this product's data starts. Time before it is "no data", never "in stock, sold 0".
  *   trendNew: it was in stock for at least 7 of the earlier days and sold nothing, and has sold 3+ since.
+ *   rateDelta: recent rate − earlier rate (units per in-stock day), when trendPct or trendNew is set.
  */
 const TREND_MIN_UNITS = 6;
 function trend(lines, eps, now, since = -Infinity) {
@@ -100,7 +101,9 @@ function trend(lines, eps, now, since = -Infinity) {
     trendPct = round(((recent.rate - before.rate) / before.rate) * 100, 1);
   }
   const trendNew = before.inDays >= 7 && before.units === 0 && recent.units >= 3;
-  return { weeks, trendPct, trendNew };
+  /* rateDelta: change in sales per in-stock day behind the % (null when there's no trend to call) */
+  const rateDelta = trendPct != null || trendNew ? round(recent.rate - before.rate, 3) : null;
+  return { weeks, trendPct, trendNew, rateDelta };
 }
 
 /** The baseline to read a product's trend against: the median trend of all products that have one.
@@ -273,6 +276,8 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
     row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
     Object.assign(row, trend(p.lines, eps, now, p.first));
+    /* ₹ effect of the trend (Overview "Moving"): the change in daily rate × average price × 30 = ₹ a month at the new pace */
+    row.trendValue = row.rateDelta == null ? null : Math.round(row.rateDelta * price * 30);
     products.push(row);
     if (pl && selling && row.status !== 'OK') reorder.push(row);
   }

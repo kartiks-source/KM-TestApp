@@ -136,16 +136,24 @@
   }
 
   /* ---------- trend: 8 weekly bars (units), rose base where the product was out of stock that week ---------- */
-  const WEEK_LABEL = (i) => (i === 7 ? 'last 7 days' : `${7 - i} week${7 - i > 1 ? 's' : ''} before`);
+  /* week i of 8 (oldest first) = the 7 days ending (7 − i) weeks before the report time; labelled by the 7 calendar
+     days it ends on ("13–19 Nov" for the last block, which ends now) */
+  const weekEnd = (i) => state.report.generatedAt - (7 - i) * 7 * 864e5 - 1;
+  const weekStart = (i) => weekEnd(i) - 6 * 864e5;
+  const WEEK_LABEL = (i) => {
+    const a = local(weekStart(i)), b = local(weekEnd(i));
+    return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}` : `${a.getUTCDate()} ${MON[a.getUTCMonth()]}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}`;
+  };
+  const weekTip = (x, i) => (x.units == null ? `${WEEK_LABEL(i)}: no data yet` : `${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out ${n1(x.outDays)} d` : ''}`);
   function spark(p, w = 64, h = 20) {
     const wk = p.weeks || []; if (!wk.length) return '';
-    const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length;
+    const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length, gap = bw > 6 ? 1 : 0.5;
     const bars = wk.map((x, i) => {
-      if (x.units == null) return `<g><title>${WEEK_LABEL(i)}: no data yet</title><rect class="nd" x="${i * bw + 1}" y="${h - 3}" width="${bw - 2}" height="1"/></g>`;
+      if (x.units == null) return `<g><title>${weekTip(x, i)}</title><rect class="nd" x="${i * bw + gap}" y="${h - 3}" width="${bw - 2 * gap}" height="1"/><rect class="hit" x="${i * bw}" y="0" width="${bw}" height="${h}"/></g>`;
       const bh = x.units ? Math.max(2, (x.units / max) * (h - 4)) : 0;
-      const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + 1}" y="${h - 2}" width="${bw - 2}" height="2"/>` : '';
-      return `<g><title>${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out of stock ${n1(x.outDays)} d` : ''}</title>`
-        + `<rect class="sb${i === wk.length - 1 ? ' last' : ''}" style="animation-delay:${i * 35}ms" x="${i * bw + 1}" y="${h - 3 - bh}" width="${bw - 2}" height="${bh}" rx="1"/>${out}</g>`;
+      const out = x.outDays > 0 ? `<rect class="so" x="${i * bw + gap}" y="${h - 2}" width="${bw - 2 * gap}" height="2"/>` : '';
+      return `<g><title>${weekTip(x, i)}</title><rect class="hit" x="${i * bw}" y="0" width="${bw}" height="${h}"/>`
+        + `<rect class="sb${i === wk.length - 1 ? ' last' : ''}" style="animation-delay:${i * 35}ms" x="${i * bw + gap}" y="${h - 3 - bh}" width="${bw - 2 * gap}" height="${bh}" rx="${bw > 6 ? 1 : 0.5}"/>${out}</g>`;
     }).join('');
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Weekly units, last 8 weeks">${bars}</svg>`;
   }
@@ -157,7 +165,7 @@
   }
 
   /* which priority columns the CSS shows at this width (mirrors the @media rules in styles.css) */
-  const colVisible = (c) => !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
+  const colVisible = (c) => !(c.pr === 'w' && innerWidth < 1400) && !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
   const tier = () => (innerWidth > 1700 ? 'xl' : innerWidth > 1400 ? 'l' : innerWidth > 1180 ? 'm' : 's');
   const colKey = (id) => `${id}@${tier()}`;                 // widths are remembered per screen size
   const tableRoom = () => (document.querySelector('.wrap')?.clientWidth || innerWidth) - 46;
@@ -261,7 +269,11 @@
   };
   const outDot = (p) => (p.stock != null && p.stock <= 0 ? '<span class="dot" title="Out of stock now"></span>' : '');
   const bestTag = (p) => (p.abc === 'A' ? '<span class="best" title="Best seller: among the products making the top 80% of sales">Best seller</span>' : '');
-  const nameCell = (p, tag = true) => `${outDot(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span>${tag ? bestTag(p) : ''}`;
+  const nameCell = (p, tag = true, sp = false) => `${sp ? `<span class="ispark">${spark(p, 40, 12)}</span>` : ''}${outDot(p)}<span class="pname" title="${esc(p.name)}">${esc(p.name)}</span>${tag ? bestTag(p) : ''}`;
+  /* SW-021: trend in the decision rows. ≥ 1400 px: its own cell (48×16 spark + chip); narrower: a 40×12 spark at the
+     start of the name cell (no extra column; at the start so a long name's … never hides it, and the sparks line up) */
+  const trendCell = (p) => `<span class="trc">${spark(p, 48, 16)}${trendOnly(p)}</span>`;
+  const mspark = (p) => `<span class="mspark">${spark(p, 48, 16)}</span>`;
 
   /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
   const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
@@ -314,18 +326,30 @@
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that need ordering today"><b>${t.bestAtRisk}<small> of ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
         <button class="tile plum" data-go="products" data-filter="over" title="Cash in stock beyond what lead time + days to last + buffer need, for overstocked products: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
       </section>
-      <section class="grid2">
+      <section class="grid2 grid3">
         <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder" data-go="reorder" data-filter="today">All ${t.orderToday}</a></div>
           ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
         </div>
         <div class="panel"><div class="panel-head"><h2>Biggest losses</h2><a href="#products" data-go="products" data-filter="lost">All</a></div>
           ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
         </div>
+        ${moving()}
       </section>
       <section class="panel chart">
         <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
         ${dailyChart(r.daily)}
       </section>`;
+  }
+
+  /* Overview "Moving" (SW-021): top 3 up and down by ₹ effect = change in daily rate × avg price × 30 (LOGIC.md §7d) */
+  function moving() {
+    const ps = state.report.products.filter((p) => p.trendValue);
+    const up = ps.filter((p) => p.trendValue > 0).sort((a, b) => b.trendValue - a.trendValue).slice(0, 3);
+    const down = ps.filter((p) => p.trendValue < 0).sort((a, b) => a.trendValue - b.trendValue).slice(0, 3);
+    const row = (p) => `<div class="mv-row" data-product="${esc(p.id)}" title="${esc(p.name)}"><span class="name">${outDot(p)}${esc(p.name)}</span>${spark(p, 40, 12)}${trendOnly(p)}<span class="mv-v ${p.trendValue > 0 ? 'up' : 'down'}">${p.trendValue > 0 ? '+' : '−'}${money(Math.abs(p.trendValue))}</span></div>`;
+    const list = (h, l) => (l.length ? `<h3 class="mv-h">${h}</h3>${l.map(row).join('')}` : '');
+    return `<div class="panel"><div class="panel-head"><h2>Moving</h2><span class="muted small" title="Change in sales per in-stock day (last 14 days vs the 14 before) × average price × 30">₹ a month at the new pace</span></div>
+      ${up.length || down.length ? `<div class="mv">${list('Selling faster', up)}${list('Selling slower', down)}</div>` : '<p class="muted">Not enough sales yet to call a trend.</p>'}</div>`;
   }
 
   function reorder() {
@@ -335,7 +359,7 @@
     const rows = r.reorder.filter((p) => (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q)));
     const pickable = rows.filter((p) => !p.onOrder && p.orderQty > 0);
     const cols = [
-      { k: 'name', label: 'Product', f: (p) => (!p.onOrder && p.orderQty > 0 ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : '<span class="pick-sp"></span>') + nameCell(p) },
+      { k: 'name', label: 'Product', f: (p) => (!p.onOrder && p.orderQty > 0 ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : '<span class="pick-sp"></span>') + nameCell(p, true, true) },
       { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
@@ -343,7 +367,7 @@
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
       { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
-      { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (p) => p.trendPct ?? -999 },
+      { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
       { k: 'act', label: '', tip: 'Placed the order? Mark it so the line leaves Order today', f: orderBtn, val: (p) => (p.onOrder ? 1 : 0) },
     ];
@@ -356,7 +380,7 @@
         <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${status(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
   }
 
@@ -404,7 +428,7 @@
     return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
   }
   const PRODUCT_COLS = () => [
-    { k: 'name', label: 'Product', f: (p) => nameCell(p), csv: (p) => p.name },
+    { k: 'name', label: 'Product', f: (p) => nameCell(p, true, true), csv: (p) => p.name },
     { k: 'sku', label: 'SKU', hide: 1 },
     { k: 'abc', label: 'Rank (A = best seller)', hide: 1 },
     { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => GROUP_LABEL[group(p.status)] },
@@ -414,7 +438,7 @@
     { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
-    { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before (stock-out days left out)', f: trendOnly, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
+    { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
     { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
@@ -427,6 +451,10 @@
     ] : []),
     { k: 'price', label: 'Avg price', hide: 1 },
   ];
+  const baseChip = () => {
+    const b = state.report.totals.storeTrendPct; if (b == null) return '';
+    return `<span class="base" title="Typical product: the median trend of all products (sales per in-stock day, last 14 days vs the 14 before). Read each product’s trend against it: after a season peak almost everything falls.">Typical product ${b > 0 ? '+' : ''}${n1(b)}%</span>`;
+  };
   const countIn = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function products() {
     const r = state.report, f = state.filter.products, ty = state.filter.type;
@@ -441,9 +469,9 @@
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}">${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
-        ${colPicker('products', cols)}${dlMenu('products')}</div>
+        ${baseChip()}${colPicker('products', cols)}${dlMenu('products')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3>${status(p)}</header>
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${status(p)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>`)}`;
   }
   function downloadProductsCsv() {
@@ -522,7 +550,8 @@
           <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
         ${p && (p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
-        <div class="panel"><h2>Trend</h2><div class="trc big">${p ? spark(p, 240, 44) + trendChip(p) : ''}</div><p class="muted small">${p ? (p.weeks || []).map((w, i) => (w.units == null ? '' : `${WEEK_LABEL(i)}: ${w.units}${w.outDays ? ` (out ${n1(w.outDays)} d)` : ''}`)).filter(Boolean).reverse().slice(0, 4).join(' · ') : ''}</p></div>
+        <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>
+          <p class="muted small">Units sold per week, week starting on the date shown; rose = out of stock part of that week.</p>` : ''}</div>
         <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
         <details class="panel fold"><summary><b>More</b> <span class="muted">units per day, every stock-out</span></summary>
         <div class="chart"><h2>Units sold per day</h2>${unitsChart(d.dailyUnits)}</div>
