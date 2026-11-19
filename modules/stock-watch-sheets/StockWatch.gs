@@ -26,10 +26,13 @@ const DEFAULTS = [
   ['Daily email to', '', 'Optional: comma-separated emails for a 9 am summary'],
 ];
 
-/* ============================== PURE LOGIC (no Apps Script calls; mirrors modules/stock-watch/src/engine.js — not yet covered by tests) ============================== */
+/* ============================== PURE LOGIC ==============================
+ * No Apps Script calls, so it can be tested: modules/stock-watch/test/parity.test.js loads this file
+ * and runs the same data through SW.compute() and the web app's engine.js. Mirror any rule change there. */
 const SW = (() => {
   const HOUR = 36e5, DAY = 864e5;
   const num = (x) => (Number.isFinite(+x) ? +x : 0);
+  const vid = (x) => String(x || '').replace(/\D/g, '');
   /** Stock-out episodes from one variant's stock changes (sorted by time). An episode starts when stock
    * drops to 0 or below and ends when it rises above 0; one still open ends "now". */
   function episodes(changes, now) {
@@ -57,7 +60,7 @@ const SW = (() => {
     const qty = Math.max(0, Math.ceil(perDay * (lead + cover + safety) - Math.max(0, stock)));
     return { daysLeft, status, qty };
   }
-  /** Split an episode's lost value across calendar days (keys from dayKey). */
+  /** Split an episode's lost value across calendar days (keys from dayKey), counting only time after `from`. */
   function lostByDay(e, lostPerHour, dayKey, from) {
     const m = {};
     for (let t = Math.max(e.start, from); t < e.end; t += HOUR) {      // hour by hour (±1 h at day edges)
@@ -65,7 +68,65 @@ const SW = (() => {
     }
     return m;
   }
-  return { episodes, rate, plan, lostByDay, overlap, HOUR, DAY };
+  const RANK = { 'Out now': 0, Critical: 1, 'Order now': 2, 'Order this week': 3 };
+  /**
+   * Everything the three tabs show, from the two logs.
+   *   stock:  [time ms, variant ID, SKU, product, variant, stock before, stock now, price]
+   *   orders: [time ms, order, variant ID, SKU, qty, unit price]
+   *   cfg: settings_() · now: ms · dayKey: time → 'yyyy-MM-dd' in the sheet's time zone
+   * ₹ lost counts only the part of each stock-out inside the last 30 days (max(start, now − 30 d)),
+   * the same as the web app; "Hours out" still shows the whole stock-out.
+   */
+  function compute(stock, orders, cfg, now, dayKey) {
+    const from = now - cfg.window * DAY, lostFrom = now - 30 * DAY;
+    const V = {};   // variant id → info
+    const v = (id) => (V[id] = V[id] || { id, sku: '', name: '', price: 0, changes: [], units: 0, revenue: 0, stock: null, first: Infinity });
+    stock.slice().sort((a, b) => a[0] - b[0]).forEach((r) => {
+      const x = v(vid(r[1])); x.sku = String(r[2] || x.sku); x.name = [r[3], r[4] && r[4] !== 'Default Title' ? r[4] : ''].filter(Boolean).join(' · ') || x.name;
+      x.price = +r[7] || x.price; x.changes.push({ t: r[0], before: r[5], now: r[6] }); x.stock = +r[6]; x.first = Math.min(x.first, r[0]);
+    });
+    let firstOrder = orders.length ? Infinity : now;
+    for (const r of orders) if (r[0] < firstOrder) firstOrder = r[0];   // a loop, not Math.min(...): no limit on rows
+    const salesByDay = {};
+    orders.forEach((r) => {
+      const qty = num(r[4]), price = num(r[5]);
+      const x = v(vid(r[2])); x.first = Math.min(x.first, r[0]); x.sku = x.sku || String(r[3] || '');
+      if (r[0] >= lostFrom) { const k = dayKey(r[0]); salesByDay[k] = (salesByDay[k] || 0) + qty * price; }
+      if (r[0] < from) return;
+      x.units += qty; x.revenue += qty * price;
+    });
+    const rateFrom = Math.max(from, firstOrder);
+    const lostDay = {}, lost = [], reorder = [];
+    Object.keys(V).forEach((id) => {
+      const x = V[id];
+      const eps = episodes(x.changes, now);
+      const perDay = rate(x.units, Math.max(rateFrom, x.first), now, eps);   // a new launch is measured from its first record
+      const price = x.units ? x.revenue / x.units : x.price;
+      const lostPerHour = (perDay / 24) * price;
+      let lost30 = 0, outs = 0;
+      eps.forEach((e, i) => {
+        if (e.end <= lostFrom) return;
+        const hoursIn = overlap(e.start, e.end, lostFrom, now) / HOUR, value = hoursIn * lostPerHour;
+        lost30 += value; outs++;
+        const m = lostByDay(e, lostPerHour, dayKey, lostFrom); Object.keys(m).forEach((k) => (lostDay[k] = (lostDay[k] || 0) + m[k]));
+        const small = !e.open && perDay > 0 && e.topUp < perDay * cfg.smallTopUp;
+        const again = !!eps[i + 1] && eps[i + 1].start - e.end < 7 * DAY;
+        lost.push({ id, name: x.name || x.sku, sku: x.sku, start: e.start, end: e.open ? null : e.end, hours: (e.end - e.start) / HOUR,
+          unitsLost: hoursIn / 24 * perDay, lost: value, topUp: e.open ? null : e.topUp, small, again, perDay });
+      });
+      if (perDay < cfg.minRate || perDay <= 0 || x.stock == null) return;
+      const p = plan({ stock: x.stock, perDay, lead: cfg.lead, cover: cfg.cover, safety: cfg.safety });
+      if (p.status === 'OK') return;
+      reorder.push({ id, status: p.status, name: x.name || x.sku, sku: x.sku, stock: x.stock, perDay, daysLeft: p.daysLeft, qty: p.qty, value: p.qty * price, lost: lost30, outs });
+    });
+    reorder.sort((a, b) => RANK[a.status] - RANK[b.status] || b.lost - a.lost || b.perDay - a.perDay);
+    lost.sort((a, b) => b.lost - a.lost);
+    const days = [], seen = {};   // newest first; the last row is the partial day the 30 days start in
+    for (let t = now; t > lostFrom - DAY; t -= DAY) { const k = dayKey(Math.max(t, lostFrom)); if (seen[k]) continue; seen[k] = 1; days.push({ day: k, sold: salesByDay[k] || 0, lost: lostDay[k] || 0 }); }
+    const sold = days.reduce((s, d) => s + d.sold, 0), lostAll = days.reduce((s, d) => s + d.lost, 0);
+    return { reorder, lost, days, totals: { sold, lost: lostAll } };
+  }
+  return { episodes, rate, plan, lostByDay, overlap, compute, HOUR, DAY };
 })();
 if (typeof module !== 'undefined') module.exports = { SW };
 
@@ -114,62 +175,24 @@ function toTime_(x) {
   const t = Date.parse(String(x || '').trim().replace(' ', 'T'));
   return Number.isFinite(t) ? t : null;
 }
-const vid_ = (x) => String(x || '').replace(/\D/g, '');
 
 /* ============================== COMPUTE + WRITE ============================== */
 function refresh() {
   const lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;
   try {
-    const cfg = settings_(), now = Date.now(), from = now - cfg.window * SW.DAY;
-    const stock = readLog_(TABS.STOCK, STOCK_HEAD.length), orders = readLog_(TABS.ORDERS, ORDER_HEAD.length);
-    const V = {};   // variant id → info
-    const v = (id) => (V[id] = V[id] || { id, sku: '', name: '', price: 0, changes: [], units: 0, revenue: 0, stock: null });
-    stock.sort((a, b) => a[0] - b[0]).forEach((r) => {
-      const x = v(vid_(r[1])); x.sku = String(r[2] || x.sku); x.name = [r[3], r[4] && r[4] !== 'Default Title' ? r[4] : ''].filter(Boolean).join(' · ') || x.name;
-      x.price = +r[7] || x.price; x.changes.push({ t: r[0], before: r[5], now: r[6] }); x.stock = +r[6];
-    });
-    const firstOrder = orders.length ? Math.min.apply(null, orders.map((r) => r[0])) : now;
-    const salesByDay = {};
-    orders.forEach((r) => {
-      const qty = +r[4] || 0, price = +r[5] || 0; if (r[0] < from - 30 * SW.DAY) return;
-      const k = dayKey_(r[0]); salesByDay[k] = (salesByDay[k] || 0) + qty * price;
-      if (r[0] < from) return;
-      const x = v(vid_(r[2])); x.sku = x.sku || String(r[3] || ''); x.units += qty; x.revenue += qty * price;
-    });
-    const rateFrom = Math.max(from, firstOrder);
-    const lostByDay = {}, lostRows = [], reorderRows = [];
-    Object.values(V).forEach((x) => {
-      const eps = SW.episodes(x.changes, now);
-      const perDay = SW.rate(x.units, rateFrom, now, eps);
-      const price = x.units ? x.revenue / x.units : x.price;
-      const lostPerHour = (perDay / 24) * price;
-      let lost30 = 0;
-      eps.forEach((e, i) => {
-        if (e.end < now - 30 * SW.DAY) return;
-        const hours = (e.end - e.start) / SW.HOUR, lost = hours * lostPerHour; lost30 += lost;
-        const m = SW.lostByDay(e, lostPerHour, dayKey_, now - 30 * SW.DAY); Object.keys(m).forEach((k) => (lostByDay[k] = (lostByDay[k] || 0) + m[k]));
-        const small = !e.open && perDay > 0 && e.topUp < perDay * cfg.smallTopUp;
-        const again = eps[i + 1] && eps[i + 1].start - e.end < 7 * SW.DAY;
-        lostRows.push([x.name || x.sku, x.sku, new Date(e.start), e.open ? 'Still out' : new Date(e.end), round_(hours, 1), round_(hours / 24 * perDay, 1), Math.round(lost),
-          e.open ? '' : e.topUp, small ? `Small: ${e.topUp} pcs ≈ ${round_(e.topUp / perDay, 1)} days` : '', again ? 'Went out again within a week' : '']);
-      });
-      if (perDay < cfg.minRate || x.stock == null) return;
-      const p = SW.plan({ stock: x.stock, perDay, lead: cfg.lead, cover: cfg.cover, safety: cfg.safety });
-      if (p.status === 'OK') return;
-      reorderRows.push([p.status, x.name || x.sku, x.sku, x.stock, round_(perDay, 1), p.daysLeft === Infinity ? '' : round_(p.daysLeft, 1), p.qty, Math.round(p.qty * price), Math.round(lost30), eps.filter((e) => e.end > now - 30 * SW.DAY).length]);
-    });
-    const RANK = { 'Out now': 0, Critical: 1, 'Order now': 2, 'Order this week': 3 };
-    reorderRows.sort((a, b) => RANK[a[0]] - RANK[b[0]] || b[8] - a[8] || b[4] - a[4]);
-    lostRows.sort((a, b) => b[6] - a[6]);
-    const days = [];
-    for (let t = now; t > now - 30 * SW.DAY; t -= SW.DAY) { const k = dayKey_(t); const s = salesByDay[k] || 0, l = lostByDay[k] || 0; days.push([fmtDay_(k), Math.round(s), Math.round(l), s + l ? round_((l / (s + l)) * 100, 1) : 0]); }
-    const tot = days.reduce((a, d) => [a[0] + d[1], a[1] + d[2]], [0, 0]);
+    const cfg = settings_(), now = Date.now();
+    const r = SW.compute(readLog_(TABS.STOCK, STOCK_HEAD.length), readLog_(TABS.ORDERS, ORDER_HEAD.length), cfg, now, dayKey_);
+    const reorderRows = r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, round_(x.perDay, 1), x.daysLeft === Infinity ? '' : round_(x.daysLeft, 1), x.qty, Math.round(x.value), Math.round(x.lost), x.outs]);
+    const lostRows = r.lost.map((e) => [e.name, e.sku, new Date(e.start), e.end == null ? 'Still out' : new Date(e.end), round_(e.hours, 1), round_(e.unitsLost, 1), Math.round(e.lost),
+      e.topUp == null ? '' : e.topUp, e.small ? `Small: ${e.topUp} pcs ≈ ${round_(e.topUp / e.perDay, 1)} days` : '', e.again ? 'Went out again within a week' : '']);
+    const days = r.days.map((d) => [fmtDay_(d.day), Math.round(d.sold), Math.round(d.lost), d.sold + d.lost ? round_((d.lost / (d.sold + d.lost)) * 100, 1) : 0]);
+    const tot = [r.totals.sold, r.totals.lost];
     const stamp = Utilities.formatDate(new Date(), tz_(), 'dd MMM HH:mm');
     write_(TABS.REORDER, `Reorder before they run out · ${stamp} · lead ${cfg.lead} d, cover ${cfg.cover} d, safety ${cfg.safety} d`,
       ['Status', 'Product', 'SKU', 'Stock now', 'Sells / day', 'Days left', 'Order qty', 'Order value ₹', 'Lost ₹ (30 d)', 'Stock-outs (30 d)'], reorderRows, 0,
       { 'Out now': '#fde4e4', Critical: '#fde4e4', 'Order now': '#fff1d6', 'Order this week': '#fffbd1' });
-    write_(TABS.LOST, `Every stock-out of a selling product, last 30 days · ₹ lost = hours out × sales per hour × price · ${stamp}`,
-      ['Product', 'SKU', 'Went out', 'Back in', 'Hours out', 'Units lost', '₹ lost', 'Topped up with', 'Top-up', 'Pattern'], lostRows, -1, null);
+    write_(TABS.LOST, `Every stock-out of the last 30 days · ₹ lost = hours out inside the 30 days × sales per hour × price · ${stamp}`,
+      ['Product', 'SKU', 'Went out', 'Back in', 'Hours out', 'Units lost (30 d)', '₹ lost (30 d)', 'Topped up with', 'Top-up', 'Pattern'], lostRows, -1, null);
     write_(TABS.DAILY, `Last 30 days: sold ₹${fmtN_(tot[0])}, lost ₹${fmtN_(tot[1])} to stock-outs (${tot[0] + tot[1] ? round_((tot[1] / (tot[0] + tot[1])) * 100, 1) : 0}% of demand) · ${stamp}`,
       ['Day', 'Sold ₹', 'Lost to stock-outs ₹', 'Lost % of demand'], days, -1, null);
   } finally { lock.releaseLock(); }
