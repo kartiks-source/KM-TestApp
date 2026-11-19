@@ -88,7 +88,7 @@ test('RACI tile count: CEO lands on Overview with 2 tiles (sales lost, overstock
 test('Sprint 1 + 2 controls follow RACI: Mark ordered only for the PO roles; warehouse lands on Ordered, marketing on Pause promotion', () => {
   const marks = R.ORDER.filter((k) => !R.ROLES[k].hide.includes('mark'));
   assert.deepEqual(marks, ['founder', 'ops', 'buyer'], 'Place the PO: A founder, R buyer, C ops (RACI "Also sees: Mark ordered")');
-  assert.ok(R.PARTS.mark[1].includes('.poform .porow') && !/\.poform(,|$)/.test(R.PARTS.mark[1]), 'the drawer keeps the on-order facts, only the form goes');
+  assert.ok(R.PARTS.mark[1].includes('.poform .porow') && R.PARTS.mark[1].includes('.poform:not(.has-order)') && !/\.poform(,|$)/.test(R.PARTS.mark[1]), 'the drawer keeps the on-order facts, only the form goes');
   assert.deepEqual([R.ROLES.warehouse.home, R.ROLES.warehouse.filter], ['reorder', 'ordered']);
   assert.ok(!R.ROLES.warehouse.hide.includes('tab:ordered'));
   assert.deepEqual([R.ROLES.marketing.home, R.ROLES.marketing.filter], ['products', 'pause']);

@@ -445,7 +445,7 @@
     const pickable = rows.filter(canPick);
     const cols = [
       { k: 'name', label: 'Product', f: (p) => (canPick(p) ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : (viewOnly() ? '' : '<span class="pick-sp"></span>')) + nameCell(p, true, true) },
-      ...(f === 'all' || f === 'ordered' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
+      ...(f === 'all' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
       { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: whyCell, val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
@@ -466,7 +466,7 @@
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
         <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <div class="mfacts">${f === 'all' || f === 'ordered' ? status(p) : poTag(p).trim()}${whyCell(p)}${bestTag(p)}</div>`)}`;
+        <div class="mfacts">${f === 'all' ? status(p) : f === 'ordered' ? '' : poTag(p).trim()}${whyCell(p)}${bestTag(p)}</div>`)}`;   // Ordered tab: the Why cell already says "Ordered · lands …"
   }
 
   /* stock-outs, one row per product (the individual stock-outs are in the product drawer) */
@@ -761,7 +761,7 @@
   function orderForm(p) {
     const o = p.onOrder, lead = state.report.settings.leadDays;
     const facts = o ? `${o.late ? '<b class="lostv">Late</b> · was due' : 'Lands'} ${dateShort(o.eta)} · marked ${dateShort(o.at)}${o.by ? ` by ${esc(o.by)}` : ''}${o.remaining < o.qty ? ` · ${inr.format(o.qty - o.remaining)} received` : ''}` : `Suggested: ${inr.format(p.orderQty)} pcs, landing in ${lead} days`;
-    const head = `<div class="panel poform"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>`;
+    const head = `<div class="panel poform${o ? ' has-order' : ''}"><div class="panel-head"><h2>${o ? `On order: ${inr.format(o.qty)} pcs` : 'Placed the order?'}</h2><span class="muted small">${facts}</span></div>`;
     if (viewOnly()) return head + '</div>';   // view-only: the facts, no form (SW-029)
     return `${head}
       <div class="porow"><label>Pieces<input id="oo-qty" inputmode="numeric" autocomplete="off" value="${o ? o.qty : p.orderQty}"></label>

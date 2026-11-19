@@ -30,7 +30,7 @@
     'col:reorder:orderValue': ['reorder', '#view .mcard .mq small'],          /* columns go via hidesCol(); the selector */
     'col:reorder:lost': ['reorder', '#view .mcard .mfacts .lostv'],          /* hides the same fact on phone cards     */
     /* Sprint 1 + Sprint 2 controls, removed per docs/RACI.md (integration) */
-    mark: ['reorder', '#view .pick, #view .pick-sp, #view .mpick, #pick-all, #view > .bulk, #drawer .poform .porow'],   /* Mark ordered (SW-012): ticks, bulk bar, drawer form; facts stay */
+    mark: ['reorder', '#view .pick, #view .pick-sp, #view .mpick, #pick-all, #view > .bulk, #drawer .poform:not(.has-order), #drawer .poform .porow'],   /* Mark ordered (SW-012): ticks, bulk bar, drawer form; on-order facts stay */
     'tab:ordered': ['reorder', '#view [data-filter-reorder="ordered"]'],
     'chip:pause': ['products', '#view [data-filter-products="pause"]'],   /* SW-026 */
     'chip:push': ['products', '#view [data-filter-products="push"]'],

@@ -76,7 +76,7 @@ async function signIn(page, base) {
   await page.fill('#pw', PASSWORD);
   await Promise.all([page.waitForURL((u) => !String(u).endsWith('/login')), page.click('button[type=submit]')]);
 }
-const ready = (page) => page.waitForFunction(() => !document.querySelector('#view')?.textContent.includes('Loading…'), null, { timeout: 15000 });
+const ready = (page) => page.waitForFunction(() => !!document.querySelector('#view .headline'), null, { timeout: 15000 });   // rendered (folded panels may still say "Loading…")
 const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 const leadValue = (page) => page.$eval('#w-leadDays', (el) => el.value);
 

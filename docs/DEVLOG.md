@@ -3,6 +3,18 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 2 · integration on main
+stock-watch, on `main` (merges 6b22541 C-access, 96bbc9d D-helpers, 29f8e8e A-groups, 6908094 B-roles, then the fix commit below; not pushed, not deployed). Kept both sprints' intent; tests 112 → 184 pass (4 browser tests skip without Playwright).
+- Access (SW-029) on Sprint 1 auth: `auth()` now returns the role ('admin' | 'view'); the 403 gate runs before every route, so Sprint 1 writes (Mark ordered, settings, import, clear, demo, pulls) and Sprint 2 writes (`/api/decide`, digest settings and send) are refused for view sessions; `GET /api/export/backup.json` is admin-only. Viewers get no Mark-ordered ticks, bulk bar or drawer form, no Decide buttons; Sign out is a POST form. `ingestKeyAt` isn't logged as a separate change. SECURITY.md has the `VIEW_PASSWORD` row.
+- One set of report options (`reportOpts()` in server.js): report, groups, product drawer, PO CSV and the digest's today report use the same period (days or "This month"), trial values, SW-002 catalog snapshot and Mark-ordered records. `/api/groups` totals now equal report totals (new test in `test/groups-api.test.js`: a marked order leaves Need order as it leaves Order today).
+- Group-by catalog: variants come from the store snapshot (SW-002), not a second copy in `catalog.json` (collections still cached there); the `onVariants` pull hook is gone; vendor is stored in the snapshot (SW-025 vendors).
+- Roles (SW-020) now cover Sprint 1/2 UI per RACI: Mark ordered only for founder, buyer, ops; warehouse lands on Reorder → Ordered (tab shown even when empty); marketing on Products → Pause promotion; Pause/Push chips off for buyer (both) and finance (Pause); one hidden Overview list leaves list + Moving side by side.
+- Digest uses the page's own rules: Pause list = `helpers.mktList`/`mktSort` (§15c), still-out ₹/day = Stock-outs headline (§15a). Rule change from the B branch (sellers only, by ₹ sold).
+- LOGIC sections renumbered after the merge: §13 access, §14 sync runs (C), §15 decision helpers (D), §16 role views, §17 digest (B).
+- Fixes found by tests/UI: `decide.clear()` wrote on start-up and crashed a read-only DATA_DIR; Ordered tab showed "Ordered · lands" twice (Status column now only on All, as §15a says); test stubs/fixtures updated (runs stub has `catalog`, ui-helpers zero-lost drop check depends on the demo draw, smoke `ready()` waits for the headline).
+- Checked on 5010 at 1280/1440/1920/390×844, admin and view-only: every page, Reorder tabs, Products Pause/Push/Decide/Overstock, all 4 lenses + opened group, 7 roles + default, periods incl. This month, drawer: 372 checks each, 0 JS errors, 0 px sideways. `roles-smoke.js` and `ui-helpers.test.js` pass.
+- Open: `test/smoke/smoke.js` fails 5/20 (phone Reset/Save/drawer selectors, a 409 console line) on pre-merge main too, so not from this merge; five critics not run on the merged result; shared dev log page row not added (no publishing from this step).
+
 ## 2026-11-19 · Sprint 2 · B-roles
 stock-watch, branch `sprint2/B-roles` (base 995369f; not merged, not deployed). Commits: 4ef2150 SW-027, 261619e SW-020, 7f88c26 SW-028.
 - SW-027: one line under the Overview headline, "Yesterday: ₹X sold · ₹Y lost · N ran out · M back" (yesterday's store-time day, same numbers as its chart bar), and "This month" in the period picker (from the 1st, store time; "Month" on phones). New `src/period.js`; engine takes `opts.from`. LOGIC.md §5a, `test/period.test.js`.

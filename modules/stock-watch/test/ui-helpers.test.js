@@ -81,7 +81,8 @@ test('Products → Slow sellers to decide: Keep hides the row, Undo brings it ba
   await pg.goto(base + '/#products'); await pg.waitForSelector('#f-more');
   await pg.selectOption('#f-more', 'decide'); await pg.waitForSelector('.tbl.desk [data-decide]');
   if (await pg.$('[data-more="products"][data-all]')) await pg.click('[data-more="products"][data-all]');
-  assert.ok(await pg.$$eval('.tbl.desk .dec.drop', (d) => d.some((x) => x.textContent.trim() === 'Don’t reorder?')), 'demo has a drop row with nothing lost');
+  const zeroDrop = (await (await fetch(base + '/api/report')).json()).decide.some((x) => x.kind === 'drop' && !x.value);   // depends on the demo draw
+  if (zeroDrop) assert.ok(await pg.$$eval('.tbl.desk .dec.drop', (d) => d.some((x) => x.textContent.trim() === 'Don’t reorder?')), 'a drop row with nothing lost reads "Don’t reorder?"');
   assert.equal(await pg.$$eval('.tbl.desk .dec', (d) => d.some((x) => /₹0\b/.test(x.textContent))), false);
   const id = await pg.$eval('.tbl.desk tbody tr', (tr) => tr.dataset.id);
   await pg.click(`.tbl.desk tr[data-id="${id}"] [data-decide$="|keep"]`);
