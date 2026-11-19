@@ -94,7 +94,8 @@
   }
 
   /* ---------- generic sortable table ---------- */
-  function table(id, cols, rows, empty) {
+  /* A sortable table on wide screens; on phones the same rows as cards (card(r) → html) with a sort picker. */
+  function table(id, cols, rows, empty, card) {
     const s = state.sort[id];
     if (s) {
       const col = cols.find((c) => c.k === s.k);
@@ -102,9 +103,18 @@
       rows = rows.slice().sort((a, b) => { const x = v(a), y = v(b); return (x > y ? 1 : x < y ? -1 : 0) * s.dir; });
     }
     if (!rows.length) return `<div class="tbl"><div class="empty">${esc(empty)}</div></div>`;
-    return `<div class="tbl"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}" data-k="${c.k}">${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
+    const desk = `<div class="tbl desk"><table data-table="${id}"><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}" data-k="${c.k}">${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">${cols.map((c) => `<td class="${c.r ? 'r' : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    if (!card) return desk;
+    const cur = s ? `${s.k}|${s.dir}` : '';
+    const opts = cols.filter((c) => c.sortable !== false).flatMap((c) => [[`${c.k}|-1`, `${c.label}: high → low`], [`${c.k}|1`, `${c.label}: low → high`]]);
+    const phone = `<div class="phone">
+        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Most recent first', products: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
+      </div>`;
+    return desk + phone;
   }
+  const kv = (label, value, cls = '') => `<div class="${cls}"><span>${label}</span><b>${value}</b></div>`;
 
   /* ---------- charts (SVG, to scale) ---------- */
   function dailyChart(daily) {
@@ -214,16 +224,20 @@
         <input class="search" id="q-reorder" placeholder="Search product or SKU" value="${esc(state.q.reorder)}">
         <a class="btn ghost" href="/api/export/reorder.csv?days=${state.days}">Download CSV</a></div>
       ${table('reorder', [
-        { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => ['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
-        { k: 'name', label: 'Product', f: (p) => `${esc(p.name)}<span class="sub mono">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sub mono">${esc(p.sku)}</span>` },
+        { k: 'status', label: 'Status', f: (p) => pill(p.status), val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week'].indexOf(p.status) },
+        { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
+        { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => inr.format(p.stock) },
         { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
-        { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
-        { k: 'orderQty', label: 'Order qty', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
         { k: 'orderValue', label: 'Order value', r: 1, f: (p) => money(p.orderValue) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#E0506E;font-weight:700">${money(p.lost)}</span>` : '–') },
+        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
-      ], rows, 'Nothing to order in this view.')}`;
+      ], rows, 'Nothing to order in this view.', (p) => `
+        <header>${pill(p.status)}<div class="mq"><small>Order</small><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <h3>${esc(p.name)}</h3><p class="sub mono">${esc(p.sku)}</p>
+        <div class="mstats">${kv('Days left', p.daysLeft == null ? '–' : n1(p.daysLeft), p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : '')}${kv('In stock', inr.format(p.stock))}${kv('Sells / day', n1(p.perDay))}</div>
+        ${p.lost || p.outs ? `<footer>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.outs ? `<span>${p.outs} stock-out${p.outs > 1 ? 's' : ''} in ${state.days} days</span>` : ''}</footer>` : ''}`)}`;
   }
 
   function stockouts() {
@@ -237,15 +251,19 @@
       <div class="toolbar">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}
         <input class="search" id="q-stockouts" placeholder="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
       ${table('stockouts', [
-        { k: 'name', label: 'Product', f: (s) => `${esc(s.name)}<span class="sub mono">${esc(s.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (s) => `<span class="pname">${esc(s.name)}</span><span class="sub mono">${esc(s.sku)}</span>` },
+        { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b class="lostv">${money(s.lost)}</b>` },
+        { k: 'hours', label: 'Out for', r: 1, f: (s) => dur(s.hours) },
         { k: 'start', label: 'Went out', f: (s) => dt(s.start) },
         { k: 'end', label: 'Back in', f: (s) => (s.open ? '<span class="st open">Still out</span>' : dt(s.end)), val: (s) => s.end || Infinity },
-        { k: 'hours', label: 'Out for', r: 1, f: (s) => dur(s.hours) },
-        { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
-        { k: 'lost', label: '₹ lost', r: 1, f: (s) => `<b style="color:#E0506E">${money(s.lost)}</b>` },
-        { k: 'topUp', label: 'Refilled with', r: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
         { k: 'flags', label: 'Pattern', f: (s) => [s.small ? '<span class="st small">Small top-up</span>' : '', s.repeat ? '<span class="st again">Out again within a week</span>' : ''].join(' ') || '–', val: (s) => (s.small ? 2 : 0) + (s.repeat ? 1 : 0) },
-      ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.')}`;
+        { k: 'topUp', label: 'Refilled with', r: 1, f: (s) => (s.topUp == null ? '–' : `${inr.format(s.topUp)} pcs<span class="sub">${n1(s.topUpDays)} days of sales</span>`), val: (s) => s.topUp ?? -1 },
+        { k: 'unitsLost', label: 'Units lost', r: 1, f: (s) => n1(s.unitsLost) },
+      ], rows.map((s) => ({ ...s, id: s.id })), 'No stock-outs in this view.', (s) => `
+        <header><h3>${esc(s.name)}</h3><div class="mq"><small>Lost</small><b class="lostv">${money(s.lost)}</b></div></header>
+        <p class="sub mono">${esc(s.sku)}</p>
+        <div class="mstats">${kv('Out for', dur(s.hours), s.open ? 'bad' : '')}${kv('Went out', dt(s.start))}${kv(s.open ? 'Status' : 'Back in', s.open ? '<span class="st open">Still out</span>' : dt(s.end))}</div>
+        <footer>${s.topUp == null ? '' : `<span>Refilled ${inr.format(s.topUp)} pcs (${n1(s.topUpDays)} days of sales)</span>`}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again within a week</span>' : ''}</footer>`)}`;
   }
 
   function products() {
@@ -255,15 +273,18 @@
       <section class="headline"><h1>Products</h1><p>Every product seen in stock changes or orders. Click one for its stock history.</p></section>
       <div class="toolbar"><input class="search" id="q-products" placeholder="Search product or SKU" value="${esc(state.q.products)}"></div>
       ${table('products', [
-        { k: 'name', label: 'Product', f: (p) => `${esc(p.name)}<span class="sub mono">${esc(p.sku)}</span>` },
+        { k: 'name', label: 'Product', f: (p) => `<span class="pname">${esc(p.name)}</span><span class="sub mono">${esc(p.sku)}</span>` },
         { k: 'status', label: 'Status', f: (p) => pill(p.status) },
         { k: 'stock', label: 'Stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
         { k: 'perDay', label: 'Sells / day', r: 1, f: (p) => n1(p.perDay) },
         { k: 'price', label: 'Avg price', r: 1, f: (p) => moneyFull(p.price) },
         { k: 'sold', label: `Sold (${state.days} d)`, r: 1, f: (p) => money(p.sold) },
-        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span style="color:#E0506E;font-weight:700">${money(p.lost)}</span>` : '–') },
+        { k: 'lost', label: `Lost (${state.days} d)`, r: 1, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
         { k: 'outs', label: 'Stock-outs', r: 1 },
-      ], rows, 'No products yet.')}`;
+      ], rows, 'No products yet.', (p) => `
+        <header><h3>${esc(p.name)}</h3>${pill(p.status)}</header><p class="sub mono">${esc(p.sku)}</p>
+        <div class="mstats">${kv('In stock', p.stock == null ? '–' : inr.format(p.stock), p.stock != null && p.stock <= 0 ? 'bad' : '')}${kv('Sells / day', n1(p.perDay))}${kv(`Sold (${state.days} d)`, money(p.sold))}</div>
+        ${p.lost ? `<footer><span class="lostv">${money(p.lost)} lost</span><span>${p.outs} stock-out${p.outs > 1 ? 's' : ''}</span></footer>` : ''}`)}`;
   }
 
   function dataView() {
@@ -351,7 +372,7 @@
   function route() { state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', async (e) => {
-    const t = e.target.closest('button, [data-product], tr[data-id], th[data-k], [data-go]');
+    const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
     if (!t) return;
     if (t.matches('.range button')) { state.days = +t.dataset.days; await load(); return; }
     if (t.dataset.go) { const v = t.dataset.go; state.filter[v] = t.dataset.filter; location.hash = v; return; }
@@ -362,7 +383,7 @@
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
     }
     if (t.dataset.product) { openProduct(t.dataset.product); return; }
-    if (t.matches('tr[data-id]')) { openProduct(t.dataset.id); return; }
+    if (t.matches('tr[data-id], .mcard[data-id]')) { openProduct(t.dataset.id); return; }
     if (t.id === 'drawer-close') { closeDrawer(); return; }
     if (t.id === 'copy-note') { copy($('.note p').textContent); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
@@ -399,7 +420,16 @@
     const m = e.target.id && e.target.id.match(/^q-(reorder|stockouts|products)$/);
     if (m) { state.q[m[1]] = e.target.value; render._focus = e.target.id; render(); }
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+  document.addEventListener('change', (e) => {
+    const id = e.target.dataset && e.target.dataset.msort;
+    if (!id) return;
+    const [k, dir] = e.target.value.split('|');
+    state.sort[id] = k ? { k, dir: +dir } : null; render();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawer();
+    if (e.key === 'Enter' && e.target.matches && e.target.matches('.mcard[data-id]')) openProduct(e.target.dataset.id);
+  });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);
 

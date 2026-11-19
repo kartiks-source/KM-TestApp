@@ -198,6 +198,30 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 60; font-weight: 500; }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
+.pname { color: var(--brand); font-weight: 500; }
+.lostv { color: var(--lost); font-weight: 600; }
+
+/* phone cards (shown instead of tables under 760px) */
+.phone { display: none; }
+.msort { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--soft); }
+.msort select { flex: 1; border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 8px 10px; font-size: 14px; color: var(--ink); }
+.mcards { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.mcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; }
+.mcard:active { background: var(--brand-wash2); }
+.mcard header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.mcard h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--brand); }
+.mcard .sub { margin: -6px 0 0; font-size: 12px; color: var(--faint); }
+.mcard .mq { text-align: right; display: flex; flex-direction: column; line-height: 1.2; flex: none; }
+.mcard .mq small { font-size: 11px; color: var(--soft); }
+.mcard .mq b { font-size: 18px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.mstats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; background: #F6F8FB; border-radius: 8px; padding: 10px 12px; }
+.mstats div { display: flex; flex-direction: column; min-width: 0; }
+.mstats span { font-size: 11px; color: var(--soft); }
+.mstats b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mstats .bad b { color: var(--lost); }
+.mcard footer { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 12.5px; color: var(--soft); }
+.mcard footer:empty { display: none; }
+
 /* phones: the rail becomes a bottom bar */
 @media (max-width: 760px) {
   :root { --rail: 0px; }
@@ -210,4 +234,13 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
   .range { order: 3; width: 100%; } .range button { flex: 1; padding: 6px 4px; }
   .wrap { padding: 18px 16px; }
   .source { padding: 4px 16px 16px; justify-content: flex-start; }
+  .desk { display: none; }
+  .phone { display: block; }
+  .toolbar { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar .chip, .toolbar .btn { flex: none; }
+  .toolbar .search { flex: none; order: -1; width: 100%; max-width: none; min-width: 0; }
+  .toolbar:has(.search) { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
+  .headline h1 { font-size: 21px; }
+  .headline p { font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 }
