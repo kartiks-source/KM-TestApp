@@ -225,3 +225,46 @@ test('store: replacing an order removes its old lines (cancellation / refund pic
   store.replaceOrders(['#2'], []);                                                                            // cancelled
   assert.deepEqual(store.load().orders.map((o) => [o.order, o.qty]), [['#1', 1]]);
 });
+
+/* ---- SW-001: report survives any data size ---- */
+test('minMax: one loop, no spread; empty gives ±Infinity', () => {
+  assert.deepEqual(E.minMax([3, 1, 2]), { min: 1, max: 3 });
+  assert.deepEqual(E.minMax([{ t: 5 }, { t: 2 }], (x) => x.t), { min: 2, max: 5 });
+  assert.deepEqual(E.minMax([]), { min: Infinity, max: -Infinity });
+});
+
+test('no spread into Math.min/max anywhere in src/', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const dir = path.join(__dirname, '../src');
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
+    assert.doesNotMatch(fs.readFileSync(path.join(dir, f), 'utf8'), /Math\.(min|max)\([^)]*\.\.\./, f);
+  }
+});
+
+test('report on 300k order lines + 200k stock rows: < 1.5 s, no throw, no NaN/Infinity', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const V = 1000, stock = [], orders = [];
+  for (let v = 0; v < V; v++) {
+    let s = 50;
+    for (let i = 0; i < 200; i++) {
+      const b = s; s = rnd() < 0.1 ? 0 : Math.floor(rnd() * 100);
+      stock.push({ t: now - 120 * D + i * (120 * D / 200) + Math.floor(rnd() * H), variantId: 'v' + v, sku: 'S' + v, product: 'P' + v, before: b, now: s, price: 500, cost: 200 });
+    }
+  }
+  for (let i = 0; i < 300000; i++) orders.push({ t: now - Math.floor(rnd() * 120 * D), order: '#' + i, variantId: 'v' + Math.floor(rnd() * V), qty: 1 + Math.floor(rnd() * 3), price: 500 });
+  const start = process.hrtime.bigint();
+  const r = E.report(stock, orders, {}, { days: 90, now });
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  assert.ok(ms < 1500, `report took ${Math.round(ms)} ms`);
+  assert.equal(r.data.stockRows, 200000); assert.equal(r.data.orderRows, 300000);
+  assert.ok(r.data.firstOrder <= r.data.lastOrder && r.data.firstStock <= r.data.lastStock);
+  const bad = [];
+  const walk = (x, at) => {
+    if (typeof x === 'number') { if (!Number.isFinite(x)) bad.push(at); return; }
+    if (x && typeof x === 'object' && !(x instanceof Set)) for (const [k, v] of Object.entries(x)) walk(v, `${at}.${k}`);
+  };
+  walk({ totals: r.totals, daily: r.daily, data: r.data, stockouts: r.stockouts }, 'r');
+  walk(r.products, 'r.products');                                  // daysLeft is null (not Infinity) when nothing sells
+  assert.deepEqual(bad.slice(0, 5), []);
+});

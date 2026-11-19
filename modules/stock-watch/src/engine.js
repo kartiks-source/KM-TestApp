@@ -14,6 +14,13 @@ const DAY = 864e5;
 
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
 const round = (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; };
+/** Smallest and largest `key(x)` in one loop. Never spread a big array into Math.min/max: past ~120k
+ *  items that throws "Maximum call stack size exceeded". Empty → { min: Infinity, max: -Infinity }. */
+function minMax(arr, key = (x) => x) {
+  let min = Infinity, max = -Infinity;
+  for (const x of arr) { const v = key(x); if (v < min) min = v; if (v > max) max = v; }
+  return { min, max };
+}
 
 /** Local calendar day (YYYY-MM-DD) for a UTC ms timestamp, at a fixed offset in minutes (India = 330). */
 function dayKey(t, offMin) { return new Date(t + offMin * 60e3).toISOString().slice(0, 10); }
@@ -168,10 +175,11 @@ function report(stock, orders, settings = {}, opts = {}) {
     p.lines.push(o);
   }
 
-  const firstOrder = orders.length ? Math.min(...orders.map((o) => o.t)) : now;
+  const orderSpan = minMax(orders, (o) => o.t), stockSpan = minMax(stock, (r) => r.t);
+  const firstOrder = orders.length ? orderSpan.min : now;
   const demandFrom = Math.max(now - S.demandWindowDays * DAY, firstOrder);
   /* a product's data starts at its first stock record or first order; before that it didn't exist for us */
-  for (const p of P.values()) p.first = Math.min(p.changes.length ? p.changes[0].t : Infinity, ...p.lines.map((o) => o.t));
+  for (const p of P.values()) p.first = Math.min(p.changes.length ? p.changes[0].t : Infinity, minMax(p.lines, (o) => o.t).min);
 
   /* one bucket per local day touched by the period, the partial first day included, so the daily
      chart adds up to the same totals as the product rows */
@@ -313,10 +321,10 @@ function report(stock, orders, settings = {}, opts = {}) {
     daily: dailyRows, reorder, stockouts, products,
     data: {
       stockRows: stock.length, orderRows: orders.length,
-      firstStock: stock.length ? Math.min(...stock.map((r) => r.t)) : null,
-      lastStock: stock.length ? Math.max(...stock.map((r) => r.t)) : null,
+      firstStock: stock.length ? stockSpan.min : null,
+      lastStock: stock.length ? stockSpan.max : null,
       firstOrder: orders.length ? firstOrder : null,
-      lastOrder: orders.length ? Math.max(...orders.map((o) => o.t)) : null,
+      lastOrder: orders.length ? orderSpan.max : null,
     },
   };
 }
@@ -345,4 +353,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  trend, TREND_MIN_UNITS, report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  trend, TREND_MIN_UNITS, minMax, report, productDetail, episodes, demandPerDay, plan, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
