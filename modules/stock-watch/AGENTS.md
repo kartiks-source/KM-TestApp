@@ -16,8 +16,9 @@ Shopify Flow → /ingest/*  ───┼─→ rows (stock changes, order lines)
 Google Sheet CSV / upload ───┘
 ```
 
-- **Stock row:** `{ t, variantId, sku, product, variant, before, now, price }`, one per stock change.
-- **Order row:** `{ t, order, variantId, sku, qty, price }`, one per order line.
+- **Stock row:** `{ t, variantId, sku, product, variant, before, now, price, src }`, one per stock change.
+- **Order row:** `{ t, order, variantId, sku, qty, price, src }`, one per order line.
+- **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs.
 - **Engine** (`src/engine.js`, pure functions): stock-out episodes, in-stock sales rate, ₹ lost (weighted by the store's hour-of-day sales pattern), reorder status and quantity.
 
 ## Files

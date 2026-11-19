@@ -85,10 +85,17 @@ function settingsFor(url, saved) {
   return out;
 }
 
+/* ---------- one data source per store (SW-006, ADR-0009) ----------
+ * Once Shopify is connected it is the only source: Flow, Sheet and CSV rows use other keys and
+ * would count the same sale twice. Clear and import also wait for a running pull. */
+const ONE_SOURCE = 'Shopify is connected, so it is this store’s only data source. Flow, Sheet and CSV data are turned off so no sale is counted twice.';
+const PULL_RUNNING = 'A Shopify pull is running. Try again in a minute.';
+
 /* ---------- Google Sheet sync (published CSV links of the Stock log / Order log tabs) ---------- */
 async function syncSheet() {
   const s = store.load().settings;
   if (!s.sheetStockCsv && !s.sheetOrderCsv) return { skipped: true };
+  if (keys.status().source) return { skipped: true, reason: ONE_SOURCE };   // Shopify is the only source (SW-006)
   const out = { stock: 0, orders: 0 };
   try {
     for (const [kind, url] of [['stock', s.sheetStockCsv], ['order', s.sheetOrderCsv]]) {
@@ -97,7 +104,7 @@ async function syncSheet() {
       const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
       if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
       const parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order');
-      if (kind === 'stock') out.stock = store.add('stock', parsed.rows); else out.orders = store.add('orders', parsed.rows);
+      if (kind === 'stock') out.stock = store.add('stock', parsed.rows, 'sheet'); else out.orders = store.add('orders', parsed.rows, 'sheet');
     }
     store.setSync({ lastSync: Date.now(), lastSyncError: null });
     return out;
@@ -134,11 +141,11 @@ function syncShopify() {
       const nm = store.load().settings.storeName;
       if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
       const s = await shopify.pullStock(store.load().shopify.lastQty);
-      const stock = store.add('stock', s.rows);
+      const stock = store.add('stock', s.rows, 'shopify');
       store.setShopify({ lastQty: s.lastQty });
       let orders = 0;
       await shopify.pullOrders(store.load().shopify.ordersCursor, {
-        onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows).added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
+        onPage: (names, rows, cursor) => { orders += store.replaceOrders(names, rows, 'shopify').added; if (cursor) store.setShopify({ ordersCursor: cursor }); },
       });
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
@@ -162,10 +169,11 @@ async function api(req, res, url) {
   if (ingest && req.method === 'POST') {
     const key = url.searchParams.get('key') || req.headers['x-ingest-key'];
     if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
+    if (keys.status().source) return fail(res, 409, ONE_SOURCE);
     const raw = await readBody(req, 2e6);
     let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
     const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1]));
-    const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list);
+    const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list, 'flow');
     return send(res, 200, { ok: true, received: list.length, added: n });
   }
 
@@ -196,12 +204,15 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, settings: store.setSettings(patch) });
   }
   if (p === '/api/import' && req.method === 'POST') {
+    if (keys.status().source) return fail(res, 409, ONE_SOURCE);
+    if (shopifyRun) return fail(res, 409, PULL_RUNNING);
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     const parsed = rows.fromCsv(await readBody(req), kind);
-    const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows);
+    const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped });
   }
   if (p === '/api/sync' && req.method === 'POST') {
+    if (keys.status().source) return fail(res, 409, ONE_SOURCE);
     try { return send(res, 200, { ok: true, ...(await syncSheet()) }); } catch (e) { return fail(res, 502, e.message); }
   }
   if (p === '/api/demo' && req.method === 'POST') {
@@ -209,7 +220,7 @@ async function api(req, res, url) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
     const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];

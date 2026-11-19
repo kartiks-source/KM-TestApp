@@ -31,10 +31,10 @@ Two streams, nothing else:
 | Source | Stock-out timing |
 |---|---|
 | Shopify pull (read-only, every 15 minutes) | to within 15 minutes; a stock-out that starts and ends between two reads is missed |
-| Shopify Flow → this app or the Google Sheet | to the minute, because Flow fires on each change |
+| Shopify Flow → this app (no Shopify connection) or the Google Sheet | to the minute, because Flow fires on each change |
 | CSV upload | as precise as the file |
 
-Why both: the pull needs no setup by the brand, while Flow is exact. Running both together is fine: the same change can arrive twice at slightly different times, but a second "went to 0" while a product is already out (or a second "back in stock" after it's back) changes nothing, so stock-outs aren't double-counted. Exact repeats of a row are dropped.
+**One source per store (ADR-0009).** Once Shopify is connected, the pull is the only source: Flow (`/ingest/*`), Sheet sync and CSV import are refused (409) with a plain message, because their order lines are keyed differently (order + variant + quantity vs Shopify's line ID) and the same sale would count twice. Clear and import also wait while a pull runs. Without Shopify, Flow, Sheet and CSV can be used together: they share one key, so the same order line sent by two of them is stored once. Every row records where it came from (`src`: shopify, flow, sheet, csv, demo). Rows stored before Shopify was connected stay; the pull replaces all lines of each order it reads (by order name), so a Flow or CSV copy of an order from the last 60 days is replaced, not doubled. Exact repeats of a row are dropped.
 
 **Times without a time zone** (in a CSV or Flow row) are read as India time.
 

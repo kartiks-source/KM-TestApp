@@ -1,6 +1,6 @@
 # 0009. One authoritative data source per store
 
-- Status: Proposed (implement in SW-006)
+- Status: Accepted (implemented in SW-006, 2026-11-19; founder sign-off still to record)
 - Date: 2026-11-19
 - Deciders: builder, architect; founder to accept
 
@@ -15,4 +15,5 @@ Each row records `src`. A store has one live source: when Shopify is connected, 
 ## Consequences
 
 - No double counting; the Data page shows one active source.
+- Implementation: rows carry `src` (`shopify`, `flow`, `sheet`, `csv`, `demo`). Rows stored before Shopify was connected stay; the pull replaces every line of each order it reads by order name, so a Flow/CSV copy of an order inside the 60-day backfill is replaced, not doubled.
 - Minute-exact Flow stock timing can't be combined with the pull until a later ADR defines merge rules for stock rows only.

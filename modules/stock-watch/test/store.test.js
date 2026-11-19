@@ -164,3 +164,68 @@ test('server: cleared live store stays empty after restart (no demo)', async () 
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(j.source, 'empty'); assert.equal(j.orders.length, 0);
 });
+
+/* ---------- SW-006: one source of truth per store ---------- */
+
+test('every stored row carries its source', () => {
+  const s = freshStore(tmpDir());
+  s.add('orders', [{ t: Date.now(), order: '#1', variantId: '9', qty: 1, price: 10 }], 'flow');
+  s.add('stock', [{ t: Date.now(), variantId: '9', before: 1, now: 0 }], 'csv');
+  s.replaceOrders(['#2'], [{ t: Date.now(), order: '#2', line: '5', variantId: '9', qty: 1, price: 10 }]);
+  const d = s.load();
+  assert.deepEqual(d.orders.map((o) => o.src), ['flow', 'shopify']);
+  assert.deepEqual(d.stock.map((o) => o.src), ['csv']);
+});
+
+test('the same order via Flow and then the Shopify pull counts once in totals.sold', () => {
+  const E = require('../src/engine');
+  const s = freshStore(tmpDir()); const t = Date.now() - 3600e3;
+  s.add('orders', [{ t, order: '#1001', variantId: '9', qty: 2, price: 500 }], 'flow');
+  s.add('orders', [{ t: t + 60e3, order: '#1001', variantId: '9', qty: 2, price: 500 }], 'csv');   // same sale from a CSV: same key
+  s.replaceOrders(['#1001'], [{ t, order: '#1001', line: '77', variantId: '9', qty: 2, price: 500 }]);
+  const d = s.load();
+  assert.equal(d.orders.length, 1);
+  assert.equal(E.report(d.stock, d.orders, {}, { now: Date.now() }).totals.sold, 1000);
+});
+
+test('server: Shopify connected → Flow ingest, CSV import and Sheet sync refused with 409', async () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'empty', settings: { ingestKey: 'k123' } }));
+  // client ID without a store name: "connected" for the guards, but no pull can reach the network
+  const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_CLIENT_ID: 'x' });
+  const auth = { authorization: 'Basic ' + Buffer.from('u:pw').toString('base64') };
+  try {
+    let r = await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': 'k123' }, body: JSON.stringify({ order: '#1', variant_id: '1', qty: 1 }) });
+    assert.equal(r.status, 409); assert.match((await r.json()).error, /only data source/);
+    r = await fetch(s.base + '/api/import?kind=order', { method: 'POST', headers: auth, body: 'time,order,variant id,sku,qty,unit price\n2026-11-18 10:00,#1,1,A,1,10' });
+    assert.equal(r.status, 409);
+    r = await fetch(s.base + '/api/sync', { method: 'POST', headers: auth });
+    assert.equal(r.status, 409);
+    r = await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': 'wrong' }, body: '{}' });
+    assert.equal(r.status, 401);   // the key is still checked first
+  } finally { await stop(s); }
+  const j = JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8'));
+  assert.equal(j.orders.length, 0);
+});
+
+test('server: Clear and import wait while a Shopify pull runs (409)', async () => {
+  freshStore(tmpDir());
+  delete require.cache[require.resolve('../server')];
+  process.env.SHOPIFY_CLIENT_ID = 'x';
+  const shopify = require('../src/shopify');
+  const real = shopify.pullStock;
+  let finish; shopify.pullStock = () => new Promise((r) => { finish = () => r({ rows: [], lastQty: {}, catalog: {} }); });
+  const { server, syncShopify } = require('../server');
+  const run = syncShopify().catch(() => {});
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    let r = await fetch(base + '/api/clear', { method: 'POST' });
+    assert.equal(r.status, 409); assert.match((await r.json()).error, /pull is running/);
+    r = await fetch(base + '/api/import?kind=order', { method: 'POST', body: 'x' });
+    assert.equal(r.status, 409);
+  } finally {
+    finish(); await run; shopify.pullStock = real; delete process.env.SHOPIFY_CLIENT_ID;
+    await new Promise((r) => server.close(r));
+  }
+});

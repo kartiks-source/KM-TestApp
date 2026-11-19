@@ -135,9 +135,14 @@ function health() {
     lastSaveError, lastSaveAt, pendingSave: !!saveTimer };
 }
 
-/** Add rows, skipping ones already stored. Returns how many were new. */
-function add(kind, rows) {
+/** Where a row came from (SW-006): shopify, flow, sheet, csv or demo. Stored on every row as `src`. */
+const SOURCES = ['shopify', 'flow', 'sheet', 'csv', 'demo'];
+const stamp = (rows, src) => { if (src) for (const r of rows) if (!r.src) r.src = src; return rows; };
+
+/** Add rows from `src`, skipping ones already stored. Returns how many were new. */
+function add(kind, rows, src) {
   const d = load();
+  stamp(rows, src);
   goLive(d, rows);
   const list = kind === 'stock' ? d.stock : d.orders;
   const keys = kind === 'stock' ? d._stockKeys : d._orderKeys;
@@ -157,8 +162,9 @@ function prune() {
 }
 
 /** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
-function replaceOrders(names, rows) {
+function replaceOrders(names, rows, src = 'shopify') {
   const d = load(); const set = new Set(names);
+  stamp(rows, src);
   goLive(d, rows);
   const before = d.orders.length;
   d.orders = d.orders.filter((r) => !set.has(r.order)).concat(rows);
@@ -169,6 +175,7 @@ function replaceOrders(names, rows) {
 
 function replaceAll(stock, orders, source) {
   const d = load();
+  if (source === 'demo') { stamp(stock, 'demo'); stamp(orders, 'demo'); }
   d.stock = stock; d.orders = orders; d.source = source;
   d._stockKeys = new Set(stock.map(stockKey)); d._orderKeys = new Set(orders.map(orderKey));
   d.shopify = blankShopify();   // re-read everything from Shopify on the next pull
@@ -186,4 +193,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { load, add, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, health, StoreLoadError, FILE, BAK, DATA_DIR, KEEP_DAYS };
+module.exports = { SOURCES, load, add, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, health, StoreLoadError, FILE, BAK, DATA_DIR, KEEP_DAYS };
