@@ -47,6 +47,8 @@ Without Shopify (Flow, Sheet, CSV), there's no catalog: stock now is the newest 
 
 **One source per store (ADR-0009).** Once Shopify is connected, the pull is the only source: Flow (`/ingest/*`), Sheet sync and CSV import are refused (409) with a plain message, because their order lines are keyed differently (order + variant + quantity vs Shopify's line ID) and the same sale would count twice. Clear and import also wait while a pull runs. Without Shopify, Flow, Sheet and CSV can be used together: they share one key, so the same order line sent by two of them is stored once. Every row records where it came from (`src`: shopify, flow, sheet, csv, demo). Rows stored before Shopify was connected stay; the pull replaces all lines of each order it reads (by order name), so a Flow or CSV copy of an order from the last 60 days is replaced, not doubled. Exact repeats of a row are dropped.
 
+**Is the data fresh?** With Shopify connected, the data counts as **stale when the last good pull is more than 45 minutes old** (three missed 15-minute pulls), or when there has been no good pull within 45 minutes of the app starting. Stale data turns the unauthenticated `/status` to 503 for the uptime monitor, and `/api/report` carries `freshness {lastPull, ageMin, stale}` for the "Data is X h old" banner. Without Shopify nothing is ever stale, because Flow, Sheet and CSV data arrive whenever the brand sends them.
+
 **Times without a time zone** (in a CSV or Flow row) are read as India time.
 
 ### What counts as a sale

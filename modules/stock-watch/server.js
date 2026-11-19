@@ -159,6 +159,26 @@ function syncShopify() {
   return shopifyRun;
 }
 
+/* ---------- freshness (SW-019): is the Shopify data recent? ---------- */
+const STALE_MIN = 45;          // three missed 15-minute pulls
+const BOOT_AT = Date.now();
+/** Age of the last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
+function freshness(now = Date.now()) {
+  if (!keys.status().source) return { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: STALE_MIN };
+  const st = store.load().shopify; const ref = st.lastSync || BOOT_AT;
+  return { shopify: true, lastPull: st.lastSync, ageMin: st.lastSync ? Math.floor((now - st.lastSync) / 60e3) : null,
+    stale: now - ref > STALE_MIN * 60e3, staleAfterMin: STALE_MIN, running: !!shopifyRun, pullFailing: !!st.lastError };
+}
+/** Unauthenticated /status for uptime monitors: 503 when data is stale or saving fails. No names, keys or error text. */
+function statusBody() {
+  const h = store.health(); const f = freshness(); const d = h.loaded ? store.load() : null;
+  let bytes = null; try { bytes = fs.statSync(store.FILE).size; } catch { /* not written yet */ }
+  const ok = h.ok && !f.stale;
+  return { code: ok ? 200 : 503, body: { ok, stale: f.stale, ageMin: f.ageMin, lastPull: f.lastPull, shopify: f.shopify, running: !!shopifyRun, pullFailing: !!f.pullFailing,
+    saveOk: h.ok, source: d ? d.source : null, storeBytes: bytes, stockRows: d ? d.stock.length : null, orderRows: d ? d.orders.length : null,
+    variants: d ? Object.keys(d.catalog || {}).length : null, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) } };
+}
+
 /* ---------- API ---------- */
 async function api(req, res, url) {
   const p = url.pathname;
@@ -182,7 +202,7 @@ async function api(req, res, url) {
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog });
-    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
@@ -248,6 +268,7 @@ function serveStatic(req, res, url) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
   try {
+    if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
     if (url.pathname === '/health') { const h = store.health(); return send(res, h.ok ? 200 : 503, { ok: h.ok, ...(h.ok ? {} : { error: h.loadError || `Saving data fails: ${h.lastSaveError?.message}` }) }); }
     if (url.pathname === '/login' && req.method === 'GET') {
       if (!PASSWORD || authed(req)) return send(res, 302, '', 'text/plain', { location: '/' });

@@ -55,6 +55,7 @@ Google Sheet CSV / upload ───┘
 
 - Runs under tini (Dockerfile). SIGTERM/SIGINT: timers stop, a running Shopify pull gets up to 25 s (`STOP_WAIT_MS`), the store is written, then the process exits.
 - `/health`: 200, or 503 while saving fails. Railway health check set in root `railway.json`.
+- `/status` (no login, for an uptime monitor): `{ok, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, uptimeMin}`; 503 when the last Shopify pull is > 45 min old or saving fails. No names, keys or error text. `/api/report` carries the same `freshness` for the stale-data banner (UI: stream E).
 
 ## Commands
 

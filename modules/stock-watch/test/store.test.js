@@ -325,3 +325,35 @@ test('a stock-out on a product that went inactive ends then, and is not "still o
   assert.equal(r.totals.stillOut, 0);
   assert.equal(r.products.find((x) => x.id === '1').status, 'Inactive');
 });
+
+/* ---------- SW-019: /status for uptime monitors ---------- */
+
+test('server: /status is open, 200 without Shopify, and reports size and row counts', async () => {
+  const s = await startServer(tmpDir());
+  try {
+    const r = await fetch(s.base + '/status');
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.ok, true); assert.equal(j.stale, false); assert.equal(j.shopify, false);
+    assert.ok(j.orderRows > 0); assert.ok(j.stockRows > 0);
+    const rep = await (await fetch(s.base + '/api/report')).json();
+    assert.deepEqual(rep.freshness, { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: 45 });
+  } finally { await stop(s); }
+});
+
+test('server: /status 503 when the last Shopify pull is over 45 min old, 200 when recent', async () => {
+  for (const [ago, code] of [[50, 503], [5, 200]]) {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'live', settings: {}, shopify: { lastSync: Date.now() - ago * 60e3 } }));
+    const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_CLIENT_ID: 'x' });
+    try {
+      const r = await fetch(s.base + '/status');
+      assert.equal(r.status, code);
+      const j = await r.json();
+      assert.equal(j.stale, code === 503); assert.equal(j.ageMin, ago);
+      assert.equal(JSON.stringify(j).includes('pw'), false);
+      const rep = await (await fetch(s.base + '/api/report', { headers: { authorization: 'Basic ' + Buffer.from('u:pw').toString('base64') } })).json();
+      assert.equal(rep.freshness.stale, code === 503);
+    } finally { await stop(s); }
+  }
+});
