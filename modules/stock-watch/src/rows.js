@@ -203,8 +203,15 @@ function fromWebhook(body, kind, opts = {}) {
   return fromCsv(String(body || ''), kind, o).rows;
 }
 
+/** One CSV cell for an export. Text starting with = + - @ tab or CR gets a leading ' so spreadsheets don't run it as a formula. */
+function csvCell(x) {
+  let s = String(x ?? '');
+  if (typeof x === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 /** Stable identity of a row, so the same row imported twice is kept once. */
 const stockKey = (r) => `${r.t}|${r.variantId}|${r.before}|${r.now}`;
 const orderKey = (r) => (r.line ? `${r.order}|L${r.line}` : `${r.order || r.t}|${r.variantId}|${r.qty}`);
 
-module.exports = { parseCsv, sniffDelimiter, toNum, toTime, headerMap, fromCsv, fromWebhook, stockKey, orderKey, STOCK_COLS, ORDER_COLS, REQUIRED };
+module.exports = { parseCsv, sniffDelimiter, toNum, toTime, headerMap, fromCsv, fromWebhook, csvCell, stockKey, orderKey, STOCK_COLS, ORDER_COLS, REQUIRED };

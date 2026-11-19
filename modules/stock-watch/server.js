@@ -218,8 +218,7 @@ async function api(req, res, url) {
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
     const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
-    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
-    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(q).join(',')).join('\n');
+    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(rows.csvCell).join(',')).join('\n');
     return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
   }
   return fail(res, 404, 'Not found');

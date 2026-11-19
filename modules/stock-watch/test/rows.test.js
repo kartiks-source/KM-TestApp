@@ -128,3 +128,9 @@ test('Flow: no header needed; missing or unreadable time is stamped now; future 
   const h = R.fromWebhook(`${ORDER_HEAD}\n2026-11-15 10:00,#7,42,S1,2,499`, 'order', { now: NOW });
   assert.deepEqual([h[0].order, h[0].qty], ['#7', 2]);
 });
+
+test('csvCell: text that a spreadsheet would run as a formula gets a leading quote (SW-017)', () => {
+  const cases = [['=1+1', `"'=1+1"`], ['+91 98', `"'+91 98"`], ['-SKU', `"'-SKU"`], ['@SUM(A1)', `"'@SUM(A1)"`], ['\tx', `"'\tx"`], ['\rx', `"'\rx"`],
+    ['Serum "30 ml"', '"Serum ""30 ml"""'], ['S-1', '"S-1"'], [-5, '"-5"'], [12.5, '"12.5"'], [null, '""'], [undefined, '""']];
+  for (const [input, want] of cases) assert.equal(R.csvCell(input), want, String(input));
+});

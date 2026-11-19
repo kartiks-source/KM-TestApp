@@ -416,7 +416,8 @@
   }
   function downloadProductsCsv() {
     const cols = PRODUCT_COLS();
-    const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+    // Same rule as csvCell in src/rows.js: text starting = + - @ tab CR gets a leading ' (no formulas run in Excel/Sheets).
+    const q = (x) => { let v = String(x ?? ''); if (typeof x === 'string' && /^[=+\-@\t\r]/.test(v)) v = `'${v}`; return `"${v.replace(/"/g, '""')}"`; };
     const lines = [cols.map((c) => c.label), ...productRows().map((p) => cols.map((c) => (c.csv ? c.csv(p) : p[c.k])))].map((l) => l.map(q).join(','));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }));
