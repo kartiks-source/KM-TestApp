@@ -64,7 +64,7 @@ async function startApp() {
   let log = ''; child.stdout.on('data', (b) => { log += b; }); child.stderr.on('data', (b) => { log += b; });
   const base = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(base + '/health')).ok) return { base, stop: () => { child.kill(); fs.rmSync(data, { recursive: true, force: true }); } }; } catch { /* not up yet */ }
+    try { if ((await fetch(base + '/health')).ok) return { base, stop: async () => { await new Promise((r) => { child.once('exit', r); child.kill(); }); fs.rmSync(data, { recursive: true, force: true }); } }; } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 200));
   }
   child.kill(); throw new Error('app did not start:\n' + log);
@@ -163,7 +163,7 @@ async function run(browser, base, vp) {
   const app = await startApp();
   const browser = await launch(chromium);
   try { for (const vp of VIEWPORTS) await run(browser, app.base, vp); }
-  finally { await browser.close(); app.stop(); }
+  finally { await browser.close(); await app.stop(); }
   const w = Math.max(...results.map((r) => r.name.length));
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.vp.padEnd(7)} ${r.name.padEnd(w)}  ${r.detail}`);
   const bad = results.filter((r) => !r.ok).length;
