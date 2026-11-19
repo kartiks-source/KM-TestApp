@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 1 · D-ops-qa
+Branch `sprint1/D-ops-qa`. Not deployed, not pushed.
+- **SW-013 (1f15a3a)** stock-watch-sheets: ₹ lost clipped to max(start, now − 30 d) on Lost sales + Reorder tabs (repro: 40-day stock-out ending 10 d ago, Sheet ₹2,00,000 vs web ₹1,00,000; now equal). Maths in pure `SW.compute()`; launch window and no-sales rule aligned; Daily includes the partial first day. `test/parity.test.js`: 6 fixtures through both, same status + qty, ₹ lost ±2%, `ALLOW` = best seller below slow cutoff (Sheet has no ABC). Sheet LOGIC.md is the single list of differences. Brands on old copies need the new .gs pasted.
+- **SW-005 (313cae3)** stock-watch: `src/backup.js` daily `backups/store-YYYYMMDD.json` + snapshot before every replaceAll, 14 each; restore via `/data/restore.json` + restart; authed `GET /api/export/backup.json`. `docs/RUNBOOK.md`. Restore drill (local, port 4804): imported 25 stock rows + 300 order lines (live, sold ₹1,49,700) → Clear (0/0, `before-clear` snapshot written) → stop → `cp backups/…-before-clear.json restore.json` → start → 25/300, sold ₹1,49,700, previous store kept as `before-restore`. Open: Railway volume backups (daily, keep ≥ 7) must be switched on by the owner in the dashboard; not done (no Railway access in this stream).
+- **SW-014 (e037930)** CI: `.github/workflows/test.yml` runs `npm test` on Node 20 + 22, push and PR. `npm test` script → `node --test test/*.test.js` (old `test/` arg failed on Node 22, the Docker version). Playwright smoke `test/smoke/smoke.js` (on demand): 16/20 today; Reset and Save fail at 1440 + 390 (SW-011 bug), 20/20 with that bug patched locally. Open: `server.test.js`, `store.test.js`, `rows.test.js`, `engine-edge.test.js` left to the streams changing those files (SW-004/6/7/8/10, SW-001-003).
+- **SW-015 (9921451)** docs: LOGIC §11 split by source, §12 → Sheet LOGIC.md; ORCA.md five critics, one fence each, `git diff $BASE..HEAD -- <role paths>`; real deploy (`railway up`, manual) in AGENTS.md + ORCA.md; `SECURITY.md`; `test/docs.test.js` fails on an unclosed fence (caught ORCA.md:60).
+- Tests: 28 → 44, green on Node 20, 22, 26.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).
