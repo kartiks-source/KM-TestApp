@@ -3,6 +3,11 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+
+## 2026-11-19 · stock-watch · token API key source (option A decided)
+- `src/keys.js` source `tokenapi` (TOKEN_API_URL / TOKEN_API_KEY / SHOPIFY_STORE): current token from the main product's API, cached until 5 min before `expires_at`, never refreshed, re-asked once on a Shopify 401, kept while the API is briefly down, plain errors (key refused / IP not allow-listed / store not allow-listed / API down).
+- `src/alert.js`: ALERT_WEBHOOK_URL gets one message when pulls start failing, a reminder every 6 h, one on recovery; tokens scrubbed.
+- `scripts/stand-in-token-api.js` to test against the contract before the real API exists. ADR 0014; RUNBOOK "Connect the first store". 8 new tests.
 ## 2026-11-19 · Sprint 2 · integration on main
 stock-watch, on `main` (merges 6b22541 C-access, 96bbc9d D-helpers, 29f8e8e A-groups, 6908094 B-roles, then the fix commit below; not pushed, not deployed). Kept both sprints' intent; tests 112 → 184 pass (4 browser tests skip without Playwright).
 - Access (SW-029) on Sprint 1 auth: `auth()` now returns the role ('admin' | 'view'); the 403 gate runs before every route, so Sprint 1 writes (Mark ordered, settings, import, clear, demo, pulls) and Sprint 2 writes (`/api/decide`, digest settings and send) are refused for view sessions; `GET /api/export/backup.json` is admin-only. Viewers get no Mark-ordered ticks, bulk bar or drawer form, no Decide buttons; Sign out is a POST form. `ingestKeyAt` isn't logged as a separate change. SECURITY.md has the `VIEW_PASSWORD` row.
