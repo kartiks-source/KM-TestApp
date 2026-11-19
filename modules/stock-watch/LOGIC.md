@@ -77,6 +77,14 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 
 Setting: *Sales history used* [28 days]. If the store's data starts later than 28 days ago, the window starts with the data. **A product's own window starts at its first stock record or first order**, so a product launched 5 days ago is measured over those 5 days, not diluted by 23 days before it existed. (Without this, a new launch looked like a slow, overstocked product.)
 
+**Long stock-outs (fewer than 7 in-stock days in the window):** the window can't say what the product sells, so the rate looks further back:
+1. **The most recent 28 in-stock days** within the history we keep (120 days), skipping the time it was out: units sold over that stretch ÷ the in-stock days in it.
+2. **If it hasn't been in stock at all in that history**, the 28 days before the stock-out began.
+
+The average price paid (section 4) comes from the same sales. A product launched recently, or a store whose data starts recently, has no older history, so for it nothing changes. The product's `rateBasis` says which rule gave the rate (`window`, `history` or `before-out`) and `rateFrom` when that stretch starts.
+
+*Why:* without this, a best seller out for the whole 28 days sold 0 in the window, so it got a rate of 0: it showed as a Slow seller with ₹0 lost and dropped off the reorder list. The costliest stock-outs vanished from exactly the lists meant to catch them. Example: 5 a day at ₹1,000, out for the last 30 days → still 5 a day, **Out now**, order 5 × 40 = 200, ₹ lost ≈ 30 × 5 × ₹1,000 = ₹1,50,000 over a 30-day view. *Why 7 days:* under a week, one good or bad day swings the rate too much, and weekdays aren't all covered. *Considered:* a fixed 90-day window for everyone (too slow to follow a season) and carrying the last rate forward from before the stock-out (ignores any in-stock days since). *When it can be wrong:* if demand really fell while the product was out (season over, trend passed), the older rate over-orders; check the product's sales chart before a big order.
+
 **Why in-stock days, not calendar days:** a product that sold 28 units but was out of stock for 7 of the 28 days really sells 28 ÷ 21 = 1.33 a day, not 1.0. Dividing by 28 would make every stock-out shrink the next order, and the product would run out sooner the next time, a loop that keeps getting worse. Removing the out-of-stock time breaks that loop.
 
 **Why 28 days:** four full weeks, so every weekday counts equally, and it's recent enough to follow a trend. We considered 7 days (too jumpy for slow sellers) and 90 days (too slow to react to a season or a campaign).
@@ -270,7 +278,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Column | Rule |
 |---|---|
 | Units / Sold / Lost | inside the selected period (7 / 14 / 30 / 60 days) |
-| Sells / day, Avg price | over the last 28 days, whatever period is selected, so the reorder maths doesn't change when you switch the view |
+| Sells / day, Avg price | over the last 28 days (further back for a long stock-out, section 3), whatever period is selected, so the reorder maths doesn't change when you switch the view |
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
@@ -302,7 +310,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - Stock-out timing is to within 15 minutes with the Shopify pull alone (section 1).
 - One lead time for all products; no supplier minimums or case packs (section 6).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
-- The rate follows the last 28 days, so it lags a sudden season or campaign (section 3).
+- The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
 - Returns and cancellations aren't netted out of sales.
 - One store per deployment; time zone is a fixed offset (no daylight saving, which India doesn't use).
 

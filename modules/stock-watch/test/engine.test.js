@@ -268,3 +268,48 @@ test('report on 300k order lines + 200k stock rows: < 1.5 s, no throw, no NaN/In
   walk(r.products, 'r.products');                                  // daysLeft is null (not Infinity) when nothing sells
   assert.deepEqual(bad.slice(0, 5), []);
 });
+
+/* ---- SW-003: long stock-outs keep their demand ---- */
+test('a best seller out for the last 30 days stays Out now, on Reorder, with ₹ lost at its earlier rate', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'best', sku: 'B', product: 'Best', before: 400, now: 400, price: 1000 },
+    { t: now - 30 * D, variantId: 'best', sku: 'B', product: 'Best', before: 1, now: 0, price: 1000 }];
+  const orders = [];
+  for (let d = 31; d <= 90; d++) for (let k = 0; k < 5; k++) orders.push({ t: now - d * D + (2 + 4 * k) * H, order: `#${d}-${k}`, variantId: 'best', qty: 1, price: 1000 });
+  const r = E.report(stock, orders, S0, { days: 30, now });
+  const p = r.products[0];
+  assert.equal(p.rateBasis, 'history');
+  assert.ok(Math.abs(p.perDay - 5) < 0.01, `perDay ${p.perDay}`);
+  assert.equal(p.status, 'Out now');
+  assert.ok(p.orderQty > 0); assert.equal(p.orderQty, 5 * (7 + 30 + 3));
+  assert.ok(Math.abs(p.lost - 30 * 5 * 1000) <= 0.05 * 30 * 5 * 1000, `lost ${p.lost}`);
+  assert.ok(r.reorder.some((x) => x.id === 'best'));
+});
+
+test('7+ in-stock days in the window: rate unchanged (window basis)', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const stock = [{ t: now - 90 * D, variantId: 'v', sku: 'V', product: 'V', before: 400, now: 400, price: 100 },
+    { t: now - 20 * D, variantId: 'v', sku: 'V', product: 'V', before: 1, now: 0, price: 100 }];   // 8 in-stock days in the 28
+  const orders = [];
+  for (let d = 21; d <= 90; d++) orders.push({ t: now - d * D + H, order: `#${d}`, variantId: 'v', qty: d <= 28 ? 1 : 5, price: 100 });
+  const p = E.report(stock, orders, S0, { days: 30, now }).products[0];
+  assert.equal(p.rateBasis, 'window');
+  assert.ok(Math.abs(p.perDay - 1) < 0.01, `perDay ${p.perDay}`);    // 8 units ÷ 8 in-stock days
+});
+
+test('in-stock lookback: most recent 28 in-stock days, skipping stock-outs; capped at history start', () => {
+  const now = 100 * D;
+  const eps = [{ start: 40 * D, end: 50 * D }, { start: 80 * D, end: now }];
+  assert.equal(E.inStockStart(eps, 0, now, 28 * D), 52 * D);    // the open stock-out is skipped; 28 of the 30 in-stock days 50→80
+  assert.equal(E.inStockStart(eps, 0, now, 40 * D), 30 * D);    // 30 (50→80) + 10 (30→40)
+  assert.equal(E.inStockStart(eps, 45 * D, now, 40 * D), 45 * D);
+});
+
+test('out since before the history starts: rate from the days before the stock-out began', () => {
+  const now = Date.parse('2026-11-28T00:00:00Z');
+  const lines = []; for (let d = 1; d <= 28; d++) lines.push({ t: now - 150 * D - d * D, qty: 3 });
+  const eps = [{ start: now - 150 * D, end: now, open: true }];
+  const r = E.demandRate(lines, eps, { winFrom: now - 28 * D, histFrom: now - 120 * D, now, wantDays: 28, first: now - 200 * D });
+  assert.equal(r.basis, 'before-out');
+  assert.ok(Math.abs(r.perDay - 3) < 0.01, `perDay ${r.perDay}`);
+});
