@@ -7,7 +7,7 @@
 
   const state = {
     days: 30, view: 'overview', report: null, settings: null, source: null,
-    filter: { reorder: 'today', stockouts: 'all', products: 'all', type: '' }, q: { reorder: '', stockouts: '', products: '' },
+    filter: { reorder: 'today', stockouts: 'all', products: 'all' }, q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
     pick: new Set(),                            // Reorder rows ticked for Mark ordered
@@ -268,7 +268,7 @@
     const opts = cols.filter((c) => (c.r || c.val) && !['status', 'name', 'type', 'start', 'end'].includes(c.k))
       .flatMap((c) => (c.k === 'daysLeft' ? [[`${c.k}|1`, 'Days left: fewest first']] : [[`${c.k}|-1`, `${c.label}: highest first`]]));
     const phone = `<div class="phone">
-        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: ({ pause: 'Out first, then fewest days left', push: 'Most ₹ stuck first', decide: 'Biggest ₹ first' })[state.filter.products] || 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: ({ pause: 'Out first, then fewest days left', push: 'Most ₹ stuck first', decide: 'Biggest ₹ first' })[state.filter.products] || 'Biggest loss first', groups: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
       </div>`;
     return desk + phone + more;
@@ -504,9 +504,9 @@
   const productMatch = (p, f) => f === 'all' || (f === 'pause' || f === 'push' ? p.mkt === f : f === 'decide' ? decideOf().has(p.id) : f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && TODAY.includes(p.status)
     : f === 'over' ? p.overstock : f === 'rising' ? p.trendCall === 'up' || p.trendNew : f === 'falling' ? p.trendCall === 'down' : group(p.status) === f);
   function productRows() {
-    const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
+    const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, gr = state.group;
     const dm = f === 'decide' ? decideOf() : null;
-    const list = r.products.filter((p) => (dm ? dm.has(p.id) : productMatch(p, f)) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
+    const list = r.products.filter((p) => (dm ? dm.has(p.id) : productMatch(p, f)) && (!gr || gr.ids.has(p.id)) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
     if (f === 'pause' || f === 'push') return mktSort(list, f);
     if (dm) return list.sort((a, b) => dm.get(b.id).value - dm.get(a.id).value);
     return list;
@@ -563,10 +563,10 @@
   ];
   const countIn = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function products() {
-    const r = state.report, f = state.filter.products, ty = state.filter.type;
+    if (state.lens) return groupView();
+    const r = state.report, f = state.filter.products, gr = state.group;
     const rows = productRows();
-    const types = [...new Set(r.products.map((p) => p.type).filter(Boolean))].sort();
-    const inType = r.products.filter((p) => !ty || p.type === ty);
+    const inType = r.products.filter((p) => !gr || gr.ids.has(p.id));
     const tot = rows.reduce((a, p) => ({ sold: a.sold + p.sold, lost: a.lost + p.lost, stock: a.stock + (p.stock > 0 ? p.stock : 0) }), { sold: 0, lost: 0, stock: 0 });
     let cols = PRODUCT_COLS().filter((c) => !c.hide);
     /* Pause: "Back in stock" in place of Order; Push: Overstock ₹ in place of Order; Decide: the decision in place of Status and Order */
@@ -576,8 +576,8 @@
     const moreOn = PRODUCT_MORE.some(([k]) => k === f);
     return `
       <section class="headline"><h1>Products</h1><p>${inr.format(rows.length)} shown · ${money(tot.sold)} sold · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
-        <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
-      <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}"${MKT_TIP[k] ? ` title="${esc(MKT_TIP[k])}"` : ''}>${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
+        <span class="hfind">${viewSelect()}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
+      <div class="toolbar"><div class="chips">${groupChip()}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}"${MKT_TIP[k] ? ` title="${esc(MKT_TIP[k])}"` : ''}>${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
         ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
@@ -592,6 +592,70 @@
     return `<details class="panel fold decided"><summary><b>${d.length} decided</b> <span class="muted">hidden until their sales change by more than half</span></summary>
       <div class="bars">${d.map((x) => `<div class="bar-row" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(byId.get(x.id)?.name || x.id)}</span><span class="muted">${esc(x.decision[0].toUpperCase() + x.decision.slice(1))}</span>${viewOnly() ? '' : `<button class="btn ghost xs" data-decide="${esc(x.id)}|">Undo</button>`}</div>`).join('')}</div></details>`;
   }
+  /* Group by (SW-022): "View: Products ▾" rolls the rows up by parent product, category, collection or tag
+     (src/groups.js, LOGIC.md §9a). A group row opens Products filtered to it, with a removable chip. */
+  const LENS = [['', 'Products'], ['product', 'Parent products'], ['type', 'Categories'], ['collection', 'Collections'], ['tag', 'Tags']];
+  const LENS_ONE = { product: 'Parent product', type: 'Category', collection: 'Collection', tag: 'Tag' };
+  const LENS_MANY = { product: 'parent products', type: 'categories', collection: 'collections', tag: 'tags' };
+  function viewSelect() {
+    if (!state.lenses) {
+      state.lenses = ['product', 'type'];
+      api('/api/groups').then((j) => { state.lenses = j.lenses; if (state.view === 'products') render(); }).catch(() => { /* keep the two that always work */ });
+    }
+    const hasType = state.report.products.some((p) => p.type);
+    const on = LENS.filter(([k]) => !k || (state.lenses.includes(k) && (k !== 'type' || hasType)));
+    return `<select class="search sel" id="f-view" aria-label="View: list products one by one, or grouped">${on.map(([k, l]) => `<option value="${k}" ${k === (state.lens || '') ? 'selected' : ''}>View: ${l}</option>`).join('')}</select>`;
+  }
+  const groupChip = () => (state.group ? `<button class="chip on gchip" id="g-clear" title="Remove this filter" aria-label="Remove filter ${esc(LENS_ONE[state.group.lens])}: ${esc(state.group.label)}">${esc(LENS_ONE[state.group.lens])}: ${esc(state.group.label)}<span aria-hidden="true">×</span></button>` : '');
+  function groupData() {
+    const k = `${state.lens}|${state.days}|${whatQs()}|${state.report.generatedAt}|${state.allColl ? 1 : 0}`;
+    if (state.groups && state.groups.k === k) return state.groups;
+    if (state.groupsWant !== k) {
+      state.groupsWant = k;
+      api(`/api/groups?lens=${state.lens}&days=${state.days}${state.allColl ? '&all=1' : ''}${whatQs()}`)
+        .then((j) => { if (state.groupsWant === k) { state.groups = { ...j, k }; if (state.view === 'products') render(); } })
+        .catch((e) => { if (state.groupsWant === k) { state.groupsWant = null; state.lens = ''; toast(e.message); if (state.view === 'products') render(); } });
+    }
+    return null;
+  }
+  const GROUP_COLS = (lens, hasCost) => [
+    { k: 'label', label: LENS_ONE[lens], f: (g) => `<span class="pname" title="${esc(g.label)}">${esc(g.label)}</span>` },
+    { k: 'n', label: 'Products', r: 1, tip: 'Product rows (variants) in this group: what a click shows', f: (g) => inr.format(g.n) },
+    { k: 'needOrder', label: 'Need order', r: 1, tip: 'Products to order today, of all in the group', f: (g) => (g.needOrder ? `<b>${inr.format(g.needOrder)}</b><span class="muted"> of ${inr.format(g.n)}</span>` : `<span class="muted">0 of ${inr.format(g.n)}</span>`) },
+    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (g) => money(g.sold) },
+    { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (g) => (g.lost ? `<span class="lostv">${money(g.lost)}</span>` : '–') },
+    ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
+    { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
+    { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
+    { k: 'trendPct', label: 'Trend', tip: 'The group’s sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (g) => g.trendPct ?? -999 },
+  ];
+  function groupView() {
+    const lens = state.lens, d = groupData();
+    const head = (sub) => `<section class="headline"><h1>Products by ${LENS_ONE[lens].toLowerCase()}</h1><p>${sub}</p><span class="hfind">${viewSelect()}</span></section>`;
+    if (!d) return `${head('Loading…')}<div class="tbl"><div class="empty">Grouping…</div></div>`;
+    const t = d.overlap ? d.store : d.total, rows = d.groups.map((g) => ({ ...g, id: g.key }));
+    const ci = d.catalog || {};
+    const fresh = ci.demo ? 'Demo tags and collections, made up from the product types.'
+      : lens === 'collection' ? (ci.reading ? 'Reading collections from Shopify…' : ci.collectionsAt ? `Collections read from Shopify ${dt(ci.collectionsAt)}, re-read daily.` : 'Collections not read yet.') : '';
+    const note = d.overlap
+      ? `A product in two ${LENS_MANY[lens]} counts in both rows, so the rows don’t add up. Store total, each product once: ${inr.format(t.n)} products · ${money(t.sold)} sold · ${money(t.lost)} lost · ${inr.format(t.needOrder)} to order today (${money(t.orderValue)}).`
+      : 'Every product is in one row, so the rows add up to the store total.';
+    const allBtn = state.allColl ? '<button class="chip on" id="g-all">Showing all-products collections<span aria-hidden="true">×</span></button>'
+      : d.hidden.length ? `<button class="chip" id="g-all" title="Collections holding 80% or more of products are hidden">Show ${d.hidden.length === 1 ? `“${esc(d.hidden[0].label)}”` : `${d.hidden.length} all-products collections`}</button>` : '';
+    const sub = `${inr.format(rows.length)} ${LENS_MANY[lens]}`;   // overlap lenses: no grand total, only the footnote
+    return `${head(d.overlap ? sub : `${sub} · <b>${inr.format(t.needOrder)}</b> to order today · ${money(t.sold)} sold · <span class="lostv">${money(t.lost)} lost</span>`)}
+      ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
+      <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
+        <header><h3><span class="pname">${esc(g.label)}</span></h3><div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
+        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
+      <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
+  }
+  function openGroup(key) {
+    const g = state.groups && state.groups.groups.find((x) => x.key === key); if (!g) return;
+    state.group = { lens: state.lens, key, label: g.label, ids: new Set(g.ids) };
+    state.lens = ''; state.filter.products = 'all'; state.limit.products = 0; render(); window.scrollTo(0, 0);
+  }
+
   function downloadProductsCsv() {
     const cols = PRODUCT_COLS();
     // Same rule as csvCell in src/rows.js: text starting = + - @ tab CR gets a leading ' (no formulas run in Excel/Sheets).
@@ -738,6 +802,8 @@
       try { await api('/api/decide', { method: 'POST', body: JSON.stringify({ id, decision: d || null }) }); toast(d ? 'Decided: hidden until its sales change by more than half' : 'Back on the list'); await reloadReport(); } catch (err) { toast(err.message); t.disabled = false; }
       return;
     }
+    if (t.id === 'g-clear') { state.group = null; state.limit.products = 0; render(); return; }
+    if (t.id === 'g-all') { state.allColl = !state.allColl; render(); return; }
     if (t.id === 'copy-summary') { copy(summaryText()); return; }
     if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
 
@@ -746,6 +812,7 @@
       state.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; render(); return;
     }
     if (t.dataset.product) { openProduct(t.dataset.product); return; }
+    if (t.matches('tr[data-id], .mcard[data-id]') && t.closest('.groups')) { openGroup(t.dataset.id); return; }
     if (t.matches('tr[data-id], .mcard[data-id]')) { lastRow = t; openProduct(t.dataset.id); return; }
     if (t.id === 'drawer-close') { closeDrawer(); return; }
     if (t.dataset.copy) { copy($(`#${t.dataset.copy}`).textContent); return; }
@@ -807,7 +874,7 @@
     if (m) { state.q[m[1]] = e.target.value; state.limit[m[1]] = 0; render._focus = e.target.id; render._caret = e.target.selectionStart; render(); }
   });
   document.addEventListener('change', (e) => {
-    if (e.target.id === 'f-type') { state.filter.type = e.target.value; state.limit.products = 0; render(); return; }
+    if (e.target.id === 'f-view') { state.lens = e.target.value; state.limit.products = 0; state.limit.groups = 0; render(); return; }
     if (e.target.id === 'f-more') { state.filter.products = e.target.value || 'all'; state.limit.products = 0; render(); return; }
     if (e.target.dataset && e.target.dataset.col) {
       const [id, k] = e.target.dataset.col.split('|'); const on = new Set(colsOn[id] || []);
@@ -846,7 +913,7 @@
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeDrawer();
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.mcard[data-id], tr[data-id]')) { e.preventDefault(); lastRow = e.target; openProduct(e.target.dataset.id); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.mcard[data-id], tr[data-id]')) { e.preventDefault(); if (e.target.closest('.groups')) { openGroup(e.target.dataset.id); return; } lastRow = e.target; openProduct(e.target.dataset.id); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('th[data-k]')) { e.preventDefault(); e.target.click(); }
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });

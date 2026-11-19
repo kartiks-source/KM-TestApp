@@ -30,6 +30,8 @@ Google Sheet CSV / upload ───┘
 |---|---|
 | `LOGIC.md` | how every number is worked out and why; read it before changing `src/engine.js` |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
+| `src/groups.js` | Group by (SW-022): rolls Products rows up by parent product, category, collection or tag, keyed by IDs (LOGIC.md §9a) |
+| `src/catalog.js` | variant → product ID, type, tags (from the SW-002 store catalog snapshot, no second copy) and collections + members (read-only, 24 h cache, resumable) in `DATA_DIR/catalog.json` (LOGIC.md §9b); demo IDs, tags and collections from `demo.catalog()` |
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
@@ -82,6 +84,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" for ticked Reorder rows (bulk bar; phone cards have the tick too) and in the drawer, with an Ordered tab (SW-012; the per-row button went in critic round 1, S2: one control per row); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Sprint 2 D-helpers (branch `sprint2/D-helpers`): SW-024 Why cell + order-by + still-out ₹/day, SW-025 reorder CSV as a PO (`?filter=&q=`, vendor, unit cost, variant ID), SW-026 Pause / Push chips on Products, SW-032 slow-seller Decide bucket.
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
+- Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
 
 ## Next
 

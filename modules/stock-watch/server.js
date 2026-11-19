@@ -13,6 +13,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const catalog = require('./src/catalog');
+const groups = require('./src/groups');
 const store = require('./src/store');
 const engine = require('./src/engine');
 const rows = require('./src/rows');
@@ -232,6 +234,7 @@ function syncShopify() {
       });
       runs.finish(store.load(), run);
       store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
+      await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
       console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
       return { stock, orders };
     } catch (e) {
@@ -303,18 +306,29 @@ async function api(req, res, url) {
   if (oo) return send(res, oo.code, oo.body);
 
   /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
-  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
+  /* Every report-shaped answer (report, groups, product, CSV) uses the same options, so their numbers agree. */
+  const reportOpts = (extra = {}) => ({ days, catalog: d.catalog, onOrder: onorder.all(), ...extra });
+  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, reportOpts({ days: 30 })).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
-    const r = helpers.enrich(engine.report(d.stock, d.orders, S, { days, catalog: d.catalog, onOrder: onorder.all() }), { decisions: decide.all(), rates: trial ? savedRates() : null });
+    const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
     const S = { ...engine.DEFAULT_SETTINGS, ...settingsFor(url, d.settings) }, now = Date.now();
-    return send(res, 200, { ok: true, ...helpers.enrichDetail(engine.productDetail(id, d.stock, d.orders, S, { days, now, catalog: d.catalog, onOrder: onorder.all() }), S, now) });
+    return send(res, 200, { ok: true, ...helpers.enrichDetail(engine.productDetail(id, d.stock, d.orders, S, reportOpts({ now })), S, now) });
+  }
+  /* Group by (SW-022): ?lens=product|type|collection|tag, same period, trial values, catalog and on-order as /api/report,
+     so group totals equal report totals. No lens: which lenses the catalog can offer. */
+  if (p === '/api/groups' && req.method === 'GET') {
+    const cat = catalog.current(d.source, d.catalog); const lens = url.searchParams.get('lens');
+    if (!lens) return send(res, 200, { ok: true, lenses: groups.lensesFor(cat), catalog: catalog.info(cat) });
+    if (!groups.LENSES.includes(lens)) return fail(res, 400, 'Unknown group');
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts());
+    return send(res, 200, { ok: true, ...groups.build(r.products, cat, lens, { showAll: url.searchParams.get('all') === '1' }), catalog: catalog.info(cat) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
@@ -357,7 +371,7 @@ async function api(req, res, url) {
   if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
-    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() }));
+    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));
     const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
     return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
