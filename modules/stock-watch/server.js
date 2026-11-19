@@ -68,6 +68,15 @@ async function syncSheet() {
   }
 }
 
+/* ---------- demo data (Sammsara's public catalog, invented stock and sales) ---------- */
+function loadDemo() {
+  const g = demo.generate({ now: Date.now() });
+  store.replaceAll(g.stock, g.orders, 'demo');
+  const s = store.load().settings;
+  store.setSettings({ demoVersion: demo.VERSION, ...(['Demo Store', '', null, undefined].includes(s.storeName) || /\(demo\)$/.test(s.storeName) ? { storeName: demo.STORE_NAME } : {}) });
+  return g;
+}
+
 /* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ---------- */
 let shopifyRun = null;
 function shopifyStatus() {
@@ -83,7 +92,8 @@ function syncShopify() {
     const started = Date.now();
     try {
       if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
-      if (store.load().settings.storeName === 'Demo Store') store.setSettings({ storeName: keys.status().store });
+      const nm = store.load().settings.storeName;
+      if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
       const s = await shopify.pullStock(store.load().shopify.lastQty);
       const stock = store.add('stock', s.rows);
       store.setShopify({ lastQty: s.lastQty });
@@ -159,8 +169,7 @@ async function api(req, res, url) {
   }
   if (p === '/api/demo' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, 'Shopify is connected, so demo data is off (it would mix with real data)');
-    const g = demo.generate({ now: Date.now() });
-    store.replaceAll(g.stock, g.orders, 'demo');
+    const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
   if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
@@ -202,9 +211,9 @@ if (require.main === module) {
     process.exit(1);
   }
   const d = store.load();
-  if (!keys.status().source && d.source === 'empty' && !d.stock.length && !d.orders.length) {
-    const g = demo.generate({ now: Date.now() });
-    store.replaceAll(g.stock, g.orders, 'demo');
+  const stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
+  if (!keys.status().source && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
+    loadDemo();
     console.log('Loaded demo data (replace it from Data & settings).');
   }
   setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY).unref();

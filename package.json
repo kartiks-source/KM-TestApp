@@ -1,14 +1,10 @@
 {
-  "name": "catalys-stockout-watch",
-  "version": "0.1.0",
+  "name": "catalys-modules",
   "private": true,
-  "description": "Stock-out Watch: reorder before bestsellers run out, and show the sales lost to stock-outs. No Shopify API keys needed.",
-  "main": "server.js",
-  "engines": { "node": ">=20" },
+  "description": "Catalys modules. Each module lives in modules/<name> with its own AGENTS.md.",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test test/"
-  },
-  "license": "UNLICENSED"
+    "start": "npm --prefix modules/stock-watch start",
+    "dev": "npm --prefix modules/stock-watch run dev",
+    "test": "npm --prefix modules/stock-watch test"
+  }
 }

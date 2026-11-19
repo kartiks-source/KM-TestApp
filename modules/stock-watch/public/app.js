@@ -268,7 +268,7 @@
       <section class="cards">
         ${shopifyPanel()}
         <div class="panel"><h2>Data now</h2>
-          <dl class="kv"><dt>Source</dt><dd>${src.kind === 'demo' ? 'Demo data (made up)' : src.kind === 'live' ? 'Live store data' : 'Nothing yet'}</dd>
+          <dl class="kv"><dt>Source</dt><dd>${src.kind === 'demo' ? 'Demo data: Sammsara’s public product list, with invented stock and sales' : src.kind === 'live' ? 'Live store data' : 'Nothing yet'}</dd>
             <dt>Stock changes</dt><dd>${inr.format(d.stockRows)} ${d.firstStock ? `· ${dt(d.firstStock)} → ${dt(d.lastStock)}` : ''}</dd>
             <dt>Order lines</dt><dd>${inr.format(d.orderRows)} ${d.firstOrder ? `· ${dt(d.firstOrder)} → ${dt(d.lastOrder)}` : ''}</dd>
             <dt>Sheet sync</dt><dd>${src.err ? `<span style="color:#D9623B">${esc(src.err)}</span>` : src.lastSync ? dt(src.lastSync) : 'not set up'}</dd></dl>

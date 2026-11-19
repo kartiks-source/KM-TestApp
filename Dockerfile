@@ -1,9 +1,10 @@
+# Builds the Stock-out Watch web app (modules/stock-watch). Railway uses this file.
 FROM node:22-alpine
 WORKDIR /app
-COPY package.json ./
-COPY server.js ./
-COPY src ./src
-COPY public ./public
+COPY modules/stock-watch/package.json ./
+COPY modules/stock-watch/server.js ./
+COPY modules/stock-watch/src ./src
+COPY modules/stock-watch/public ./public
 ENV NODE_ENV=production PORT=4400 DATA_DIR=/data
 # No VOLUME line: Railway rejects it. Attach a Railway volume at /data instead.
 RUN mkdir -p /data && chown node:node /data
