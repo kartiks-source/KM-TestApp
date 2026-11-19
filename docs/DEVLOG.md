@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 2 · B-roles
+stock-watch, branch `sprint2/B-roles` (base 995369f; not merged, not deployed). Commits: 4ef2150 SW-027, 261619e SW-020, 7f88c26 SW-028.
+- SW-027: one line under the Overview headline, "Yesterday: ₹X sold · ₹Y lost · N ran out · M back" (yesterday's store-time day, same numbers as its chart bar), and "This month" in the period picker (from the 1st, store time; "Month" on phones). New `src/period.js`; engine takes `opts.from`. LOGIC.md §5a, `test/period.test.js`.
+- SW-020: role home views that only remove UI (ADR-0006): 7 RACI roles in `public/roles.js`, each lands on its page/tab and hides menu items, tiles, lists, chart, plan bar or columns. Picked from the store menu (desktop), Data → Show me (phone) or `/?role=ceo`; remembered per browser; no role = today's view. Data is never hidden (switch back). LOGIC.md §13, `test/roles.test.js`, `test/smoke/roles-smoke.js` (every role shows fewer pieces than the default on its home page at 1280/1440/1920/390; no sideways scroll).
+- SW-028: morning digest per role (≤ 6 lines + link): `src/digest.js` (text), `src/digest-service.js` (`GET /api/digest?role=`, `/api/digest.txt`, settings, send now, schedule at a store-time hour after a fresh pull, weekly roles Mondays, every send logged). Overview "Copy summary" became a Share menu (copy summary / copy digest / WhatsApp `wa.me` link); Data → Morning digest (webhook URL, hour, roles, pause, last sends). Webhook URL never shown back (host only); `DIGEST_WEBHOOK_URL` overrides. No email provider, no deps. LOGIC.md §14, `test/digest.test.js`.
+- app.js touched in small hooks only (showCol, start, Show me field, Share menu, digest panel, period wording); new code in new files.
+- Open: per-role webhook URLs (one URL, `role` in the body today); warehouse home → Ordered list after SW-012, marketing home → Pause/Push chips after SW-026; "This month" makes SW-031 visible (order value moves with the period because ABC does); first-open role prompt left out on purpose (it would grow the default view), roles are set by menu or link; five critics not run on this branch yet; shared dev log page row not added.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).
