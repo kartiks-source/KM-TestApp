@@ -17,6 +17,7 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const backup = require('./src/backup');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -170,6 +171,7 @@ async function api(req, res, url) {
   }
 
   if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
+  if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
@@ -264,6 +266,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  backup.start();   // first: applies a pending restore before the store loads, then daily + before-replace backups
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
