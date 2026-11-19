@@ -2,7 +2,8 @@
 
 Stock-out Watch shows which bestsellers to reorder before they run out, and what every stock-out cost in sales. Brands that spend heavily on ads can then see whether a bad day came from the ads or from an empty shelf.
 
-- **No Shopify API key, no app on the store.** Data arrives from the store's own Shopify Flow (into a Google Sheet or straight to this app), or as a CSV upload.
+- **Shopify, read-only.** With a store key (from Azure Key Vault, or a Railway variable as a stop-gap) it reads stock every 15 minutes and new orders straight from Shopify. It can't change the store: every call is checked and anything but a read is refused.
+- **Or no key at all.** Data can also come from the store's own Shopify Flow (into a Google Sheet or straight to this app), or as a CSV upload.
 - **Plain Node.js, zero dependencies.** One process, data kept in a JSON file.
 - **Demo data on first run**, so it can be shown right away.
 
@@ -45,9 +46,27 @@ Requires Node 20 or newer.
 
 All of these settings can be changed under Data & settings.
 
-## Getting real data in (no API keys)
+## Getting real data in
 
 It needs two streams: **every stock change** and **every order line**.
+
+### Shopify, read-only (recommended)
+The app pulls straight from Shopify into its own storage. It never connects to any other team's database.
+
+- **Read permissions needed:** `read_products`, `read_inventory`, `read_orders`. Nothing else.
+- **Read-only, enforced in code:** every request goes through one guard (`src/shopify.js`) that refuses anything except a GraphQL query, so even a token with write access can't change the store.
+- **What it reads:** every 15 minutes, each variant's total stock (a stock change is stored only when the number moved) and the orders created since the last read. The first read loads the last 60 days of orders.
+- **Gentle on the store:** it pauses whenever less than half of Shopify's request budget is left, so other apps on the store aren't slowed down.
+- **Keys:** kept in memory for 30 minutes, never written to disk, logs or the page. If Shopify rejects a token, it's fetched again at once, so a rotated key is picked up without a restart.
+
+Where the key comes from (Railway variables, nothing typed into the page):
+
+| Source | Variables |
+|---|---|
+| **Azure Key Vault** (preferred) | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads the secret `shopify-<SHOPIFY_STORE>`. Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
+| **Railway variables** (stop-gap) | `SHOPIFY_STORE` + `SHOPIFY_ACCESS_TOKEN` (or `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`). Move to Key Vault and rotate the key once the vault is ready. |
+
+`SHOPIFY_STORE` is the part before `.myshopify.com`. Once either source is set, the app won't start without `ADMIN_PASSWORD`, and demo data is turned off.
 
 ### A. Shopify Flow → Google Sheet → this app
 1. In the store's Shopify Flow, add two workflows that use **Add row to spreadsheet**:
@@ -87,22 +106,27 @@ Notes on these formats:
 - **The same row sent twice** is stored once.
 - **Stock** is the variant's total across all locations.
 
-## Deploy
+## Deploy (Railway)
 
-Any Node host works. The repo has a `Dockerfile`; mount a volume at `/data`.
+Railway builds the `Dockerfile` at the repo root. Attach a volume at `/data` and set `RAILWAY_RUN_UID=0` so the app can write to it. Run **one** replica only, so the 15-minute pulls never run twice.
 
 | Variable | Meaning |
 |---|---|
-| `PORT` | default 4400 |
-| `ADMIN_PASSWORD` | set this in production |
+| `ADMIN_PASSWORD` | required in production (any user name) |
+| `RAILWAY_RUN_UID` | `0`, so the app can write to the Railway volume |
+| `PORT` | set by Railway (default 4400 locally) |
 | `DATA_DIR` | where `store.json` lives (default `./data`; `/data` in Docker) |
+| Shopify key variables | see "Shopify, read-only" above |
+| `SHOPIFY_API_VERSION` | optional, default `2026-07` |
 
 Health check: `GET /health`.
 
 ## Layout
 
 ```
-server.js          HTTP server, API, Flow ingest, sheet sync
+server.js          HTTP server, API, Flow ingest, sheet sync, Shopify pull schedule
+src/keys.js        where the Shopify key comes from (Key Vault or variables)
+src/shopify.js     read-only guard + stock and order pulls
 src/engine.js      all the maths (pure, tested)
 src/rows.js        CSV / sheet / webhook → rows
 src/store.js       JSON-file storage, de-duplication, 120-day retention
@@ -115,4 +139,5 @@ test/              node --test
 
 - **Storage:** the JSON-file store suits one store with a few months of data. For more stores, move `src/store.js` to Postgres; the rest is unchanged.
 - **History:** it starts when data starts flowing. Shopify keeps no stock history, so lost-sales numbers build up from day one.
+- **Stock timing:** read every 15 minutes, so a stock-out is timed to within 15 minutes, and one that starts and ends between two reads is missed. For exact timing, also send stock changes through Shopify Flow (option B above).
 - **Stores:** one store per deployment. Multi-store would add a store id to every row and the URL.

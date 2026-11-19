@@ -16,9 +16,11 @@ const KEEP_DAYS = 120;
 let db = null;
 let saveTimer = null;
 
+const blankShopify = () => ({ lastQty: {}, ordersCursor: null, lastSync: null, lastError: null, lastTry: null });
+
 function blank() {
   return { settings: { ...DEFAULT_SETTINGS, ingestKey: crypto.randomBytes(16).toString('hex'), sheetStockCsv: '', sheetOrderCsv: '' },
-    stock: [], orders: [], source: 'empty', lastSync: null, lastSyncError: null };
+    stock: [], orders: [], source: 'empty', lastSync: null, lastSyncError: null, shopify: blankShopify() };
 }
 
 function load() {
@@ -26,6 +28,7 @@ function load() {
   try { db = JSON.parse(fs.readFileSync(FILE, 'utf8')); }
   catch { db = blank(); }
   db.settings = { ...blank().settings, ...db.settings };
+  db.shopify = { ...blankShopify(), ...db.shopify };
   if (!db.settings.ingestKey) db.settings.ingestKey = crypto.randomBytes(16).toString('hex');
   db._stockKeys = new Set(db.stock.map(stockKey));
   db._orderKeys = new Set(db.orders.map(orderKey));
@@ -67,6 +70,7 @@ function replaceAll(stock, orders, source) {
   const d = load();
   d.stock = stock; d.orders = orders; d.source = source;
   d._stockKeys = new Set(stock.map(stockKey)); d._orderKeys = new Set(orders.map(orderKey));
+  d.shopify = blankShopify();   // re-read everything from Shopify on the next pull
   save(true);
 }
 
@@ -79,4 +83,6 @@ function setSettings(patch) {
 
 function setSync(info) { Object.assign(load(), info); save(); }
 
-module.exports = { load, add, replaceAll, setSettings, setSync, save };
+function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
+
+module.exports = { load, add, replaceAll, setSettings, setSync, setShopify, save };

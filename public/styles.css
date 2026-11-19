@@ -50,8 +50,10 @@ button, input, select { font: inherit; color: inherit; }
 .badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; padding: 2px 10px; border-radius: 999px; }
 .badge.demo { background: var(--amber-soft); color: var(--amber); }
 .badge.live { background: var(--sold-soft); color: var(--sold); }
-.badge.empty { background: var(--lost-soft); color: var(--lost); }
+.badge.empty { background: var(--lost-soft); color: var(--lost); padding: 2px 10px; text-align: left; }
 .badge.err { background: var(--lost-soft); color: var(--lost); }
+.source > .badge { flex: 0 0 auto; white-space: nowrap; }
+.source > .badge.err { flex: 0 1 auto; white-space: normal; }
 
 /* headline */
 .headline { display: flex; flex-direction: column; gap: 6px; }

@@ -3,8 +3,9 @@
  * Catalys · Stock-out Watch — server. Plain Node, no dependencies.
  *
  *   npm start            → http://localhost:4400
- *   ADMIN_PASSWORD=...   → the page and /api ask for it (user "catalys")
+ *   ADMIN_PASSWORD=...   → the page and /api ask for it (any user name). Required once Shopify is connected.
  *   PORT, DATA_DIR       → optional
+ *   Shopify (read-only) → see src/keys.js: Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_ACCESS_TOKEN
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -14,6 +15,8 @@ const store = require('./src/store');
 const engine = require('./src/engine');
 const rows = require('./src/rows');
 const demo = require('./src/demo');
+const keys = require('./src/keys');
+const shopify = require('./src/shopify');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -65,6 +68,40 @@ async function syncSheet() {
   }
 }
 
+/* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ---------- */
+let shopifyRun = null;
+function shopifyStatus() {
+  const k = keys.status(); const st = store.load().shopify;
+  return { source: k.source, store: k.store, secretName: k.secretName || null, ready: k.ready, missing: k.missing,
+    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun,
+    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
+}
+function syncShopify() {
+  if (!keys.status().source) return Promise.resolve({ skipped: true });
+  if (shopifyRun) return shopifyRun;
+  shopifyRun = (async () => {
+    const started = Date.now();
+    try {
+      if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
+      if (store.load().settings.storeName === 'Demo Store') store.setSettings({ storeName: keys.status().store });
+      const s = await shopify.pullStock(store.load().shopify.lastQty);
+      const stock = store.add('stock', s.rows);
+      store.setShopify({ lastQty: s.lastQty });
+      let orders = 0;
+      await shopify.pullOrders(store.load().shopify.ordersCursor, {
+        onPage: (rows, cursor) => { orders += store.add('orders', rows); store.setShopify({ ordersCursor: cursor }); },
+      });
+      store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
+      console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
+      return { stock, orders };
+    } catch (e) {
+      store.setShopify({ lastTry: started, lastError: e.message });
+      throw e;
+    } finally { shopifyRun = null; }
+  })();
+  return shopifyRun;
+}
+
 /* ---------- API ---------- */
 async function api(req, res, url) {
   const p = url.pathname;
@@ -87,13 +124,20 @@ async function api(req, res, url) {
 
   if (p === '/api/report' && req.method === 'GET') {
     const r = engine.report(d.stock, d.orders, d.settings, { days });
-    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError });
+    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
     return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, d.settings, { days }) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/shopify/sync' && req.method === 'POST') {
+    if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
+    const run = syncShopify();
+    const done = await Promise.race([run.then((x) => x, (e) => ({ error: e.message })), new Promise((r) => setTimeout(() => r(null), 25000))]);
+    if (!done) return send(res, 202, { ok: true, running: true });
+    return done.error ? fail(res, 502, done.error) : send(res, 200, { ok: true, ...done });
+  }
   if (p === '/api/settings' && req.method === 'PUT') {
     const b = JSON.parse(await readBody(req) || '{}'); const patch = {};
     const n = (k, lo, hi) => { if (b[k] != null && b[k] !== '' && Number.isFinite(+b[k])) patch[k] = Math.min(hi, Math.max(lo, +b[k])); };
@@ -114,6 +158,7 @@ async function api(req, res, url) {
     try { return send(res, 200, { ok: true, ...(await syncSheet()) }); } catch (e) { return fail(res, 502, e.message); }
   }
   if (p === '/api/demo' && req.method === 'POST') {
+    if (keys.status().source) return fail(res, 409, 'Shopify is connected, so demo data is off (it would mix with real data)');
     const g = demo.generate({ now: Date.now() });
     store.replaceAll(g.stock, g.orders, 'demo');
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
@@ -152,14 +197,23 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
+  if (keys.status().source && !PASSWORD) {
+    console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
+    process.exit(1);
+  }
   const d = store.load();
-  if (d.source === 'empty' && !d.stock.length && !d.orders.length) {
+  if (!keys.status().source && d.source === 'empty' && !d.stock.length && !d.orders.length) {
     const g = demo.generate({ now: Date.now() });
     store.replaceAll(g.stock, g.orders, 'demo');
     console.log('Loaded demo data (replace it from Data & settings).');
   }
   setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY).unref();
+  if (keys.status().source) {
+    const pull = () => syncShopify().catch((e) => console.warn('shopify pull failed:', e.message));
+    setTimeout(pull, 5000).unref();
+    setInterval(pull, SYNC_EVERY).unref();
+  }
   server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${PORT}${PASSWORD ? ' (password on)' : ''}`));
 }
 
-module.exports = { server };
+module.exports = { server, syncShopify };

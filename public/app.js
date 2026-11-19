@@ -42,7 +42,7 @@
 
   async function load() {
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}`), api('/api/settings')]);
-    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError };
+    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     header();
     render();
   }
@@ -56,8 +56,35 @@
     const badge = src.kind === 'demo' ? '<span class="badge demo">Demo data</span>' : src.kind === 'live' ? '<span class="badge live">● Live data</span>' : '<span class="badge empty">No data yet</span>';
     $('#source').innerHTML = `${badge}<span>${inr.format(d.stockRows)} stock changes · ${inr.format(d.orderRows)} order lines</span>`
       + (d.lastStock ? `<span>last stock change ${dt(d.lastStock)}</span>` : '')
-      + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>sheet synced ${dt(src.lastSync)}</span>` : '');
+      + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>sheet synced ${dt(src.lastSync)}</span>` : '')
+      + shopifyBadge();
     $$('.range button').forEach((b) => b.classList.toggle('on', +b.dataset.days === state.days));
+  }
+
+  function shopifyBadge() {
+    const sh = state.shopify || {};
+    if (!sh.source) return '';
+    if (sh.running) return '<span>Shopify: pulling now…</span>';
+    if (sh.lastError) return `<span class="badge err">Shopify: ${esc(sh.lastError)}</span>`;
+    return sh.lastSync ? `<span>Shopify read ${dt(sh.lastSync)}</span>` : '<span>Shopify: first pull pending</span>';
+  }
+  function shopifyPanel() {
+    const sh = state.shopify || {};
+    const scopes = (sh.scopes || []).map((x) => `<span class="mono">${esc(x)}</span>`).join(', ');
+    if (!sh.source) {
+      return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · not connected</h2>
+        <p class="muted">Connect a store and the app reads stock every 15 minutes and new orders since the last read, straight from Shopify. It only ever reads: every call is checked, and anything that could change the store is refused. Read permissions needed: ${scopes}.</p>
+        <p class="muted">Set these as Railway variables (the key is never typed into this page):</p>
+        <dl class="kv"><dt>Azure Key Vault (preferred)</dt><dd><span class="mono">AZURE_KEY_VAULT_URL, AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, SHOPIFY_STORE</span>. Reads the secret <span class="mono">shopify-&lt;store&gt;</span>.</dd>
+          <dt>Stop-gap</dt><dd><span class="mono">SHOPIFY_STORE, SHOPIFY_ACCESS_TOKEN</span></dd></dl></div>`;
+    }
+    const where = sh.source === 'vault' ? `Azure Key Vault, secret <span class="mono">${esc(sh.secretName)}</span>` : 'Railway variables (stop-gap)';
+    return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · ${esc(sh.store || '')}</h2>
+      <dl class="kv"><dt>Key from</dt><dd>${where}</dd>
+        <dt>Status</dt><dd>${!sh.ready ? `<span style="color:#D9623B">Missing: ${esc(sh.missing.join(', '))}</span>` : sh.running ? 'Pulling now…' : sh.lastError ? `<span style="color:#D9623B">${esc(sh.lastError)}</span>${sh.lastTry ? ` · tried ${dt(sh.lastTry)}` : ''}` : sh.lastSync ? `OK · last read ${dt(sh.lastSync)}` : 'First pull pending'}</dd>
+        <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 15 minutes' : 'Loads the last 60 days on the first pull'}</dd>
+        <dt>Reads only</dt><dd>${scopes} · API ${esc(sh.apiVersion || '')}</dd></dl>
+      <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
   }
 
   /* ---------- generic sortable table ---------- */
@@ -237,14 +264,15 @@
     const s = state.settings, d = state.report.data, src = state.source;
     const base = location.origin;
     return `
-      <section class="headline"><h1>Data &amp; settings</h1><p>Stock-out Watch needs two things from the store: every stock change and every order line. None of the ways below needs a Shopify API key.</p></section>
+      <section class="headline"><h1>Data &amp; settings</h1><p>Stock-out Watch needs two things from the store: every stock change and every order line. It reads them from Shopify (read-only), or from Shopify Flow, a Google Sheet or a CSV, with no Shopify key at all.</p></section>
       <section class="cards">
+        ${shopifyPanel()}
         <div class="panel"><h2>Data now</h2>
           <dl class="kv"><dt>Source</dt><dd>${src.kind === 'demo' ? 'Demo data (made up)' : src.kind === 'live' ? 'Live store data' : 'Nothing yet'}</dd>
             <dt>Stock changes</dt><dd>${inr.format(d.stockRows)} ${d.firstStock ? `· ${dt(d.firstStock)} → ${dt(d.lastStock)}` : ''}</dd>
             <dt>Order lines</dt><dd>${inr.format(d.orderRows)} ${d.firstOrder ? `· ${dt(d.firstOrder)} → ${dt(d.lastOrder)}` : ''}</dd>
             <dt>Sheet sync</dt><dd>${src.err ? `<span style="color:#D9623B">${esc(src.err)}</span>` : src.lastSync ? dt(src.lastSync) : 'not set up'}</dd></dl>
-          <div class="toolbar"><button class="btn ghost" id="load-demo">Reload demo data</button><button class="btn ghost" id="clear-all">Clear all data</button></div>
+          <div class="toolbar">${state.shopify?.source ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
           <div id="clear-confirm"></div>
         </div>
         <div class="panel"><h2>Upload CSV</h2>
@@ -348,6 +376,11 @@
         await api('/api/settings', { method: 'PUT', body: JSON.stringify({ sheetStockCsv: $('#sheet-stock').value, sheetOrderCsv: $('#sheet-order').value }) });
         const j = await api('/api/sync', { method: 'POST' }).catch((err) => ({ error: err.message }));
         toast(j.error ? `Saved. Sync failed: ${j.error}` : `Synced: ${j.stock || 0} stock changes, ${j.orders || 0} order lines new`); await load();
+      }
+      if (t.id === 'shopify-sync') {
+        t.disabled = true; t.textContent = 'Pulling…';
+        const j = await api('/api/shopify/sync', { method: 'POST' });
+        toast(j.running ? 'Still pulling in the background (the first pull can take a while)' : `Read from Shopify: ${j.stock} stock changes, ${j.orders} order lines new`); await load();
       }
       if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update the Flow URLs'); await load(); }
       if (t.id === 'save-settings') {
