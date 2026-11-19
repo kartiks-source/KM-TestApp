@@ -3,6 +3,16 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 2 · D-helpers
+Branch `sprint2/D-helpers` (base 995369f). Module stock-watch. Commits 5b1a1d6 (helpers + tests), 8029c40 (server), ca0ce77 (UI), this one (docs).
+- SW-024: Why cell on Reorder ("Out 3 d · lost ₹18.7k" / "Runs out Fri 22 Nov · order by today · supplier takes 7 d"); replaces Status on Order today / This week tabs; same sentence on phone cards and in the drawer; Stock-outs headline adds "N still out, costing ₹X/day". LOGIC §13a.
+- SW-025: reorder CSV = PO: honours tab + search (`?filter=&q=`), Vendor (Shopify `product.vendor`, now in the stock query), Variant ID, Unit cost, UI status labels, Why, Order by; grouped by vendor; store-date file name; formula guard. LOGIC §13b.
+- SW-026: Products chips "Pause promotion" (out or days left < lead) and "Push these" (overstock by ₹ stuck; replaces the Overstock chip, which moves to More…); count line "42 to reorder · 14 slow", Copy SKUs, CSV; Back in stock uses the SW-012 ETA when present. LOGIC §13c.
+- SW-032: More… → "Slow sellers to decide": slow + out → "Don't reorder? ₹ lost", slow + stock → "Clear ₹ at cost"; Keep/Clear/Drop stored in `DATA_DIR/decisions.json` (`/api/decide`), hidden until the rate moves > 50% (0.1/day floor); Undo list. LOGIC §13d.
+- New files only for logic: `src/helpers.js`, `src/decide.js`, `test/helpers.test.js`, `test/helpers-server.test.js`; engine.js untouched. 42 tests green. UI checked at 1280/1440/1920/390 (no sideways scroll, no console errors).
+- Merge notes (on top of Sprint 1): server.js report/product/CSV lines conflict with Sprint 1's `catalog`/`onOrder` args — keep Sprint 1's args, wrap with `helpers.enrich(...)`; use `rows.csvCell` or `helpers.csvCell` (same rule). helpers already reads `p.onOrder.eta/late` and status `Ordered`/`Inactive`; `vendorMap` reads `catalog[id].vendor` once SW-002's catalog stores vendor. app.js Reorder cols: add Why next to Sprint 1's trend/act columns.
+- Open: per-item commits are by layer (helpers / server / UI) because items share files; phone sort label still says "Biggest loss first" on Pause/Push/Decide lists; five-critic review not run in this workstream.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).

@@ -31,6 +31,8 @@ Google Sheet CSV / upload ───┘
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention |
 | `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
 | `src/shopify.js` | read-only guard, stock and order pulls, paced by Shopify's cost budget |
+| `src/helpers.js` | decision helpers on top of the report (LOGIC.md §13): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`) |
+| `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` |
@@ -60,6 +62,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 ## Status
 
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
+- Sprint 2 D-helpers (branch `sprint2/D-helpers`): SW-024 Why cell + order-by + still-out ₹/day, SW-025 reorder CSV as a PO (`?filter=&q=`, vendor, unit cost, variant ID), SW-026 Pause / Push chips on Products, SW-032 slow-seller Decide bucket.
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next

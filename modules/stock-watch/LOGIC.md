@@ -311,3 +311,63 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 `modules/stock-watch-sheets/StockWatch.gs` uses the same rules, settings and thresholds, with two differences:
 - **It values every hour of a stock-out equally** (no hour-of-day weighting, section 4a). Its ₹ lost can differ from the web app's for stock-outs mostly at night or mostly in the evening; over whole days the two agree.
 - **It uses a fixed 30-day window** and counts a stock-out that started before it in full, where the web app counts only the hours inside the selected period.
+
+---
+
+## 13. Decision helpers (Sprint 2: SW-024, SW-025, SW-026, SW-032)
+
+All in `src/helpers.js` (pure functions, tested in `test/helpers.test.js`). They add fields to the report; none of them changes a number from sections 1–7. Dates are in the store's time zone (setting *Time zone*).
+
+### 13a. Why cell, order-by date, still-out cost per day (SW-024)
+
+One plain sentence per row, the same text in the Reorder table, the phone card and the product drawer (and for the morning digest, SW-028, via `helpers.why()`):
+
+| Row | Sentence | Rule |
+|---|---|---|
+| Out of stock | "Out 3 d · lost ₹18.7k" | time since the open stock-out began (hours under a day, else days, rounded); ₹ lost = this stock-out's ₹ lost inside the selected period (section 4), not the row's whole-period Sales lost |
+| Has stock and sells | "Runs out Fri 22 Nov · order by today · supplier takes 7 d" | **runs out** = now + days left; **order by** = runs out − (lead time + buffer) days, never before today; "supplier takes" = lead time |
+| Marked ordered (SW-012) | "Ordered · lands 25 Nov" | the order's ETA |
+| No sales in the window | "No sales lately" | no rate, so no date |
+| More than a year of stock | "Over a year of stock" | a date that far out means nothing |
+
+**Why order by = runs out − (lead + buffer):** that is the day the status turns *Order now* (section 6), so the date and the status always agree: *Order now*/*Critical* rows say "order by today", *Order this week* rows give a date within 7 days.
+
+**Status column:** on the Reorder tabs *Order today* and *This week* every row has the same status, so the column is replaced by the Why cell. *All* keeps both.
+
+**Still-out cost per day** (Stock-outs headline: "17 still out, costing ₹16,599/day") = Σ over products at 0 stock of sales per day × average price paid. It is the sales rate each empty shelf is missing right now; tomorrow's ₹ lost grows by about this much if nothing is refilled.
+
+**When it can be wrong:** dates assume the rate holds (section 3); one lead time for the store (section 6); a product out for the whole demand window has rate 0 (section 3) and adds nothing to the per-day cost.
+
+### 13b. Reorder CSV as a purchase order (SW-025)
+
+`GET /api/export/reorder.csv?filter=today|week|ordered|all&q=…` gives the same rows the Reorder tab shows (tab + search on name and SKU), grouped by vendor A–Z (unknown vendor last), otherwise in page order. Columns: Vendor, Product, SKU, Variant ID, Order qty, Unit cost, Order value, Status (the page's labels: Order today / This week / Ordered), Why, Order by (date), Stock now, Sells per day, Days left, Sales lost (₹). The file name date is the store's date.
+
+- **Vendor** = Shopify `product.vendor`, read with the stock pull (newest stock row that has one; the catalog's when there is one). Blank for CSV, Sheet, Flow and demo data. Like type and cost, it updates when the variant's stock next changes (until the catalog snapshot, SW-002, is in).
+- **Unit cost** is blank when unknown; Order value then uses the average price paid (section 6), so check those lines.
+- Text cells starting with `= + - @`, tab or CR get a leading `'` so a spreadsheet never runs them.
+
+### 13c. Pause / Push lists for marketing (SW-026)
+
+Two chips on Products, each with a count line, **Copy SKUs** (one per line; variant ID when there's no SKU) and **CSV**:
+
+| List | Rule | Order | Count line |
+|---|---|---|---|
+| **Pause promotion** | stock ≤ 0, or days left < lead time (it can't be refilled before it runs out) | out now first, then fewest days left, then most ₹ a day | "42 to reorder · 14 slow": on the list with an order quantity / slow sellers |
+| **Push these** | overstocked (section 7c) | most ₹ stuck first | "₹2.60 L stuck" |
+
+Archived/untracked and no-stock-data rows are on neither. **Back in stock** on the Pause list = the marked order's ETA (SW-012), "Late · was due …" past it, else "Not ordered · earliest <today + lead time>". Push replaces the old *Overstock* chip (same products); *Overstock* moves to More….
+
+**Why days left < lead time (not ≤ lead + buffer):** promotion spend should stop only when the shelf will empty before any new stock can land; the buffer is for ordering, not for ads.
+
+### 13d. Slow-seller "Decide" bucket (SW-032)
+
+Products → More… → *Slow sellers to decide*: every **Slow seller** (section 7) with stock data, biggest ₹ first.
+
+| Case | Shows | ₹ |
+|---|---|---|
+| slow + out of stock | "Don't reorder? ₹X lost" | ₹ lost in the period |
+| slow + has stock | "Clear ₹X at cost" | stock × unit cost (price when no cost) |
+
+One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop) in `DATA_DIR/decisions.json` with the product's sales per day at that moment (`base`, taken from the server's report, not the page). The item is hidden until **|rate now − base| > 50% × max(base, 0.1/day)**; then it comes back showing the earlier decision. The 0.1/day floor stops one stray sale on a product that sold nothing from bringing it back (it needs about 2 sales in 4 weeks). Decided items are listed under the table with **Undo**. Decisions don't change any number or status; Clear all data wipes them.
+
+**When it can be wrong:** the base is the rate on the saved *Sales history to use* window; changing that window moves rates and can bring items back.
