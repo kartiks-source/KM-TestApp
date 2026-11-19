@@ -120,8 +120,13 @@ Railway builds the `Dockerfile` at the repo root, which copies this folder. Atta
 | `DATA_DIR` | where `store.json` lives (default `./data`; `/data` in Docker) |
 | Shopify key variables | see "Shopify, read-only" above |
 | `SHOPIFY_API_VERSION` | optional, default `2026-07` |
+| `DIGEST_WEBHOOK_URL` | optional: where the morning digest is POSTed (env only; the page never sees or saves it) |
+| `DIGEST_WEBHOOK_URL_<ROLE>` | optional: one role's own recipient, e.g. `DIGEST_WEBHOOK_URL_CEO` (else `DIGEST_WEBHOOK_URL`) |
+| `PUBLIC_URL` | optional: the app's address for links in scheduled digests (Railway's `RAILWAY_PUBLIC_DOMAIN` is used if set) |
 
 Health check: `GET /health`.
+
+Morning digest: `GET /api/digest?role=ops` (JSON) or `/api/digest.txt?role=ops` (text), signed in. Roles: ceo, founder, ops, buyer, marketing, finance, warehouse (none = everyone).
 
 ## Layout
 
@@ -133,7 +138,10 @@ src/engine.js      all the maths (pure, tested)
 src/rows.js        CSV / sheet / webhook → rows
 src/store.js       JSON-file storage, de-duplication, 120-day retention
 src/demo.js        made-up demo store
-public/            the web page (no build step)
+src/period.js      "This month" + the Yesterday strip
+src/digest.js      morning digest text per role (pure)
+src/digest-service.js  digest routes, webhook, daily schedule, send log
+public/            the web page (no build step); roles.js = role views, digest-ui.js = Share menu + digest settings
 test/              node --test
 ```
 

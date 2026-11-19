@@ -20,7 +20,7 @@ Role views (SW-020) only remove things from today's default screen.
 
 | Role | Lands on | First number | Also sees | Cadence | Pushed to them (SW-028) |
 |---|---|---|---|---|---|
-| CEO | Overview, 3 tiles | Sales lost to stock-outs (₹, % of demand) vs last period and target | Cash in overstock; trend line | Weekly (Mon) | Monday digest, 5 lines |
+| CEO | Overview, 2 tiles + daily chart | Sales lost to stock-outs (₹, % of demand) vs last period and target | Cash in overstock; trend line | Weekly (Mon) | Monday digest, 5 lines |
 | Founder / COO | Overview | Order today ₹ and still-out cost per day | Best sellers at risk, overstock ₹, targets behind, late POs | Daily | 9:00 digest |
 | Ops / inventory exec | Reorder → Order today | Number of lines to order today + ₹ | Why cell, order-by date, Mark ordered, trend spark | Daily, several times | 9:00 digest with top lines |
 | Buyer | Reorder grouped by supplier (SW-040; until then Order today) | PO total per supplier | Qty, unit cost, ETA, Reorder CSV | Per PO cycle (2–3×/week) | – |

@@ -516,3 +516,29 @@ table.fixed td:first-child { max-width: none; }
   .wrap > .toolbar .mktbar { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
   .btn.xs { min-height: 44px; padding: 6px 12px; }
 }
+
+/* Sprint 2 · B-roles: yesterday strip + "This month" (SW-027) */
+.headline .yday { flex-basis: 100%; margin: 2px 0 0; color: var(--soft); font-size: 13px; }
+.headline .yday b { color: var(--ink-2); font-weight: 600; }
+@media (max-width: 760px) { .range .wide-only { display: none; } .range button[data-days="month"] { text-transform: capitalize; } .range button { min-height: 44px; } }   /* SW-023: 44 px touch targets */
+
+/* Sprint 2 · B-roles: role picker in the store menu (SW-020) */
+.rolepick > summary.store-pill { cursor: pointer; }
+.rolepick .role-name { color: var(--brand); font-weight: 600; font-size: 12px; margin-left: -4px; }
+.rolepick .role-name:not(:empty)::before { content: "· "; color: var(--faint); }
+.rolepick .menu { left: 0; right: auto; min-width: 300px; }
+.rolepick .menu .rp-h { margin: 2px 8px 4px; font-size: 12px; color: var(--faint); }
+.rolepick .menu .linkbtn { display: grid; gap: 0; text-align: left; width: 100%; }
+.rolepick .menu .linkbtn small { color: var(--soft); font-size: 12px; }
+.rolepick .menu .linkbtn.on { background: var(--brand-wash); }
+.rolepick .menu .linkbtn.on b { color: var(--brand); }
+
+/* Sprint 2 · B-roles: Share menu + Morning digest settings (SW-028) */
+.share .menu { min-width: 230px; }
+.share .menu .linkbtn { width: 100%; }
+.dg-roles { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0; }
+.dg-roles label { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; font-size: 13px; }
+.dg-h { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: var(--soft); }
+.dg-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.okv { color: var(--ok); font-weight: 600; }
+@media (max-width: 760px) { .share .menu { right: 0; left: auto; } .share > summary.btn, .share .menu .linkbtn { min-height: 44px; } .dg-roles label { min-height: 44px; } }

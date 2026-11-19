@@ -44,6 +44,11 @@ Google Sheet CSV / upload ───┘
 | `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
+| `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
+| `src/digest.js` | morning digest text per role, pure (SW-028) |
+| `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
+| `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
+| `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
 | `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store`, `backup`, `docs`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
@@ -57,6 +62,12 @@ Google Sheet CSV / upload ───┘
 - Fallback if tokens can't be shared: our own read-only Shopify app (not built).
 - Scopes needed: `read_products`, `read_inventory`, `read_orders`.
 - Once a key source is set, the app refuses to start without `ADMIN_PASSWORD`, and demo data is turned off.
+
+## Role views and digest (Sprint 2 · B-roles)
+
+- Role views only remove UI (ADR-0006); config in `public/roles.js`, rules in LOGIC.md §16. Browser check: `node test/smoke/roles-smoke.js` (needs Playwright; uses its browser, else system Chrome, else `CHROMIUM_PATH`). Not in `npm test` (no browser in CI, no deps).
+- Digest: LOGIC.md §17. Optional variables `DIGEST_WEBHOOK_URL`, `DIGEST_WEBHOOK_URL_<ROLE>` (per-role recipient), `PUBLIC_URL`. Env only, never saved from the page. Without a webhook nothing is sent; Share → Copy / WhatsApp still works.
+- Next: warehouse home on the Ordered list once SW-012 lands; marketing home on Pause/Push chips once SW-026 lands.
 
 ## Railway variables now
 

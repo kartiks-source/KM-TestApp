@@ -28,6 +28,8 @@ const audit = require('./src/audit');
 const runs = require('./src/runs');
 const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Push, Decide (LOGIC.md §15)
 const decide = require('./src/decide');
+const period = require('./src/period');
+const digests = require('./src/digest-service');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -266,6 +268,20 @@ function statusBody() {
     variants: d ? Object.keys(d.catalog || {}).length : null, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) } };
 }
 
+/* ---------- morning digest (SW-028): the report as of `now`, with yesterday; a fresh pull before sending ---------- */
+const digestCtx = {
+  report({ days, now }) {
+    const d = store.load(), rowsAt = period.asOf(d.stock, d.orders, now);
+    /* today's digest: the same options as /api/report (catalog snapshot, Mark ordered); a past "7 days before" comparison
+       uses the rows as they stood then (the snapshot is today's stock, so it would be wrong for a past date) */
+    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all() } : {};
+    const r = helpers.enrich(engine.report(rowsAt.stock, rowsAt.orders, d.settings, { days, now, ...live }));   // still-out ₹/day, Pause list: the page's numbers (§15)
+    r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
+    return r;
+  },
+  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(); },
+};
+
 /* ---------- API ---------- */
 const SETTINGS_LIMIT = 64 * 1024;   // settings bodies are tiny; anything bigger is refused (413)
 const MAX_INGEST_ROWS = 500;   // Flow sends one change per request; a leaked key can't flood the store
@@ -273,7 +289,7 @@ let keyInUrlWarned = 0;
 async function api(req, res, url) {
   const p = url.pathname;
   const d = store.load();
-  const days = Number(url.searchParams.get('days')) || 30;
+  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), d.settings.tzOffsetMin);   // { days } or { from } ("This month")
 
   /* Shopify Flow → "Send HTTP request" (no login; protected by the X-Ingest-Key header) */
   const ingest = p.match(/^\/ingest\/(stock|order)$/);
@@ -304,16 +320,19 @@ async function api(req, res, url) {
   if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
   const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
   if (oo) return send(res, oo.code, oo.body);
+  const dg = await digests.handle(req, url, readBody, digestCtx);   // /api/digest… (SW-028); writes already refused above for view-only
+  if (dg) return send(res, dg.code, dg.body, dg.type);
 
   /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
   /* Every report-shaped answer (report, groups, product, CSV) uses the same options, so their numbers agree. */
-  const reportOpts = (extra = {}) => ({ days, catalog: d.catalog, onOrder: onorder.all(), ...extra });
-  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, reportOpts({ days: 30 })).products.map((x) => [String(x.id), x.perDay]));
+  const reportOpts = (extra = {}) => ({ ...span, catalog: d.catalog, onOrder: onorder.all(), ...extra });   // span: { days } or { from } (SW-027)
+  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
+    r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts());   // SW-027
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
@@ -503,6 +522,7 @@ if (require.main === module) {
     timers.push(setTimeout(pull, 5000));
     timers.push(setInterval(pull, SYNC_EVERY));
   }
+  timers.push(digests.schedule(digestCtx));   // SW-028: every minute; sends at the set hour
   timers.forEach((t) => t.unref());
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
   server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''}`));

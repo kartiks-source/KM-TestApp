@@ -187,6 +187,17 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 | Out of stock right now (list) | every open stock-out, slow sellers included, so it can be higher than the count above |
 | Product-days with an empty shelf | total stock-out hours across all products ÷ 24 |
 
+### 5a. "This month" and the Yesterday strip (SW-027, `src/period.js`)
+
+- **This month** (period picker): from the 1st of the current month at 00:00 store time until now. On the 1st it covers only today so far. Every number that follows the period (sold, lost, % of demand, daily chart, Products and Stock-outs pages, CSV) uses this window. The reorder plan should not depend on the period, but today it moves a little with it (order value today 33.18L at 30 days, 33.71L for This month, 33.27L at 7 days on the demo store), because best-seller rank (ABC) is ranked on the selected period: SW-031 fixes that. Shown as "this month" instead of "in N days".
+- **Yesterday strip** (one line under the Overview headline): `Yesterday: ₹X sold · ₹Y lost · N ran out · M back`.
+  - *Sold* and *lost* are yesterday's store-time calendar day, exactly the numbers on that day's bar in the daily chart (same rules as section 5, including the hour-of-day weighting for lost).
+  - *Ran out* = products where a stock-out started yesterday; *back* = products where a stock-out ended yesterday (stock came back above 0). A product that ran out twice counts once.
+  - When the period doesn't reach back to yesterday (This month on the 1st), the strip is worked out from a separate 2-day report with the same settings.
+- Why: the owner checks "how did yesterday go" every morning; a fixed rolling 30 days hides it, and month-to-date matches how targets and budgets are set (DAWBU sheet).
+- Considered: a "Yesterday" button in the picker (a one-day period). Rejected: one line answers the question without changing every other number on the screen.
+- When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
+
 ---
 
 ## 6. Reorder status and quantity
@@ -544,3 +555,50 @@ One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop
 **Saved settings only:** the base and the hide check both use the sales rate on the **saved** settings. Trial values (the what-if fields, e.g. a different *Sales history to use* window) change the report but never hide or bring back a decided item.
 
 **When it can be wrong:** saving a different *Sales history to use* window moves rates and can bring items back.
+
+## 16. Role home views (SW-020, `public/roles.js`)
+
+No number changes with a role: a role view only **removes** parts of today's default screen (ADR-0006) and picks the page you land on. No role chosen = today's view.
+
+| Role | Lands on | Removed (everything else stays) |
+|---|---|---|
+| CEO | Overview (2 tiles + daily chart) | Reorder in the menu; "Order ₹X today" in the headline (it leads with sales lost); tiles "to order today" and "best sellers at risk"; both lists; Mark ordered (ticks, bulk bar, drawer form) and the Ordered tab |
+| Founder / COO | Overview | daily chart |
+| Ops / inventory | Reorder → Order today | Stock-outs in the menu; the "each order covers…" line; daily chart |
+| Buyer | Reorder → Order today | Overview and Stock-outs in the menu; plan settings; explainer; Sales lost column; Pause / Push chips |
+| Marketing | Products → Pause promotion (§15c: out, or runs out before a reorder could land: don't promote) | Reorder and Stock-outs in the menu; "Order ₹X today" in the Overview headline; "to order today" tile and list; Order column; Mark ordered and the Ordered tab |
+| Finance | Overview | Stock-outs in the menu; tiles "sales lost" and "best sellers at risk"; Biggest losses list; daily chart; Mark ordered; Pause chip |
+| Warehouse | Reorder → Ordered (SW-012: what is due to land) | Overview, Stock-outs, Products in the menu; period picker; plan settings; explainer; Order cost and Sales lost columns; Mark ordered |
+
+- Chosen from the store menu (top left), **Show me** on Data & settings (phones), or a link `/?role=ceo` (`?role=all` = everything). Remembered per browser.
+- **Landing:** a role opens on its home page and tab when the address has no `#page` or has `#<its home>` (digest links: `/?role=marketing#products` → Products → Pause promotion). Any other `#page` opens as asked. `landing()` in `public/roles.js`, tested.
+- **Mark ordered** (SW-012) follows RACI "Place the PO": founder (A), buyer (R) and ops (C, "also sees Mark ordered") keep the ticks, bulk bar and drawer form; the others lose them (the drawer still shows what is on order). The Ordered tab shows whenever it is the open tab, even with nothing ordered, so the warehouse never lands on a missing tab. Pause / Push chips go for roles that are "–" on ads (buyer, finance: Pause; warehouse has no Products page).
+- RACI "the A's number first": a role that drops the "to order today" tile also drops "Order ₹X today" from the Overview headline, so it starts with "Stock-outs cost ₹Y".
+- Data & settings is never removed: it holds the switch back. Removing a page from the menu doesn't lock it (view-only access is SW-029).
+- Why: each role has one decision (docs/RACI.md); the rest is noise for that person. Considered: per-role pages. Rejected: they'd add screens for everyone and drift from the default.
+- Checked: `test/roles.test.js` (every role removes something on its home page, never Data); `test/smoke/roles-smoke.js` counts visible pieces per role against the default at 1280/1440/1920/390.
+
+## 17. Morning digest (SW-028, `src/digest.js`, `src/digest-service.js`)
+
+A few plain-language lines per role, with a link that opens that role's view (`/?role=ops#reorder`). At most 6 lines including the title; the link comes after. Same rules and numbers as the page: order today, overstock and best sellers come from the default 30-day report; "yesterday" is §5a.
+
+| Role | When | Lines |
+|---|---|---|
+| CEO | Mondays | sales lost last 7 days (₹, % of demand) **vs the 7 days before**; profit lost; cash in overstock; best sellers at risk |
+| Founder / COO (and "Everyone") | daily | order today ₹ and products; still out + cost per day; yesterday; overstock |
+| Ops / inventory | daily | order today lines + ₹; top 3 lines (qty, days left); yesterday ran out / back |
+| Marketing | daily | pause promotion count + top 3; push (overstock ₹) + top 3 |
+| Finance | Mondays | cash to order today + more due this week; overstock; sales lost last 7 days |
+| Buyer, Warehouse | not pushed (RACI "–") | order today; top 3 by order cost (buyer) or pieces (warehouse). Available from Share and `GET /api/digest?role=` |
+
+- **Still out, cost per day** = the Stock-outs headline number (§15a): Σ over products at 0 stock: in-stock rate (§3) × average price paid. What a day of the current stock-outs costs in sales, at today's rates.
+- **Pause promotion** (marketing) = the Products → Pause promotion list (§15c, same code: `helpers.mktList` / `mktSort`): out of stock, or fewer days left than the lead time (a reorder placed today can't land in time); out now first, then fewest days left. Integration change: the branch had its own rule (sellers only, biggest ₹ sold first), so the digest count could differ from the chip. **Push these** = overstocked products (§7c), most ₹ stuck first.
+- **Vs the 7 days before** (CEO): the same 7-day report worked out from the rows as they stood 7 days ago (nothing recorded after then), so it shows what the page showed that day.
+- **More due this week** (finance) = order value of everything on the reorder list − order value for today.
+- **When it's sent:** every minute the server checks: not paused, the role has a webhook URL, it is less than 3 hours after the set hour [9] in store time (a restart doesn't lose the morning's send; wraps past midnight, so 23:00 is caught up until 02:00 and counts for the day it was set for), and the role hasn't had one for that day (weekly roles: Mondays only). Then it pulls fresh data (sheet, Shopify) and POSTs each due role's digest as JSON `{app, kind, at, store, role, roleName, title, lines, link, text, note?}`. One try per role per day; a failure is logged, not retried all morning ("Send now" retries by hand). A failed pull still sends, with `note` saying the numbers are from the last good pull.
+- **Every send is logged** (last 50 kept, last 5 shown under Data & settings → Morning digest): time, role, scheduled or by hand, HTTP status or error.
+- **Webhook URLs are env only** (they often carry a token; secrets stay out of `store.json` on the data volume): `DIGEST_WEBHOOK_URL` for every role, `DIGEST_WEBHOOK_URL_<ROLE>` (e.g. `DIGEST_WEBHOOK_URL_CEO`) for a role's own recipient. The page can't set one (PUT with `webhookUrl` → 400); it shows only the host, never the URL; never logged. https only (http only to this machine, for testing).
+- **No webhook:** Overview → Share → Copy morning digest, or Send digest on WhatsApp (`wa.me/?text=`, opens WhatsApp with the text ready; no account or key on our side).
+- Why a webhook and not email: no email provider, keys or dependencies; Zapier / Make / Slack / a WhatsApp Business tool turn one POST into email, chat or WhatsApp per recipient. Considered: an email API (needs a provider account and key in env); left for when a client asks.
+- **Links:** `PUBLIC_URL`, else `RAILWAY_PUBLIC_DOMAIN`, else the address of the last signed-in request (Host / X-Forwarded-Host). Set `PUBLIC_URL` when a proxy in front can pass a wrong host.
+- When it can be wrong: the CEO comparison counts a stock-out still open 7 days ago up to that day only; one role, one recipient (a webhook): more people per role means the receiving tool fans out; without `PUBLIC_URL` / Railway domain, scheduled links use the last signed-in address.

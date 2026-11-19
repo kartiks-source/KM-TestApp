@@ -40,11 +40,11 @@
       <a class="brand" href="#overview" aria-label="Stock-out Watch home">
         <img src="/favicon.svg" alt="" width="26" height="26"><b>Stock-out Watch</b>
       </a>
-      <div class="store-pill" title="Store"><span id="store-name">Store</span>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></div>
+      <details class="colpick rolepick"><summary class="store-pill" title="Store · choose what you see"><span id="store-name">Store</span><span id="role-name" class="role-name"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><div class="menu" id="role-menu"></div></details>
       <div class="top-gap"></div>
       <span class="rlabel">Losses for</span><div class="range" role="group" aria-label="Show losses for">
-        <button data-days="7">7 days</button><button data-days="14">14 days</button><button data-days="30" class="on">30 days</button><button data-days="60">60 days</button>
+        <button data-days="7">7 days</button><button data-days="14">14 days</button><button data-days="30" class="on">30 days</button><button data-days="60">60 days</button><button data-days="month" title="From the 1st of this month (store time)"><span class="wide-only">This </span>month</button>
       </div>
       <a class="sync-pill" id="sync-pill" href="#data"><i></i><span>Data Sync</span></a>
       <form class="signout" method="post" action="/logout"><button class="icon-btn" type="submit" title="Sign out" aria-label="Sign out">
@@ -63,6 +63,8 @@
     </div>
   </aside>
   <div class="toast" id="toast" hidden></div>
+  <script src="/roles.js"></script>
+  <script src="/digest-ui.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -114,7 +114,8 @@ test('routes: VIEW_PASSWORD session reads everything, every write route is 403 a
   assert.ok(key);
   for (const p of ['/api/report', '/api/product/x', '/api/export/reorder.csv']) assert.ok(!(await (await s.req(p, { headers: view })).text()).includes(key), `no ingest key in ${p}`);
   assert.equal((await (await s.req('/api/report', { headers: view })).json()).settings.ingestKey, undefined);
-  const writes = [['PUT', '/api/settings', '{"leadDays":99}'], ['POST', '/api/import?kind=stock', 'Time,Variant ID\n'], ['POST', '/api/sync'], ['POST', '/api/demo'], ['POST', '/api/clear'], ['POST', '/api/shopify/sync'], ['POST', '/api/onorder', '{}'], ['DELETE', '/api/onorder/1']];
+  const writes = [['PUT', '/api/settings', '{"leadDays":99}'], ['POST', '/api/import?kind=stock', 'Time,Variant ID\n'], ['POST', '/api/sync'], ['POST', '/api/demo'], ['POST', '/api/clear'], ['POST', '/api/shopify/sync'], ['POST', '/api/onorder', '{}'], ['DELETE', '/api/onorder/1'],
+    ['POST', '/api/decide', '{"id":"1","decision":"keep"}'], ['PUT', '/api/digest/settings', '{"hour":8}'], ['POST', '/api/digest/send?role=ops']];   // Sprint 2 writes too
   for (const [method, p, body] of writes) {
     const r = await s.req(p, { method, headers: view, body });
     assert.equal(r.status, 403, `${method} ${p}`);

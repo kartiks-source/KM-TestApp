@@ -238,8 +238,9 @@ const DEFAULT_SETTINGS = {
 function report(stock, orders, settings = {}, opts = {}) {
   const S = { ...DEFAULT_SETTINGS, ...settings };
   const now = opts.now || Date.now();
-  const days = Math.max(1, Math.min(90, Math.round(opts.days || 30)));
-  const from = now - days * DAY;
+  /* opts.from (e.g. the 1st of this month, see src/period.js) overrides opts.days; never more than 90 days back */
+  const from = opts.from != null ? Math.min(now, Math.max(now - 90 * DAY, opts.from)) : now - Math.max(1, Math.min(90, Math.round(opts.days || 30))) * DAY;
+  const days = Math.max(1, Math.ceil((now - from) / DAY));
   const off = S.tzOffsetMin;
   const profile = hourProfile(orders.filter((o) => o.t >= now - 60 * DAY), off);
 
@@ -455,8 +456,8 @@ function report(stock, orders, settings = {}, opts = {}) {
 function productDetail(id, stock, orders, settings = {}, opts = {}) {
   const S = { ...DEFAULT_SETTINGS, ...settings };
   const now = opts.now || Date.now();
-  const days = Math.max(1, Math.min(90, Math.round(opts.days || 30)));
-  const from = now - days * DAY;
+  const from = opts.from != null ? Math.min(now, Math.max(now - 90 * DAY, opts.from)) : now - Math.max(1, Math.min(90, Math.round(opts.days || 30))) * DAY;
+  const days = Math.max(1, Math.ceil((now - from) / DAY));
   const changes = stock.filter((r) => String(r.variantId) === String(id)).sort((a, b) => a.t - b.t);
   const lines = orders.filter((o) => String(o.variantId) === String(id));
   const before = changes.filter((c) => c.t < from).pop();
@@ -468,7 +469,7 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (let t = now - (days - 1) * DAY; t <= now; t += DAY) units[dayKey(t, S.tzOffsetMin)] = 0;
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, S.tzOffsetMin); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
-  const r = report(stock, orders, S, { now, days, catalog: opts.catalog, onOrder: opts.onOrder });
+  const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder });
   const c = opts.catalog && opts.catalog[id];
   if (!timeline.length && c && c.stock != null) timeline.push({ t: from, stock: num(c.stock) }, { t: now, stock: num(c.stock) });   // never moved: flat at its stock now
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,
