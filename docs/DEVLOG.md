@@ -3,6 +3,16 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 2 · C-access
+Branch `sprint2/C-access` (base 995369f, before the Sprint 1 merges). Module stock-watch.
+- SW-029 (771b471): `VIEW_PASSWORD` = view-only sign-in. Role signed into the session cookie with a `VIEW_PASSWORD` fingerprint (can't be edited into admin; changing the password signs viewers out; admin cookies unchanged). One gate in `api()` refuses every POST/PUT/PATCH/DELETE to `/api` from a view session with 403 before any route runs (settings, import, sync, Shopify pull, demo, clear, and future routes such as Mark ordered). Viewers never get the ingest key. Page: no Data link, no "Save as default"; trial values + Reset still work; phone gets a Sign out button at the bottom. Refuses to start with `VIEW_PASSWORD` but no `ADMIN_PASSWORD`, or both equal. New `src/access.js`.
+- SW-029: settings change log `{at, by, key, old, new}` in new `src/audit.js` (store.json `settingsLog`, newest first, 200 kept; only real changes; ingest key masked; `by` = role, "(script)" for Basic auth). Last Plan change under Plan settings; last 50 in Data → Settings → "Advanced: change log". LOGIC.md §13.
+- SW-030 (ff8fbd1): pill shows "Syncing · stock" then "Syncing · 2,340 orders" (orders read so far), polled every 3 s while a pull runs; same text in the Data status card. Last 20 runs (Shopify pulls and sheet syncs) kept in store.json `syncRuns`: start, time taken, stock changes, order lines, orders, error, notes (archived/draft and untracked variants left out, counted by `diffStock`). Shown folded in the Data status card. New `src/runs.js`. LOGIC.md §14.
+- Tests: `test/access.test.js` (roles, cookie tamper/expiry/rotation, 403 on 8 write routes with cookie and Basic, change log via routes, start refusal), `test/runs.test.js` (history cap, notes, real `syncShopify` with stubbed reads: live progress then stored run, failed run keeps its error). 38 pass.
+- Checked at 1280/1440/1920/390: no sideways scroll; admin default views unchanged in size.
+- Merge notes (onto Sprint 1): `server.js` auth was rewritten in SW-008 (`auth()` returns 'ok'|'none'|'bad'|'limited'). Port the role: `sessionRole()` via `access.cookieRole`, Basic → `access.roleForPassword`, login → `access.cookieValue`; put the `access.refused` 403 gate right after auth and BEFORE `backup.route` and `onorder.handle`. Main's `GET /api/export/backup.json` includes settings: strip `ingestKey` for view sessions there too (or refuse it). Sprint 1 `syncShopify` adds `store.setCatalog`; keep the run hooks around it.
+- Open: "by" is a role, not a person (shared passwords, ADR-0011). Data actions (import, clear) not in the change log. Five critics not run on this branch.
+
 ## 2026-11-19 · stock-watch (simplicity pass)
 Simplicity critic (12 findings), adopted except where noted:
 - Three user-facing statuses: Order today (out / critical / order now), This week, OK; out of stock = red dot by the name; one "Order today" count everywhere (side menu, Overview, Reorder, Products). "OK" never shows an order quantity (engine sets it to 0).

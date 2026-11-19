@@ -340,7 +340,7 @@ Code: `src/runs.js`, counts from `syncShopify` / `syncSheet` in `server.js` (SW-
 - A **run** is one Shopify pull (every 15 minutes, or "Pull from Shopify now") or one Google Sheet sync. Skipped syncs (nothing set up) are not runs.
 - **While a Shopify pull runs**, the top-right pill reads "Syncing · stock" while stock is read, then "Syncing · 2,340 orders": the number of orders read so far in this pull (each page of 40 adds to it). The page asks again every 3 seconds until the pull ends, then reloads every number once. On a phone the pill is a dot; the same text is its tooltip and shows in the Data status card.
 - **When a run ends** (finished or failed), one line is kept: start time, how long it took, stock changes stored, order lines read, orders read (Shopify), the error if it failed, and notes. A failed run keeps what it had counted before the error.
-- **Notes** name what the stock pull leaves out on purpose: variants of archived or draft products, and variants whose stock isn't tracked (LOGIC.md §1). The numbers come from the same filter, so they can't drift from it.
+- **Notes** name what the stock pull leaves out on purpose: variants of archived or draft products, and variants whose stock isn't tracked (the stock pull reads only active products with tracked stock: `diffStock` in `src/shopify.js`). The numbers come from the same filter, so they can't drift from it.
 - The last **20** runs are kept in `store.json` (`syncRuns`), newest first, and are not wiped by "Clear all data". Shown on Data, inside the status card, folded: "Last 20 syncs · latest 19 Nov 16:00, 8 s, OK".
 
 **Why.** "Is it stuck or still loading?" on a first 60-day pull, and "when did it last fail, and why?" without reading server logs.
