@@ -17,6 +17,7 @@ const rows = require('./src/rows');
 const demo = require('./src/demo');
 const keys = require('./src/keys');
 const shopify = require('./src/shopify');
+const period = require('./src/period');
 
 const PORT = Number(process.env.PORT) || 4400;
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -155,7 +156,7 @@ function syncShopify() {
 async function api(req, res, url) {
   const p = url.pathname;
   const d = store.load();
-  const days = Number(url.searchParams.get('days')) || 30;
+  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), d.settings.tzOffsetMin);   // { days } or { from } ("This month")
 
   /* Shopify Flow → "Send HTTP request" (no login; protected by the ingest key) */
   const ingest = p.match(/^\/ingest\/(stock|order)$/);
@@ -172,12 +173,13 @@ async function api(req, res, url) {
   if (!authed(req)) return send(res, 401, { ok: false, error: 'Login needed' });
 
   if (p === '/api/report' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { ...span });
+    r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, settingsFor(url, d.settings), r);
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     const id = decodeURIComponent(p.slice('/api/product/'.length));
-    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days }) });
+    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { ...span }) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
@@ -212,7 +214,7 @@ async function api(req, res, url) {
   }
   if (p === '/api/clear' && req.method === 'POST') { store.replaceAll([], [], 'empty'); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days });
+    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { ...span });
     const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
     const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
     const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(q).join(',')).join('\n');

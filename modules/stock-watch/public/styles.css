@@ -395,3 +395,8 @@ table.fixed td:first-child { max-width: none; }
   .headline .hbtn { margin-left: 0; }
   .colpick .menu { right: auto; left: 0; }
 }
+
+/* Sprint 2 · B-roles: yesterday strip + "This month" (SW-027) */
+.headline .yday { flex-basis: 100%; margin: 2px 0 0; color: var(--soft); font-size: 13px; }
+.headline .yday b { color: var(--ink-2); font-weight: 600; }
+@media (max-width: 760px) { .range .wide-only { display: none; } .range button[data-days="month"] { text-transform: capitalize; } }

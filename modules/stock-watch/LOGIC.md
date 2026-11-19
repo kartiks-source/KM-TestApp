@@ -145,6 +145,17 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 | Out of stock right now (list) | every open stock-out, slow sellers included, so it can be higher than the count above |
 | Product-days with an empty shelf | total stock-out hours across all products ÷ 24 |
 
+### 5a. "This month" and the Yesterday strip (SW-027, `src/period.js`)
+
+- **This month** (period picker): from the 1st of the current month at 00:00 store time until now. On the 1st it covers only today so far. Every number that follows the period (sold, lost, % of demand, daily chart, Products and Stock-outs pages, CSV) uses this window; the reorder plan doesn't change, because it never depended on the period. Shown as "this month" instead of "in N days".
+- **Yesterday strip** (one line under the Overview headline): `Yesterday: ₹X sold · ₹Y lost · N ran out · M back`.
+  - *Sold* and *lost* are yesterday's store-time calendar day, exactly the numbers on that day's bar in the daily chart (same rules as section 5, including the hour-of-day weighting for lost).
+  - *Ran out* = products where a stock-out started yesterday; *back* = products where a stock-out ended yesterday (stock came back above 0). A product that ran out twice counts once.
+  - When the period doesn't reach back to yesterday (This month on the 1st), the strip is worked out from a separate 2-day report with the same settings.
+- Why: the owner checks "how did yesterday go" every morning; a fixed rolling 30 days hides it, and month-to-date matches how targets and budgets are set (DAWBU sheet).
+- Considered: a "Yesterday" button in the picker (a one-day period). Rejected: one line answers the question without changing every other number on the screen.
+- When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
+
 ---
 
 ## 6. Reorder status and quantity

@@ -40,6 +40,7 @@
   const dt = (t) => { if (!t) return '–'; const d = local(t); return `${String(d.getUTCDate()).padStart(2, '0')} ${MON[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
   const dayLabel = (k) => { const [, m, d] = k.split('-'); return `${+d} ${MON[+m - 1]}`; };
   const dur = (h) => (h >= 48 ? `${n1(h / 24)} days` : `${n1(h)} h`);
+  const inPeriod = (r = { period: state.days === 'month' ? 'month' : 'days', days: state.days }) => (r.period === 'month' ? 'this month' : `in the last ${r.days} days`);   // "This month" = from the 1st (SW-027)
 
   const STATUS_CLS = { 'Out now': 'out', Critical: 'crit', 'Order now': 'now', 'Order this week': 'week', OK: 'ok', 'Slow seller': 'idle', 'No stock data': 'idle' };
   const narrow = () => window.innerWidth < 760;
@@ -84,7 +85,7 @@
       + (d.lastStock ? `<span>Last stock change: ${dt(d.lastStock)}</span>` : '')
       + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
       + shopifyBadge();
-    $$('.range button').forEach((b) => b.classList.toggle('on', +b.dataset.days === state.days));
+    $$('.range button').forEach((b) => b.classList.toggle('on', b.dataset.days === String(state.days)));
   }
 
   function shopifyBadge() {
@@ -267,8 +268,14 @@
     const r = state.report, t = r.totals;
     const prods = new Set(r.stockouts.map((s) => s.id)).size;
     return t.stockouts
-      ? `In the last ${r.days} days, ${prods} products ran out of stock ${t.stockouts} times. That cost about ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand)${t.hasCost ? ` and ${moneyFull(t.lostProfit)} in profit` : ''}. ${t.orderToday} products need ordering today (${moneyFull(t.orderValueNow)} at cost)${t.excessValue ? `, and ${moneyFull(t.excessValue)} sits in overstock` : ''}.`
-      : `No product ran out of stock in the last ${r.days} days.`;
+      ? `${inPeriod(r).replace(/^./, (c) => c.toUpperCase())}, ${prods} products ran out of stock ${t.stockouts} times. That cost about ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand)${t.hasCost ? ` and ${moneyFull(t.lostProfit)} in profit` : ''}. ${t.orderToday} products need ordering today (${moneyFull(t.orderValueNow)} at cost)${t.excessValue ? `, and ${moneyFull(t.excessValue)} sits in overstock` : ''}.`
+      : `No product ran out of stock ${inPeriod(r)}.`;
+  }
+
+  /* one line under the Overview headline (SW-027, LOGIC.md §5a) */
+  function ydayStrip(y) {
+    if (!y) return '';
+    return `<p class="yday" title="Yesterday (${esc(dayLabel(y.day))}), store time: sold, sales lost to stock-outs, products that ran out, products back in stock">Yesterday: <b>${money(y.sold)}</b> sold · ${y.lost ? `<span class="lostv">${money(y.lost)} lost</span>` : 'nothing lost'} · ${y.ranOut} ran out · ${y.back} back</p>`;
   }
 
   function overview() {
@@ -277,8 +284,9 @@
     const top = r.products.filter((p) => p.lost > 0).slice(0, 5), maxLost = Math.max(1, ...top.map((p) => p.lost));
     return `
       <section class="headline">
-        <h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today · stock-outs cost <span class="lost">${money(t.lost)}</span> in ${r.days} days</h1>
+        <h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today · stock-outs cost <span class="lost">${money(t.lost)}</span> ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</h1>
         <button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>
+        ${ydayStrip(r.yesterday)}
       </section>
       <section class="tiles t4">
         <button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost while products were out of stock (${n1(t.lostPct)}% of demand)"><b>${money(t.lost)}</b><span>sales lost${t.hasCost ? ` · ${money(t.lostProfit)} profit${t.costed < t.active ? ` (${t.costed}/${t.active} costed)` : ''}` : ''}</span></button>
@@ -311,7 +319,7 @@
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
-      { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
+      { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
       { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
       { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (p) => p.trendPct ?? -999 },
@@ -348,7 +356,7 @@
       { k: 'name', label: 'Product', f: (a) => `<span class="pname" title="${esc(a.name)}">${esc(a.name)}</span>` },
       { k: 'lost', label: 'Sales lost', r: 1, f: (a) => `<b class="lostv">${money(a.lost)}</b>` },
       { k: 'times', label: 'Times out', r: 1 },
-      { k: 'days', label: 'Days out', r: 1, tip: `Total days out of stock inside the last ${state.days} days`, f: (a) => n1(a.days) },
+      { k: 'days', label: 'Days out', r: 1, tip: `Total days out of stock ${inPeriod()}`, f: (a) => n1(a.days) },
       { k: 'open', label: 'Now', f: (a) => (a.open ? '<span class="st g-today">Still out</span>' : '<span class="muted">Back in stock</span>'), val: (a) => (a.open ? 1 : 0) },
       { k: 'pattern', label: 'Pattern', f: pattern, val: (a) => a.small + a.repeat },
     ];
@@ -378,8 +386,8 @@
     { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => GROUP_LABEL[group(p.status)] },
     { k: 'stock', label: 'In stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
     { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1, csv: (p) => p.daysLeft ?? '' },
-    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (p) => money(p.sold) },
-    { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
+    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold ${inPeriod()}`, f: (p) => money(p.sold) },
+    { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
     { k: 'trendPct', label: 'Trend', opt: 1, tip: 'Sales per in-stock day, last 14 days vs the 14 before (stock-out days left out)', f: trendOnly, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
@@ -479,7 +487,7 @@
     body.innerHTML = '<p class="muted">Loading…</p>'; dr.hidden = false;
     try {
       const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
-      const p = d.product, now = state.report.generatedAt, from = now - state.days * 864e5;
+      const p = d.product, now = state.report.generatedAt, from = state.report.from;
       body.innerHTML = `
         <h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
@@ -518,7 +526,7 @@
     const sum = e.target.closest('.plan > summary'); if (sum) { state.planOpen = !sum.parentElement.open; return; }
     const t = e.target.closest('button, [data-product], tr[data-id], .mcard[data-id], th[data-k], [data-go]');
     if (!t) return;
-    if (t.matches('.range button')) { state.days = +t.dataset.days; await load(); return; }
+    if (t.matches('.range button')) { state.days = t.dataset.days === 'month' ? 'month' : +t.dataset.days; await load(); return; }
     if (t.dataset.go) { const v = t.dataset.go; state.filter[v] = t.dataset.filter; location.hash = v; return; }
     if (t.dataset.more) { const id = t.dataset.more; state.limit[id] = t.dataset.all ? 1e9 : (state.limit[id] || PAGE) + PAGE; render(); return; }
     if (t.dataset.filterReorder) { state.filter.reorder = t.dataset.filterReorder; state.limit.reorder = 0; render(); return; }
