@@ -491,3 +491,25 @@ table.fixed td:first-child { max-width: none; }
 .log .ep span { overflow-wrap: anywhere; min-width: 0; }
 /* SW-030: run history in the Data status card */
 .log .err-t { color: var(--lost); font-size: 12.5px; }
+/* Sprint 2 · D-helpers: why sentence (SW-024), Pause / Push bar (SW-026), slow-seller Decide (SW-032) */
+.why { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-size: 13px; color: var(--ink-2); }
+.why.out { color: var(--lost); font-weight: 500; }
+.why.crit { color: var(--lost); }
+.tbl td .why { max-width: 380px; }
+.mfacts .why, .dwhy .why { white-space: normal; }
+.dwhy { margin: 2px 0 12px; font-size: 14px; }
+.dwhy .why { font-size: 14px; }
+.btn.xs { padding: 3px 9px; font-size: 12px; font-weight: 500; }
+.mktbar { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--soft); margin-left: auto; }
+.mktbar > span { white-space: nowrap; margin-right: 2px; }
+.dec { white-space: nowrap; font-size: 13px; }
+.dec.drop b { color: var(--lost); }
+.dec.clear b { color: var(--plum); }
+.decb { display: inline-flex; gap: 4px; }
+.decided { margin-top: 12px; }
+.decided .bar-row { cursor: default; }
+.decided .bar-row .name { color: var(--ink-2); }
+@media (max-width: 760px) {
+  .wrap > .toolbar .mktbar { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
+  .btn.xs { min-height: 44px; padding: 6px 12px; }
+}

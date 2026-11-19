@@ -24,6 +24,8 @@ const onorder = require('./src/onorder');
 const access = require('./src/access');
 const audit = require('./src/audit');
 const runs = require('./src/runs');
+const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Push, Decide (LOGIC.md §15)
+const decide = require('./src/decide');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -194,6 +196,7 @@ async function syncSheet() {
 function loadDemo() {
   const g = demo.generate({ now: Date.now() });
   store.replaceAll(g.stock, g.orders, 'demo');
+  decide.clear();   // SW-032: decisions belong to the data they were made on
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(['Demo Store', '', null, undefined].includes(s.storeName) || /\(demo\)$/.test(s.storeName) ? { storeName: demo.STORE_NAME } : {}) });
   return g;
@@ -215,7 +218,7 @@ function syncShopify() {
     const started = Date.now();
     const run = shopifyProgress = runs.begin('shopify', started);
     try {
-      if (store.load().source === 'demo') store.replaceAll([], [], 'empty');   // never mix demo with live data
+      if (store.load().source === 'demo') { store.replaceAll([], [], 'empty'); decide.clear(); }   // never mix demo with live data
       const nm = store.load().settings.storeName;
       if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
       const s = await shopify.pullStock(store.load().shopify.lastQty);
@@ -299,13 +302,19 @@ async function api(req, res, url) {
   const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
   if (oo) return send(res, oo.code, oo.body);
 
+  /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
+  const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
+  const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
+  if (dc) return send(res, dc.code, dc.body);
   if (p === '/api/report' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() });
+    const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
+    const r = helpers.enrich(engine.report(d.stock, d.orders, S, { days, catalog: d.catalog, onOrder: onorder.all() }), { decisions: decide.all(), rates: trial ? savedRates() : null });
     return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
-    return send(res, 200, { ok: true, ...engine.productDetail(id, d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() }) });
+    const S = { ...engine.DEFAULT_SETTINGS, ...settingsFor(url, d.settings) }, now = Date.now();
+    return send(res, 200, { ok: true, ...helpers.enrichDetail(engine.productDetail(id, d.stock, d.orders, S, { days, now, catalog: d.catalog, onOrder: onorder.all() }), S, now) });
   }
   if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
@@ -330,7 +339,9 @@ async function api(req, res, url) {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself (SW-007).
     const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
+    const wasDemo = d.source === 'demo';
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
+    if (wasDemo && store.load().source !== 'demo') decide.clear();   // demo decisions go with the demo (SW-032)
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
   }
   if (p === '/api/sync' && req.method === 'POST') {
@@ -343,12 +354,12 @@ async function api(req, res, url) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
-    const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() });
-    const head = ['Status', 'Product', 'SKU', 'Stock now', 'Sells per day', 'Days left', 'Order qty', 'Order value', 'Lost (₹)', 'Stock-outs'];
-    const csv = [head, ...r.reorder.map((x) => [x.status, x.name, x.sku, x.stock, x.perDay, x.daysLeft ?? '', x.orderQty, x.orderValue, x.lost, x.outs])].map((l) => l.map(rows.csvCell).join(',')).join('\n');
-    return send(res, 200, '﻿' + csv, 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${new Date().toISOString().slice(0, 10)}.csv"` });
+    /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
+    const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), { days, catalog: d.catalog, onOrder: onorder.all() }));
+    const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
+    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
   return fail(res, 404, 'Not found');
 }

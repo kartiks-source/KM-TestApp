@@ -70,7 +70,7 @@ async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
 const STOCK_Q = `query Stock($after: String) {
   productVariants(first: 250, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { id title status productType tags } }
+    nodes { id sku title price inventoryQuantity inventoryItem { tracked unitCost { amount } } product { id title status productType tags vendor } }
   }
 }`;
 
@@ -116,7 +116,7 @@ function diffStock(variants, lastQty, t) {
     const variant = v.title === 'Default Title' ? '' : (v.title || '');
     catalog[id] = {
       productId: String(v.product?.id || '').replace(/^gid:\/\/shopify\/Product\//, ''), product: v.product?.title || '', variant, sku: v.sku || '',
-      type: v.product?.productType || '', tags: Array.isArray(v.product?.tags) ? v.product.tags : [], price: Number(v.price) || 0, cost,
+      type: v.product?.productType || '', vendor: v.product?.vendor || '', tags: Array.isArray(v.product?.tags) ? v.product.tags : [], price: Number(v.price) || 0, cost,
       status: tracked ? status : (status === 'ACTIVE' ? 'UNTRACKED' : status), tracked, active: tracked && status === 'ACTIVE',
       stock: Number.isFinite(now) ? now : null, seenAt: t,
     };
@@ -125,7 +125,7 @@ function diffStock(variants, lastQty, t) {
     next[id] = now;
     const before = Object.prototype.hasOwnProperty.call(lastQty, id) ? lastQty[id] : null;
     if (before === now) continue;
-    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant, before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(cost ? { cost } : {}) });
+    rows.push({ t, variantId: id, sku: v.sku || '', product: v.product?.title || '', variant, before, now, price: Number(v.price) || 0, ...(v.product?.productType ? { type: v.product.productType } : {}), ...(v.product?.vendor ? { vendor: v.product.vendor } : {}), ...(cost ? { cost } : {}) });
   }
   return { rows, lastQty: next, catalog, excluded };
 }

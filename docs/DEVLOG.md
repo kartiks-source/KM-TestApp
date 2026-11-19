@@ -3,6 +3,26 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-19 · Sprint 2 · D-helpers (review fixes)
+Reviewer found 12 issues on `sprint2/D-helpers`; fixed:
+- Order-by follows the status (LOGIC §13a): This week rows near the line said "order by today" (7 of 46 in demo) but weren't in Order today. Now Order today rows → today, others → tomorrow at the earliest. `src/helpers.js` why().
+- Out-of-stock Why: "lost ₹X this stock-out" so it isn't read as the Sales lost column; no ₹ when no open stock-out (it would repeat the column).
+- Pause list: slow sellers without an order qty say "Slow seller · not reordered" instead of "Not ordered · earliest …". Kept on the list (not dropped when ₹0 sold): a product out the whole demand window has rate 0, is "Slow seller" and sold ₹0, and could be a best seller still on ads.
+- Decide: "Don't reorder?" without "₹0 lost". Hide check uses saved-settings rates even with trial values on (`rates` option to `enrich`); demo load and demo-replacing import now wipe decisions.json (was only Clear all data).
+- Phone: `.btn.xs` 44 px at ≤760 px (SW-023); sort label names the list order on Pause / Push / Decide. Dead `.why.crit` now styled (red, as days-left ≤ 3).
+- Tests: 47 (4 browser tests in `test/ui-helpers.test.js` for Status column per tab, Why vs tab, Pause count line + Copy SKUs, Decide Keep/Undo, 44 px buttons; skipped without Playwright).
+- ADR-0006 exception, recorded: Products default chips 5 → 6 (Pause promotion + Push these; Push replaces Overstock, which moves to More…). SW-026 acceptance asks for two chips and ADR-0006 names "a chip for Pause/Push"; SW-020 role views should drop Pause/Push for non-marketing roles to get back to 5.
+- Not done: CHANGELOG (none exists; SW-056 creates it, a new file here would clash); screenshots / PR checklist (no PR from this branch); five-critic review; wrapping app.js 366–410 long lines (reformatting adds conflict surface; SW-059 splits app.js).
+
+## 2026-11-19 · Sprint 2 · D-helpers
+Branch `sprint2/D-helpers` (base 995369f). Module stock-watch. Commits 5b1a1d6 (helpers + tests), 8029c40 (server), ca0ce77 (UI), this one (docs).
+- SW-024: Why cell on Reorder ("Out 3 d · lost ₹18.7k" / "Runs out Fri 22 Nov · order by today · supplier takes 7 d"); replaces Status on Order today / This week tabs; same sentence on phone cards and in the drawer; Stock-outs headline adds "N still out, costing ₹X/day". LOGIC §13a.
+- SW-025: reorder CSV = PO: honours tab + search (`?filter=&q=`), Vendor (Shopify `product.vendor`, now in the stock query), Variant ID, Unit cost, UI status labels, Why, Order by; grouped by vendor; store-date file name; formula guard. LOGIC §13b.
+- SW-026: Products chips "Pause promotion" (out or days left < lead) and "Push these" (overstock by ₹ stuck; replaces the Overstock chip, which moves to More…); count line "42 to reorder · 14 slow", Copy SKUs, CSV; Back in stock uses the SW-012 ETA when present. LOGIC §13c.
+- SW-032: More… → "Slow sellers to decide": slow + out → "Don't reorder? ₹ lost", slow + stock → "Clear ₹ at cost"; Keep/Clear/Drop stored in `DATA_DIR/decisions.json` (`/api/decide`), hidden until the rate moves > 50% (0.1/day floor); Undo list. LOGIC §13d.
+- New files only for logic: `src/helpers.js`, `src/decide.js`, `test/helpers.test.js`, `test/helpers-server.test.js`; engine.js untouched. 42 tests green. UI checked at 1280/1440/1920/390 (no sideways scroll, no console errors).
+- Merge notes (on top of Sprint 1): server.js report/product/CSV lines conflict with Sprint 1's `catalog`/`onOrder` args — keep Sprint 1's args, wrap with `helpers.enrich(...)`; use `rows.csvCell` or `helpers.csvCell` (same rule). helpers already reads `p.onOrder.eta/late` and status `Ordered`/`Inactive`; `vendorMap` reads `catalog[id].vendor` once SW-002's catalog stores vendor. app.js Reorder cols: add Why next to Sprint 1's trend/act columns.
+- Open: per-item commits are by layer (helpers / server / UI) because items share files; five-critic review not run in this workstream. (Phone sort label: fixed in review fixes above.)
 ## 2026-11-19 · Sprint 2 · C-access
 Branch `sprint2/C-access` (base 995369f, before the Sprint 1 merges). Module stock-watch.
 - SW-029 (771b471): `VIEW_PASSWORD` = view-only sign-in. Role signed into the session cookie with a `VIEW_PASSWORD` fingerprint (can't be edited into admin; changing the password signs viewers out; admin cookies unchanged). One gate in `api()` refuses every POST/PUT/PATCH/DELETE to `/api` from a view session with 403 before any route runs (settings, import, sync, Shopify pull, demo, clear, and future routes such as Mark ordered). Viewers never get the ingest key. Page: no Data link, no "Save as default"; trial values + Reset still work; phone gets a Sign out button at the bottom. Refuses to start with `VIEW_PASSWORD` but no `ADMIN_PASSWORD`, or both equal. New `src/access.js`.
