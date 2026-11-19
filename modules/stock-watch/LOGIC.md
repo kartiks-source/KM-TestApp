@@ -227,7 +227,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 ## 6b. Already ordered ("Mark ordered")
 
-**Rule:** when someone places a purchase order they press **Mark ordered** (on the Reorder row, in the product drawer, or for several ticked rows at once) and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
+**Rule:** when someone places a purchase order they tick the row on Reorder (one or many) and press **Mark N ordered** in the bar that appears, or use **Mark ordered** in the product drawer and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
 
 > received = sum of stock increases recorded after the order was marked, each measured from *Stock before*, or from the previous row's stock when that's blank (section 2), so a row with a blank *Stock before* isn't read as an increase from 0
 > still to come = ordered qty − received; once 90% has arrived the order is treated as complete and dropped
@@ -317,9 +317,9 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
   > rate = units sold ÷ days in stock (in that 14-day half)
   > change = (recent rate − earlier rate) ÷ earlier rate
 
-  ▲ green at +10% or more, ▼ rose at −10% or less, ▬ in between. **New** = in stock for at least 7 days of the earlier half with no sales, and 3 or more sold since. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
+  The chip shows the product's own % change. Its **colour is read against the typical product** (below): green when it's 10 points or more above the typical product's %, rose when 10 or more below, grey in between (`trendCall` = up / down / flat). With fewer than 5 products to take a median from, it's read against 0. The *Selling faster / slower* filters on Products use the same call. **New** = in stock for at least 7 days of the earlier half with no sales, and 3 or more sold since. **·** = too little to call: under 6 units over the 28 days, or under 3 in-stock days in either half.
 - **Only time we have data for counts.** Days before a product's first record are "no data" (an empty bar), never "in stock, sold 0". Without this, a store with 20 days of history showed every product at +133%.
-- **Typical-product baseline:** the **median** of all product trends (needs 5 or more), shown once in the Products toolbar ("Typical product −38%") and in each chip's tooltip. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
+- **Typical-product baseline:** the **median** of all product trends (needs 5 or more). It sets the chip colour, and its value is in each chip's tooltip and the Trend column header's. It's the same measure as the product trend. An earlier version compared raw store units, which store-wide stock-outs dragged down; that made flat products look like they were outperforming.
 
 - **₹ effect (Overview "Moving" card):** what the trend is worth, so the card ranks by money rather than by %:
 
@@ -331,7 +331,8 @@ A product is **Overstocked** when its stock is more than **twice** what's needed
 - **Stock-outs aren't demand.** A product out for half of last week shows −50% week-on-week, though shoppers wanted it as much as ever. Dividing by in-stock days removes that. It's the same principle as section 3.
 - **Two weeks against two weeks.** For a product selling a few a week, one week against one week swings wildly (2 → 1 = −50%). Doubling the window halves most of that noise, and the 6-unit minimum hides changes that are just noise.
 - **Rolling weeks ending now,** not calendar weeks, so there's never a half-finished current week dragging the last bar down.
-- **A ±10% band,** wider than ±5%, so normal week-to-week wobble stays "flat".
+- **A ±10-point band,** wider than ±5, so normal week-to-week wobble stays grey.
+- **Colour against the typical product, not against 0** (critic round 1). With a ±10% cut-off against 0, after a store-wide fall (typical −38% in the demo) about 70% of Reorder rows were red, which reads as "cut the orders" when most products were only following the season. Now red means "worse than the rest of the store", which is what a manager can act on. *Considered:* showing the gap in points as the chip text (another unit to learn) and a separate "Typical product −38%" chip in the toolbar (the earlier version; nobody read it).
 - **The baseline separates season from product.** After a peak like Diwali almost everything falls. A product down 20% while the typical product is down 25% is holding up; one down 50% isn't.
 
 **When it can be wrong:**

@@ -185,10 +185,19 @@
   }
   function trendChip(p) {
     if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="In stock but no sales in the 14 days before; 3 or more sold since">New</span>' : '<span class="tr low" title="Not enough sales yet to call a trend">–</span>';
-    const v = p.trendPct, cls = v >= 10 ? 'up' : v <= -10 ? 'down' : 'flat';
-    const base = state.report.totals.storeTrendPct;
-    return `<span class="tr ${cls}" title="Sales per in-stock day, last 14 days vs the 14 before. Out-of-stock days are left out, so a stock-out doesn't look like falling demand.${base != null ? ` Typical product over the same days: ${base > 0 ? '+' : ''}${n1(base)}%.` : ''}">${cls === 'up' ? '▲' : cls === 'down' ? '▼' : '▬'} ${v > 0 ? '+' : ''}${n1(v)}%</span>`;
+    /* colour = the engine's call against the typical product (LOGIC.md §7d), text = this product's own change */
+    const v = p.trendPct, cls = p.trendCall || 'flat', base = state.report.totals.storeTrendPct;
+    const pct = (x) => `${x > 0 ? '+' : ''}${n1(x)}%`;
+    const verdict = base == null ? (cls === 'up' ? 'Selling faster' : cls === 'down' ? 'Selling slower' : 'About flat')
+      : cls === 'up' ? 'Doing better than the typical product' : cls === 'down' ? 'Doing worse than the typical product' : 'In line with the typical product';
+    return `<span class="tr ${cls}" title="${verdict}: ${pct(v)}${base != null ? ` vs typical ${pct(base)}` : ''}. Sales per in-stock day, last 14 days vs the 14 before; out-of-stock days are left out, so a stock-out doesn't look like falling demand.">${pct(v)}</span>`;
   }
+
+  /* Trend column tip: % = the product's own change; colour = against the typical product (median trend, LOGIC.md §7d) */
+  const trendTip = () => {
+    const b = state.report.totals.storeTrendPct;
+    return `Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before. Green / red = 10 points or more better / worse than the typical product${b != null ? ` (${b > 0 ? '+' : ''}${n1(b)}% over the same days)` : ''}`;
+  };
 
   /* which priority columns the CSS shows at this width (mirrors the @media rules in styles.css) */
   const colVisible = (c) => !(c.pr === 'w' && innerWidth < 1400) && !(c.pr === 4 && innerWidth <= 1700) && !(c.pr === 3 && innerWidth <= 1400) && !(c.pr === 2 && innerWidth <= 1180);
@@ -306,13 +315,11 @@
   const showCol = (id, c) => !c.opt || (colsOn[id] || []).includes(c.k);
   function colPicker(id, cols) {
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
-    return `<details class="colpick"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
+    return `<details class="colpick desk"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
   }
   const dlMenu = (id, href, extra = '') => `<details class="colpick"><summary class="btn ghost" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${extra}${href ? `<a href="${href}">Download CSV</a>` : `<button class="linkbtn" id="csv-${id}">Download CSV</button>`}</div></details>`;
-  /* "Mark ordered" (LOGIC.md §6b): one click with the suggested qty and today + lead time; edit qty/date in the drawer */
-  const orderBtn = (p) => (p.status === 'Ordered' ? `<button class="btn ghost xs" data-unorder="${esc(p.id)}" title="Remove the order mark">Undo</button>`
-    : p.onOrder ? `<button class="btn ghost xs" data-edit-order="${esc(p.id)}" title="Change the order already marked">Edit order</button>`
-      : p.orderQty > 0 ? `<button class="btn ghost xs" data-order="${esc(p.id)}" title="Mark ${inr.format(p.orderQty)} pcs ordered, landing in ${state.report.settings.leadDays} days (edit in the product panel)">Mark ordered</button>` : '');
+  /* "Mark ordered" (LOGIC.md §6b): tick rows (one or many) → the bulk bar marks them at the suggested qty and today +
+     lead time; edit qty/date or remove the mark in the product drawer. One control per row (critic round 1, S2). */
   const isoDay = (t) => local(t).toISOString().slice(0, 10);
   const myName = () => { try { return localStorage.getItem('sw-name') || ''; } catch { return ''; } };
   async function markOrdered(items, label) {
@@ -393,9 +400,8 @@
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
       { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
-      { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
+      { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
-      { k: 'act', label: '', tip: 'Placed the order? Mark it so the line leaves Order today', f: orderBtn, val: (p) => (p.onOrder ? 1 : 0) },
     ];
     const picked = [...state.pick].filter((id) => r.reorder.some((p) => p.id === id && !p.onOrder && p.orderQty > 0));
     return `
@@ -406,8 +412,8 @@
         <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, 'Nothing to order in this view.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
-        <div class="mfacts">${status(p)}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
+        <header>${!p.onOrder && p.orderQty > 0 ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <div class="mfacts">${f === 'all' || f === 'ordered' ? status(p) : poTag(p).trim()}<span class="${p.daysLeft != null && p.daysLeft <= 3 ? 'bad' : ''}"><b>${p.daysLeft == null ? (p.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b> days left</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${bestTag(p)}</div>`)}`;
   }
 
   /* stock-outs, one row per product (the individual stock-outs are in the product drawer) */
@@ -448,7 +454,7 @@
   const PRODUCT_TABS = [['all', 'All'], ['bestrisk', 'Best sellers at risk'], ['today', 'Order today'], ['over', 'Overstock'], ['lost', 'Losing sales']];
   const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['slow', 'Slow sellers'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
   const productMatch = (p, f) => f === 'all' || (f === 'lost' ? p.lost > 0 : f === 'best' ? p.abc === 'A' : f === 'bestrisk' ? p.abc === 'A' && TODAY.includes(p.status)
-    : f === 'over' ? p.overstock : f === 'rising' ? p.trendPct >= 10 || p.trendNew : f === 'falling' ? p.trendPct <= -10 : group(p.status) === f);
+    : f === 'over' ? p.overstock : f === 'rising' ? p.trendCall === 'up' || p.trendNew : f === 'falling' ? p.trendCall === 'down' : group(p.status) === f);
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = state.filter.products, ty = state.filter.type;
     return r.products.filter((p) => productMatch(p, f) && (!ty || p.type === ty) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
@@ -464,7 +470,7 @@
     { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
-    { k: 'trendPct', label: 'Trend', pr: 'w', tip: 'Units sold per week, last 8 weeks (rose = out of stock part of that week); % = sales per in-stock day, last 14 days vs the 14 before', f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
+    { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
     { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
@@ -477,10 +483,6 @@
     ] : []),
     { k: 'price', label: 'Avg price', hide: 1 },
   ];
-  const baseChip = () => {
-    const b = state.report.totals.storeTrendPct; if (b == null) return '';
-    return `<span class="base" title="Typical product: the median trend of all products (sales per in-stock day, last 14 days vs the 14 before). Read each product’s trend against it: after a season peak almost everything falls.">Typical product ${b > 0 ? '+' : ''}${n1(b)}%</span>`;
-  };
   const countIn = (list, k) => inr.format(list.filter((p) => productMatch(p, k)).length);
   function products() {
     const r = state.report, f = state.filter.products, ty = state.filter.type;
@@ -495,7 +497,7 @@
         <span class="hfind">${types.length ? `<select class="search sel" id="f-type" aria-label="Category"><option value="">All categories</option>${types.map((t) => `<option ${t === ty ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
       <div class="toolbar"><div class="chips">${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}">${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
-        ${baseChip()}${colPicker('products', cols)}${dlMenu('products')}</div>
+        ${colPicker('products', cols)}${dlMenu('products')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
         <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${status(p)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>`)}`;
@@ -566,6 +568,7 @@
   /* ---------- product drawer ---------- */
   async function openProduct(id) {
     const dr = $('#drawer'), body = $('#drawer-body');
+    if (dr.hidden) { try { history.pushState({ drawer: 1 }, ''); } catch { /* sandboxed */ } }   // Back closes the drawer
     body.innerHTML = '<p class="muted">Loading…</p>'; dr.hidden = false;
     try {
       const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
@@ -599,7 +602,11 @@
         <button class="btn" id="oo-save" data-oo="${esc(p.id)}">${o ? 'Update' : 'Mark ordered'}</button>${o ? `<button class="btn ghost" id="oo-remove" data-oo="${esc(p.id)}">Remove</button>` : ''}</div></div>`;
   }
   let lastRow = null;
-  const closeDrawer = () => { const was = !$('#drawer').hidden; $('#drawer').hidden = true; if (was && lastRow && document.contains(lastRow)) lastRow.focus(); };
+  const closeDrawer = () => {
+    const was = !$('#drawer').hidden; $('#drawer').hidden = true;
+    if (was && history.state?.drawer) history.back();   // drop the entry openProduct pushed; popstate then finds it closed
+    if (was && lastRow && document.contains(lastRow)) lastRow.focus();
+  };
 
   /* ---------- render + events ---------- */
   const VIEWS = { overview, reorder, stockouts, products, data: dataView };
@@ -616,6 +623,7 @@
 
   document.addEventListener('click', async (e) => {
     if (e.target.closest('.rz')) return;
+    if (e.target.closest('.mpick') && !e.target.matches('input')) return;   // the label's own click; the checkbox click follows
     if (e.target.matches('input.pick')) { const id = e.target.dataset.pick; if (e.target.checked) state.pick.add(id); else state.pick.delete(id); render(); return; }
     if (e.target.id === 'toast-act' && toast._do) { const run = toast._do; $('#toast').hidden = true; toast._do = null; run().catch((err) => toast(err.message)); return; }
     const sum = e.target.closest('.plan > summary'); if (sum) { state.planOpen = !sum.parentElement.open; return; }
@@ -642,20 +650,13 @@
     if (t.id === 'copy-key') { copy(state.settings.ingestKey); return; }
     if (t.id === 'show-key') { const shown = t.textContent === 'Hide key'; $('#u-key').innerHTML = shown ? maskKey(state.settings.ingestKey) : esc(state.settings.ingestKey); t.textContent = shown ? 'Show key' : 'Hide key'; return; }
     try {
-      if (t.dataset.order) {
-        const p = state.report.reorder.find((x) => x.id === t.dataset.order); if (!p) return;
-        t.disabled = true; const eta = isoDay(Date.now() + state.report.settings.leadDays * 864e5);
-        await markOrdered([{ id: p.id, qty: p.orderQty, eta }], `Marked ordered: ${inr.format(p.orderQty)} pcs, lands ${dateShort(Date.now() + state.report.settings.leadDays * 864e5)}`); return;
-      }
-      if (t.dataset.editOrder) { lastRow = t.closest('tr'); openProduct(t.dataset.editOrder); return; }
-      if (t.dataset.unorder) { t.disabled = true; await api('/api/onorder', { method: 'POST', body: JSON.stringify({ items: [{ id: t.dataset.unorder, clear: true }] }) }); await reloadReport(); toast('Order mark removed'); return; }
       if (t.id === 'pick-all') { const f = state.filter.reorder, q = state.q.reorder.toLowerCase(); state.report.reorder.filter((p) => !p.onOrder && p.orderQty > 0 && (f === 'all' || group(p.status) === f) && (!q || `${p.name} ${p.sku}`.toLowerCase().includes(q))).forEach((p) => state.pick.add(p.id)); render(); return; }
       if (t.id === 'pick-clear') { state.pick.clear(); render(); return; }
       if (t.id === 'pick-mark') {
         const lead = state.report.settings.leadDays, eta = isoDay(Date.now() + lead * 864e5);
         const items = state.report.reorder.filter((p) => state.pick.has(p.id) && !p.onOrder && p.orderQty > 0).map((p) => ({ id: p.id, qty: p.orderQty, eta }));
         if (!items.length) return; t.disabled = true;
-        await markOrdered(items, `Marked ${items.length} ordered, landing ${dateShort(Date.now() + lead * 864e5)}`); return;
+        await markOrdered(items, items.length === 1 ? `Marked ordered: ${inr.format(items[0].qty)} pcs, lands ${dateShort(Date.now() + lead * 864e5)}` : `Marked ${items.length} ordered, landing ${dateShort(Date.now() + lead * 864e5)}`); return;
       }
       if (t.id === 'oo-save' || t.id === 'oo-remove') {
         const id = t.dataset.oo, by = ($('#oo-by')?.value || '').trim();
@@ -748,6 +749,7 @@
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);
+  window.addEventListener('popstate', (e) => { if (!$('#drawer').hidden && !e.state?.drawer) closeDrawer(); });
   let wasNarrow = narrow();
   let wasTier = tier();
   window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } });

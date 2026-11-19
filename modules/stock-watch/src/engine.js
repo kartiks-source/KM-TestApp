@@ -174,6 +174,14 @@ function storeTrend(products) {
   return round(v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2, 1);
 }
 
+/** 'up' | 'down' | 'flat' for a product's trend read against the typical product (null: no trend to call). */
+const TREND_BAND = 10;
+function trendCall(pct, base) {
+  if (pct == null) return null;
+  const d = pct - (base == null ? 0 : base);
+  return d >= TREND_BAND ? 'up' : d <= -TREND_BAND ? 'down' : 'flat';
+}
+
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered', 'OK'];
 /** Reorder status and quantity for one product. */
 function plan({ stock, perDay, lead, cover, safety }) {
@@ -384,6 +392,11 @@ function report(stock, orders, settings = {}, opts = {}) {
     }
   }
 
+  /* trend call against the typical product (LOGIC.md §7d): 'up' / 'down' only 10+ points away from the store's
+     median trend, so a season-wide fall doesn't paint every row red. No baseline (under 5 trends) → against 0. */
+  const baseTrend = storeTrend(products);
+  for (const p of products) p.trendCall = trendCall(p.trendPct, baseTrend);
+
   /* an order quantity only where an order is due (Order today / This week); "OK" never asks you to order */
   for (const p of products) if (!['Out now', 'Critical', 'Order now', 'Order this week'].includes(p.status)) { p.orderQty = 0; p.orderValue = 0; }
 
@@ -422,7 +435,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       orderValueAll: reorder.reduce((s, p) => s + p.orderValue, 0),
       overstocked: products.filter((p) => p.overstock).length,
       excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
-      storeTrendPct: storeTrend(products),
+      storeTrendPct: baseTrend,
       costed: products.filter((p) => p.cost != null && (p.sold || p.lost)).length,
       active: products.filter((p) => p.sold || p.lost).length,
     },
@@ -464,4 +477,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  trend, TREND_MIN_UNITS, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  trend, trendCall, storeTrend, TREND_MIN_UNITS, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

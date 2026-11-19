@@ -74,7 +74,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Done: engine, page, Flow/Sheet/CSV ingest, read-only Shopify pull with Key Vault, Railway deploy, Sammsara demo.
 - Sprint 1 security (SW-008/009/010/016/017/018): login limiter + prod password check, session secret in `DATA_DIR/secret`, POST logout, ingest key in the `X-Ingest-Key` header only (≤ 500 rows/request), strict CSV import, security headers + same-origin writes, CSV formula guard, 400s for bad input.
 - Before the next deploy: Railway `ADMIN_PASSWORD` must be ≥ 12 characters (the Dockerfile sets `NODE_ENV=production`, so a shorter one stops the app starting). Flow workflows using `?key=` keep working but should move to the header.
-- Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" on Reorder rows, ticked rows and the drawer, with an Ordered tab (SW-012); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
+- Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" for ticked Reorder rows (bulk bar; phone cards have the tick too) and in the drawer, with an Ordered tab (SW-012; the per-row button went in critic round 1, S2: one control per row); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 
 ## Next
