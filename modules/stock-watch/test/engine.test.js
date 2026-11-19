@@ -94,3 +94,31 @@ test('stock rows carry an optional category; products report it with units sold 
   const p = r.products[0];
   assert.equal(p.type, 'Lamps'); assert.equal(p.unitsSold, 1); assert.equal(p.lostPct, 0);
 });
+
+test('best sellers (A = first 80% of sales), profit lost at unit cost, overstock beyond twice the need', () => {
+  const now = Date.parse('2026-11-10T00:00:00Z');
+  const S = { leadDays: 7, coverDays: 30, safetyDays: 3, minPerDay: 0 };
+  const stock = [
+    { t: now - 20 * D, variantId: 'big', sku: 'B', product: 'Big', before: 100, now: 100, price: 1000, cost: 400 },
+    { t: now - 20 * D, variantId: 'mid', sku: 'M', product: 'Mid', before: 10, now: 10, price: 1000 },
+    { t: now - 20 * D, variantId: 'dead', sku: 'X', product: 'Dead', before: 50, now: 50, price: 200, cost: 80 },
+    // "big" goes out for exactly one day, 10 days ago
+    { t: now - 10 * D, variantId: 'big', sku: 'B', product: 'Big', before: 1, now: 0, price: 1000, cost: 400 },
+    { t: now - 9 * D, variantId: 'big', sku: 'B', product: 'Big', before: 0, now: 100, price: 1000, cost: 400 },
+  ];
+  const orders = [];
+  for (let i = 0; i < 18; i++) orders.push({ t: now - (i + 1) * D + 3600e3, order: `#b${i}`, variantId: 'big', qty: 1, price: 1000 });
+  orders.push({ t: now - 2 * D, order: '#m1', variantId: 'mid', qty: 2, price: 1000 });
+  const r = E.report(stock, orders, S, { days: 30, now });
+  const P = Object.fromEntries(r.products.map((p) => [p.id, p]));
+  assert.equal(P.big.abc, 'A');            // 18,000 of 20,000 sold
+  assert.equal(P.mid.abc, 'B');            // next 10%
+  assert.equal(P.dead.abc, 'C');           // didn't sell
+  // a full day out costs exactly one day of sales; profit = units × (price paid − cost)
+  assert.ok(P.big.lostProfit > 0 && Math.abs(P.big.lostProfit / P.big.lost - 0.6) < 0.01);
+  assert.equal(P.mid.lostProfit, null);    // no cost known
+  // "dead" has stock and no sales → overstocked, excess valued at unit cost
+  assert.equal(P.dead.overstock, true); assert.equal(P.dead.excessUnits, 50); assert.equal(P.dead.excessValue, 50 * 80);
+  // order value uses unit cost when known (cash to commit)
+  if (P.big.orderQty) assert.equal(P.big.orderValue, Math.round(P.big.orderQty * 400));
+});
