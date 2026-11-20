@@ -15,6 +15,12 @@ stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, t
 - Checked: `npm test` 257 pass / 23 skip (283/283 with Playwright); `test:ui` 26/26; `test:smoke` 30/30 + roles all pass (`PLAYWRIGHT_CHANNEL=chrome`).
 - Not done: Drawer charts (Stock level, Units sold) still scale with their viewBox (~11.2 px labels at 360); Products keeps Sort on its own row (its Search shares the View row). Open: shared dev log page row not added; critics not re-run.
 
+## 2026-11-20 · release 1.0.0
+stock-watch 1.0.0 (tag `v1.0.0`), deployed to the new Railway project (Limitless Pixel, Singapore).
+- Final review: 6 critics × 2 rounds (wf finish-all-sprints), fixes 0e1b893, 15e2897, 2be1cf0, 4a5e9d6. Checked: `npm test` 257 pass, `test:ui` 26/26, smoke + roles smoke all pass (1280/1440/1920/390/360, 0px sideways).
+- Old Railway service on the shivam account deleted by the user (URL 404). BACKLOG: SW-016 closed (CI runs the smoke); SW-005 left open only for Railway volume backups (dashboard).
+- Next: Sprint 3 (SW-040..062 doable items); real brands when Performity moves us to production.
+
 ## 2026-11-20 · Performity connected (Origin header)
 stock-watch, `main`. KD sent the real base URL (Azure App Service, dev API); Railway var updated by the user.
 - Live calls gave `403 Origin not allowed`: Performity allows our key only from the domain we gave them, checked on `Origin` (not in the calling guide). `keys.pocCall` now sends `Origin: https://$RAILWAY_PUBLIC_DOMAIN` (or `PERFORMITY_ORIGIN`); clear error for that 403. Tests: 2 new (default/override/none; error text).

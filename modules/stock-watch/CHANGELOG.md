@@ -2,6 +2,16 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.0.0 · 2026-11-20 · first production release
+
+1.0.0-rc.1 plus two rounds of six final critics (logic, UI, cross-module, simplicity, security + QA, mobile), and the live Performity connection:
+
+- Performity calls send our domain as `Origin`; tested live against Performity's dev API and test store.
+- A part-filled PO keeps an urgent row in Order today (it no longer drops to This week).
+- Stock-outs headline: "N still out, costing ₹X/day"; daily chart drawn at its real width; contrast of up-trends and ok badges ≥ 4.5:1.
+- Phones: chips snap with edge fades, sticky drawer close, toast above the bulk bar, store bar fits with a role.
+- Railway as code keeps every app variable (no accidental deletes on apply).
+
 ## 1.0.0-rc.1 · 2026-11-20 · release candidate: Sprint 1 + Sprint 2 + several stores
 
 The first version meant for production, once the open items in `docs/BACKLOG.md` (Performity IP allow-list, first real store compared against Shopify admin) are closed. What it is, in one place:
