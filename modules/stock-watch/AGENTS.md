@@ -35,6 +35,8 @@ Google Sheet CSV / upload ───┘
 | `FORMATS.md` | every row format and stored file; `store.json` `schemaVersion` and how to migrate (SW-047) |
 | `.env.example` | every variable the code reads, blank |
 | `src/version.js` | app version (`package.json`) + build commit (`RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or the `BUILD_SHA` file from `npm run stamp`) for `/health`, `/status`, `/api/report` `app` and the footer (SW-056) |
+| `src/tz.js` → `public/tz.js` | the store's time zone (SW-049, LOGIC §0a): the ONE place for store-time days, hours, months and stamps; IANA zone with daylight saving; `zoneOf(settings)` |
+| `src/log.js` | one-line JSON logs `{time, level, msg, store, …}` (SW-054); `captureConsole()` makes every `console.*` line JSON; every line scrubbed of `shpat_`/Bearer/X-Api-Key/`key=`; request line per API call (path only); boot line names set variables, never values |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min (one store at a time, `pullAll`), demo loader; `openStore` / `inStore` / `eachStore` run work for one store |
 | `src/scope.js` | which store the current work is for: `run(id, fn)`, `id()`, `dir()` → `DATA_DIR/stores/<id>`; store id rule (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`); `useDir()` for tests only |
 | `src/stores.js` | the store registry (ADR-0015): `list()`, `refresh()` (Performity brand list, last good one kept in `DATA_DIR/stores.json`), `pick(?store, cookie)` → id or 404/503 |

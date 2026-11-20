@@ -40,6 +40,7 @@ const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
 const TZ = require('./src/tz');             // the store's time zone (SW-049): every store-time day, hour and stamp
+const log = require('./src/log');           // one-line JSON logs, tokens scrubbed (SW-054)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -295,7 +296,7 @@ async function pullOne(id) {
     runs.finish(store.load(), run);
     store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
     await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
-    console.log(`shopify (${storeName(id)}): ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
+    log.info('shopify pull done', { store: id, stockChanges: stock, orderLines: orders, seconds: Math.round((Date.now() - started) / 1000) });
     alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
     return { stock, orders };
   } catch (e) {
@@ -411,6 +412,7 @@ async function api(req, res, url) {
   if (ingest && req.method === 'POST') {
     const pk = stores.pick(asked, '');
     if (pk.error) return fail(res, pk.error, pk.message);
+    res.swStore = pk.id;   // for the request log line (SW-054)
     return inStore(pk.id, () => ingestRoute(req, res, url, ingest[1]));
   }
 
@@ -425,6 +427,7 @@ async function api(req, res, url) {
   }
   const pk = stores.pick(asked, cookieOf(req, STORE_COOKIE));
   if (pk.error) return fail(res, pk.error, pk.message);
+  res.swStore = pk.id;
   return inStore(pk.id, () => storeApi(req, res, url, role, pk.id));
 }
 
@@ -582,6 +585,10 @@ const server = http.createServer(async (req, res) => {
   securityHeaders(req, res);
   let url;
   try { url = new URL(req.url, 'http://local'); } catch { return fail(res, 400, 'Bad address'); }
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) {   // one line per API call: path only, never the query or a cookie
+    const t0 = Date.now();
+    res.on('finish', () => log.info('request', { store: res.swStore || null, method: req.method, path: url.pathname, status: res.statusCode, ms: Date.now() - t0 }));
+  }
   try {
     if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
       return fail(res, 403, 'Cross-site request refused');
@@ -639,7 +646,16 @@ async function shutdown(signal) {
   setTimeout(() => process.exit(code), 3000).unref();
 }
 
+/* SW-054: the boot line names which settings are set, never a value */
+const BOOT_VARS = ['NODE_ENV', 'DATA_DIR', 'ADMIN_PASSWORD', 'VIEW_PASSWORD', 'PERFORMITY_POC_API_URL', 'PERFORMITY_POC_API_KEY', 'PERFORMITY_BRAND_ID', 'SHOPIFY_STORE',
+  'AZURE_KEY_VAULT_URL', 'SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'ALERT_WEBHOOK_URL', 'DIGEST_WEBHOOK_URL', 'PUBLIC_URL', 'KEEP_DAYS'];
+function bootLine(list) {
+  const app = version.current(), k = keys.status();
+  log.info('boot', { version: app.version, sha: app.short || null, node: process.version, source: k.source || 'none', ready: k.source ? !!k.ready : null, stores: list.length, set: log.setVars(BOOT_VARS) });
+}
+
 async function main() {
+  log.captureConsole();   // every console line from here on is one JSON line, tokens scrubbed (SW-054)
   if (PROD && PASSWORD.length < MIN_PASSWORD) {
     console.error(`Refusing to start: NODE_ENV=production needs ADMIN_PASSWORD set, at least ${MIN_PASSWORD} characters.`);
     process.exit(1);
@@ -678,6 +694,7 @@ async function main() {
   timers.push(digests.schedule(digestCtx, (fn) => eachStore(fn)));   // SW-028: every minute, each store; sends at its set hour
   timers.forEach((t) => t.unref());
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
+  bootLine(list);
   const app = version.current();
   server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''} · ${list.length} store${list.length === 1 ? '' : 's'} · v${app.version} (${app.short || 'dev'})`));
 }

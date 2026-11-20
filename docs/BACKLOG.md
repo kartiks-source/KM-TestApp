@@ -202,6 +202,10 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: one `timeZone` setting per store used by rows, engine, digest and backups; no fixed +5:30 left; LOGIC note; tests in a daylight-saving zone.
 - Status: Partial. Done: `public/tz.js` (+ `src/tz.js`) is the one helper; rows, engine, period, Mark ordered, helpers, digest, backups, demo and the page use it; Settings has a zone picker; old `tzOffsetMin` stores keep working (LOGIC §0a, `test/tz.test.js` at New York and London). Open: the Google Sheet version (`modules/stock-watch-sheets`) still uses the spreadsheet's own zone.
 
+**SW-054 · JSON logs** (S · ops)
+- Accept: one-line JSON logs (time, level, msg, store, fields); a request line per API call without query string or cookies; one boot line naming set variables, never values; tokens scrubbed in every line.
+- Status: Done. `src/log.js`; `server.js` captures `console.*`, so every module's lines are JSON and scrubbed; `test/log.test.js`. RUNBOOK and SECURITY.md updated.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -221,7 +225,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |
-| SW-054 | JSON logs + request log without query strings; boot config line | S | ops | SRE-11, SRE idea |
 | SW-055 | Single-instance lock file; KEEP_DAYS env; capacity warnings | S | ops | SRE ideas |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
 | SW-057 | Trial input keeps raw text while typing | S | builder | QA F10 |

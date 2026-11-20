@@ -129,6 +129,8 @@ From a Railway volume backup all of these come back together. From an app backup
 
 ## When something is wrong
 
+**Logs** (SW-054) are one JSON line each: `{time, level, msg, store, …}`. In Railway → Deployments → Logs, filter on `"level":"error"`, `"msg":"boot"` (version, key source, which variables are set) or a store id. Every API call has one `"msg":"request"` line (method, path, status, ms). Tokens are scrubbed to `***`.
+
 | Symptom | Check | Fix |
 |---|---|---|
 | Uptime monitor: `/status` 503 | Data page: last pull, last error; `ALERT_WEBHOOK_URL` channel | Same as "Shopify data stale" below; `saveOk: false` → same as "Disk full" |
