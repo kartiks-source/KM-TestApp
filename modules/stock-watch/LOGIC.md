@@ -376,7 +376,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 | Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
-Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them.
+Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them. **Columns added from Columns…** that don't fit make that one table scroll sideways inside its box, with a note above it ("More columns than fit: scroll the table sideways"); before, they were cut off out of reach (critic r2 UI-2). The default columns fit every Reorder and Products tab from 1181 px up (tested at 1280 and 1400; Reorder → All keeps Sales lost on screen: its name column gives up ~60 px to Status, critic r2 UI-1), so the page itself never scrolls sideways.
 
 ## 9a. Group by: product, category, collection, tag (SW-022)
 

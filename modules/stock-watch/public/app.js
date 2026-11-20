@@ -827,6 +827,18 @@
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
     render._caret = null;
+    fitTables();
+  }
+  /* critic r2 UI-2: when the columns don't fit (ones the user added from Columns…), the table scrolls sideways inside its
+     box with a note, instead of clipping them out of reach; the default columns fit from 1180 px, so the page never scrolls */
+  function fitTables() {
+    $$('.tbl.desk').forEach((b) => {
+      const t = b.querySelector('table'), over = !!t && b.clientWidth > 0 && t.getBoundingClientRect().width > b.clientWidth + 1;
+      b.classList.toggle('scrollx', over);
+      const hint = b.previousElementSibling && b.previousElementSibling.classList.contains('sx-hint') ? b.previousElementSibling : null;
+      if (over && !hint) b.insertAdjacentHTML('beforebegin', '<div class="sx-hint">More columns than fit: scroll the table sideways →</div>');
+      else if (!over && hint) hint.remove();
+    });
   }
   function route() { closeDrawer(); render._animate = true; state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
 
@@ -952,6 +964,7 @@
     const up = () => {
       document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.body.classList.remove('resizing');
       state.colW[colKey(id)] = W; try { localStorage.setItem('sw-colw', JSON.stringify(state.colW)); } catch { /* private window */ }
+      fitTables();
     };
     document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
   });
@@ -972,7 +985,7 @@
   window.addEventListener('popstate', (e) => { if (!$('#drawer').hidden && !e.state?.drawer) closeDrawer(); });
   let wasNarrow = narrow();
   let wasTier = tier();
-  window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } });
+  window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } else fitTables(); });
 
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); toast('Copied'); }

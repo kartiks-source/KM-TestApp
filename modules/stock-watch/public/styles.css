@@ -289,7 +289,15 @@ table.fixed td:first-child { max-width: none; }
 @media (max-width: 1180px) { .tbl .p2 { display: none; } .tbl td:first-child { max-width: 200px; } .tbl td .sku { display: none; } }
 /* Reorder 1181–1400: the name cell also holds tick + spark + dot (~85 px), and Why needs ≤ 370 px; give the name the slack
    (critic UI-2: 1280 cut 48/50 names, incl. the variant suffix → 3/50) */
-@media (min-width: 1181px) and (max-width: 1400px) { .tbl table[data-table="reorder"] td:first-child { max-width: 420px; } }
+@media (min-width: 1181px) and (max-width: 1400px) {
+  .tbl table[data-table="reorder"] td:first-child { max-width: min(420px, calc(100vw - 870px)); }
+  /* the All tab's Status column takes ~60 px of that, or Sales lost is cut off at 1280 (critic r2 UI-1) */
+  .tbl table[data-table="reorder"]:has(th[data-k="status"]) td:first-child { max-width: min(360px, calc(100vw - 925px)); }
+}
+/* a table wider than its box (columns added from Columns…) scrolls inside its box, never clipped out of reach (critic r2 UI-2) */
+.tbl.scrollx { overflow-x: auto; }
+.tbl.scrollx th { top: auto; }   /* the box is now the scroll container: a 60 px sticky offset would sit the header over row 1 */
+.sx-hint { font-size: 12px; color: var(--soft); margin: -4px 0 4px; text-align: right; }
 .headline p .lostv { font-weight: 600; }
 .hfind { margin-left: auto; display: inline-flex; gap: 6px; align-self: center; }
 .hfind .search { flex: none; width: 200px; }

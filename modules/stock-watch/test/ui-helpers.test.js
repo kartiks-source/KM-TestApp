@@ -136,3 +136,43 @@ test('Marketing phone home leads with its decision: "Pause promotion on N produc
   assert.deepEqual(pg.errors, []);
   await pg.context().close();
 });
+
+test('Reorder: every tab fits its box at 1280 and 1400 (All keeps Sales lost on screen); no sideways page scroll (critic r2 UI-1)', opts, async () => {
+  for (const w of [1280, 1400]) {
+    const pg = await page(w, 900);
+    await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('.tbl.desk table');
+    for (const f of ['today', 'week', 'all']) {
+      await pg.click(`[data-filter-reorder="${f}"]`); await pg.waitForSelector(`[data-filter-reorder="${f}"].on`);
+      const m = await pg.evaluate(() => { const b = document.querySelector('.tbl.desk'), t = b.querySelector('table'), lost = t.querySelector('th[data-k="lost"]');
+        return { tw: t.getBoundingClientRect().width, bw: b.clientWidth, lostRight: lost.getBoundingClientRect().right, page: document.documentElement.scrollWidth - innerWidth }; });
+      assert.ok(m.tw <= m.bw + 1, `${w} ${f}: table ${m.tw} in ${m.bw}`);
+      assert.ok(m.lostRight <= w, `${w} ${f}: Sales lost header at ${m.lostRight}`);
+      assert.equal(m.page, 0, `${w} ${f}: page scrolls sideways`);
+    }
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+});
+
+test('Columns: added columns that do not fit scroll inside the table (with a note), never clipped; default view has no note (critic r2 UI-2)', opts, async () => {
+  const all = { reorder: ['stock', 'perDay', 'outs'], products: ['type', 'perDay', 'unitsSold', 'lostPct', 'outs', 'excessValue', 'lostProfit', 'margin'] };
+  for (const w of [1280, 1440]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
+    await ctx.addInitScript((c) => { if (location.search.includes('cols=all')) localStorage.setItem('sw-cols', JSON.stringify(c)); else localStorage.removeItem('sw-cols'); }, all);
+    const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));
+    for (const view of ['products', 'reorder']) {
+      await pg.goto(`${base}/?role=all#${view}`); await pg.waitForSelector('.tbl.desk table');
+      assert.equal(await pg.$('.sx-hint'), null, `${w} ${view}: default columns fit`);
+      await pg.goto(`${base}/?role=all&cols=all#${view}`); await pg.waitForSelector('.tbl.desk table');
+      const m = await pg.evaluate(() => { const b = document.querySelector('.tbl.desk'), t = b.querySelector('table');
+        return { tw: Math.round(t.getBoundingClientRect().width), sw: b.scrollWidth, bw: b.clientWidth, sx: getComputedStyle(b).overflowX, hint: !!document.querySelector('.sx-hint'), page: document.documentElement.scrollWidth - innerWidth }; });
+      if (m.tw > m.bw + 1) {
+        assert.equal(m.sx, 'auto', `${w} ${view}: table ${m.tw} in ${m.bw} must scroll`); assert.ok(m.hint, 'note shown');
+        assert.ok(m.sw >= m.tw - 1, `${w} ${view}: every column reachable (${m.sw} ≥ ${m.tw})`);
+      }
+      assert.equal(m.page, 0, `${w} ${view}: the page itself never scrolls sideways`);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
