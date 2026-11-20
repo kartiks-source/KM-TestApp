@@ -28,6 +28,7 @@ export default defineRailway(() => {
       ADMIN_PASSWORD: preserve(),
       VIEW_PASSWORD: preserve(),
       RAILWAY_RUN_UID: preserve(),
+      KEEP_DAYS: preserve(),   // backups kept (SW-055)
       PERFORMITY_POC_API_URL: preserve(),
       PERFORMITY_POC_API_KEY: preserve(),
       PERFORMITY_BRAND_ID: preserve(),
