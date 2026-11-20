@@ -150,6 +150,7 @@ function enrich(r, { decisions = {}, rates = null } = {}) {
     decide: decide.length, decided: decided.length,
   });
   r.decide = decide; r.decided = decided;
+  require('./budget').annotate(r);   // SW-041: profit kept per ₹ on every reorder row (LOGIC.md §6d)
   return r;
 }
 

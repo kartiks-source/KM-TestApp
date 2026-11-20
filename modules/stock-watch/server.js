@@ -35,6 +35,7 @@ const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Pus
 const decide = require('./src/decide');
 const suppliers = require('./src/suppliers');   // SW-040: supplier table + SKU map (suppliers.json)
 const supplierRules = require('./src/supplier-rules');
+const budget = require('./src/budget');   // SW-041: cash budget cut line
 const period = require('./src/period');
 const digests = require('./src/digest-service');
 const scope = require('./src/scope');
@@ -540,9 +541,13 @@ async function storeApi(req, res, url, role, id) {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));
     /* SW-040: Vendor = the product's supplier (SKU map, else Shopify vendor); ?supplier=<name> = that supplier's PO draft (lines to order only) */
+    const filter = url.searchParams.get('filter') || 'all';
     const one = url.searchParams.has('supplier') ? supplierRules.cleanName(url.searchParams.get('supplier')).toLowerCase() : null;
-    const keep = one == null ? null : (x) => x.orderQty > 0 && String(x.supplier || '').toLowerCase() === one;
-    const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: Object.fromEntries(Object.entries(sups).map(([k, v]) => [k, v.name])), keep });
+    /* SW-041: ?budget=<₹> keeps only the rows above the cut line of the same view (src/budget.js, LOGIC.md §6d) */
+    const B = filter === 'ordered' ? null : budget.parse(url.searchParams.get('budget'));
+    const fit = B == null ? null : budget.cut(helpers.reorderRows(r.reorder, { filter, q: url.searchParams.get('q') || '' }), B).fit;
+    const keep = one == null && !fit ? null : (x) => (one == null || (x.orderQty > 0 && String(x.supplier || '').toLowerCase() === one)) && (!fit || fit.has(String(x.id)));
+    const lines = helpers.poLines(r, { filter, q: url.searchParams.get('q') || '', vendors: Object.fromEntries(Object.entries(sups).map(([k, v]) => [k, v.name])), keep });
     const what = one == null ? 'reorder' : `po-${fileSlug(url.searchParams.get('supplier')).replace(/-$/, '') || 'no-supplier'}`;
     return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="${what}-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
