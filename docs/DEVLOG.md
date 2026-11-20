@@ -3,6 +3,13 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · Sprint 3 · E-data
+stock-watch, branch `sprint3/E-data` (not merged, not deployed). SW-045, SW-050.
+- SW-045 import preview: `POST /api/import/preview` (writes nothing) + `?map=` on `/api/import`; `src/csvmap.js` reads Shopify Products / Orders exports as they come (SKU as Variant ID or the store's ID for that SKU; copy-down per Handle / order; image rows ignored; untracked, draft/archived, cancelled/voided/refunded left out; line discount netted). Mapping remembered per store + header set (`mappings.json`, last 50). Page (`public/import-ui.js`): kind, mapping selects, first 5 rows as read, Upload stopped while a needed column is unmapped. Stock rows keep `vendor` (PO CSV). LOGIC §1b, API, FORMATS, SECURITY.
+- SW-050 `/api/v1`: path rewrite before routing, so every route answers at both paths with the same checks; `GET /api/v1/summary` (totals only, <1.5 KB), `GET /api/v1/rows` (cursor pages, variant-ID order, ≤ 500). ADR-0016, API §v1 with examples, LOGIC §5c.
+- Tests: `csvmap`, `import-api`, `apiv1` (node:test), `ui-import` (Playwright, 1440 + 390, 0 px sideways; added to `test:ui`).
+- Open: order-level discount codes not spread over lines; per-tool API keys (SW-060). ADR number 0016 may clash with other sprint3 streams: renumber at merge.
+
 ## 2026-11-20 · final critic round 2 fixes
 stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, this entry; not pushed, not deployed).
 - L1 (P1): `planWithOrder` keeps the row's own status unless the PO covers the need (Ordered): 5/day, 10 in stock, 50 on order stayed Critical (was This week, off Order today). LOGIC §6b; onorder.test (fails on the old code).
