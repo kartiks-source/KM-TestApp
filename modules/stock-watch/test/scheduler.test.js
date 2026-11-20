@@ -27,6 +27,7 @@ test('pull loop: stores one after the other, never two at once; a manual pull qu
   };
   S.pullOrders = async (since, { onPage }) => { await onPage([`#${scope.id()}`], [{ t: Date.now(), order: `#${scope.id()}`, line: '1', variantId: `v-${scope.id()}`, sku: 'x', qty: 1, price: 100 }], Date.now()); return { total: 1 }; };
   C.refreshCollections = async () => ({ skipped: true });
+  require('../src/token-scopes').check = async () => ({ handles: [], write: [] });   // SW-051 scope check: stubbed like the reads
 
   const loop = pullAll();
   const manual = syncShopify('beta');                       // while the loop starts: queued like any other pull

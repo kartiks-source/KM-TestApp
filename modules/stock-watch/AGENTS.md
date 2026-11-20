@@ -51,7 +51,9 @@ Google Sheet CSV / upload ───┘
 | `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |
 | `src/runs.js` | sync progress ("Syncing · 2,340 orders") and the last 20 runs: start, time taken, rows, error, notes (SW-030) |
 | `src/keys.js` | where the Shopify key comes from: Performity POC API, Azure Key Vault or Railway variables; `access(storeId)`, caches per store; Performity calls paced (≥ 2.1 s, token calls per brand ≥ 6.1 s) |
-| `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
+| `src/shopify.js` | stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget; every call through the read-only guard |
+| `src/gql-guard.js` | the read-only guard (SW-051): a GraphQL tokeniser (comments, strings, block strings as whole tokens); every top-level definition must be `query`, the `{` shorthand, or a fragment beside one. Tests: `test/gql-guard.test.js` |
+| `src/token-scopes.js` | token permissions once per pull (SW-051): `currentAppInstallation.accessScopes`; own app (vault / variables) with any `write_*` → pull refused; Performity token → `shopify.writeScopes`, Data note, logged once per store |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |

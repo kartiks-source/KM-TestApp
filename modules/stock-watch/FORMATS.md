@@ -161,7 +161,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
                 "spells": "?[ { from: 0, to: 0, status: 'DRAFT' } ]" } },
   "source": "empty|demo|live", "everLive": true,
   "lastSync": null, "lastSyncError": null,
-  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null },
+  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null, "writeScopes": "?['write_products']" },
   "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)|server (env)", "key": "leadDays|…|digest.hour|digest.roles|digest.paused|digest.webhook", "old": 7, "new": 10 } ],
   "syncRuns":    [ { "kind": "shopify|sheet", "start": 0, "ms": 0, "stock": 0, "orders": 0, "lines": 0, "error": null, "notes": [] } ],
   "digest": { "hour": 9, "roles": ["ceo", "founder", "ops", "marketing", "finance"], "paused": false, "webhookSeen": "?everyone → host; ceo → host",
@@ -173,5 +173,6 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 - Rows older than 120 days are pruned, except per variant the newest stock row and the row that opened a stock-out still running (ADR-0010).
 - `catalog` is Shopify only, replaced whole on every stock pull; a variant that disappears stays as `DELETED` until it is 120 days gone. `spells` (optional) are the variant's past inactive spells, added when it turns active again (from = `inactiveSince`, to = the pull that saw it active); at most 20, each dropped 120 days after it ends (LOGIC §1). Older files without it load as before.
 - `settingsLog` keeps 200 entries, newest first; the ingest key shows as `(old key)` → `(new key)`. `syncRuns` keeps 20. `digest.log` keeps 50.
+- `shopify.writeScopes` (optional, SW-051): the `write_*` scopes the last pull's token had; only ever non-empty for Performity's token (our own apps with one are refused), shown on Data as "Token also allows writes; this app only reads". Older files without it load as `[]`.
 - Keys starting with `_` are in-memory indexes and never written.
 - A file is accepted as a store when it is a JSON object with `stock` and `orders` arrays (restore also needs `settings`).

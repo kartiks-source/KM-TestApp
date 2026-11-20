@@ -39,6 +39,7 @@ const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
+const tokenScopes = require('./src/token-scopes');   // refuse our own apps' write scopes; note Performity's (SW-051)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -259,7 +260,7 @@ function shopifyStatus(id = scope.id()) {
   const k = keys.status(id); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
     lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: pulls.has(id), progress: runs.progress(progress.get(id) || null),
-    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
+    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION, writeScopes: st.writeScopes || [] };
 }
 /** Pull one store from Shopify (default: the current store). Queued behind any other store's pull. */
 function syncShopify(id = scope.id()) {
@@ -279,6 +280,8 @@ async function pullOne(id) {
   try {
     store.endDemo();   // never mix demo with live data: rows, Mark ordered and decisions go (SW-007)
     if (store.load().settings.storeName && isDemoName(store.load().settings.storeName)) store.setSettings({ storeName: '' });   // the registry's name shows instead
+    const sc = await tokenScopes.check(keys.status(id).source, id);   // SW-051: own app with write_* → refused; Performity → noted
+    store.setShopify({ writeScopes: sc.write });
     const s = await shopify.pullStock(store.load().shopify.lastQty);
     stores.noteShop(id, keys.status(id).store);
     const stock = store.add('stock', s.rows, 'shopify');
