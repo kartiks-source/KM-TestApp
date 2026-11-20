@@ -8,12 +8,15 @@
  *   pullStock   every variant's total stock now; a stock row is stored only when it changed, and the
  *               whole catalog (stock now, price, cost, type, tags, status) is returned on every pull
  *   pullOrders  orders changed since the last pull (first run: created in the last 60 days). Each order's
- *               lines are replaced whole, so later cancellations, refunds and edits are picked up.
- *               What counts as a sale: not cancelled, not a test order, units net of refunds and
- *               removals (currentQuantity), price after line AND order-level discounts, without the tax
- *               (GST) inside it when the store's prices include tax (= Shopify's Net sales, LOGIC.md §5).
- *               Each line also keeps `ordered` (Shopify's original `quantity`): ordered − currentQuantity = units
- *               refunded, returned or removed (SW-064, LOGIC.md §9e). A fully refunded line is kept with qty 0.
+ *               lines are replaced whole, so later cancellations, refunds and edits are picked up (a refund or
+ *               a cancellation moves the order's updated_at).
+ *               What counts as a sale: not cancelled, not a test order, units kept = currentQuantity less the
+ *               units on the order's refunds, price after line AND order-level discounts, without the tax (GST)
+ *               inside it when the store's prices include tax (= Shopify's Net sales by order date, LOGIC.md §5).
+ *               Each line also keeps `ordered` (Shopify's `quantity`) and, from the order's refunds (SW-064,
+ *               1.1.3, LOGIC.md §9e): `returned` units, `refund` ₹ ex GST, `cancelled` units (cancelled before
+ *               shipping: restock type CANCEL, or the whole order cancelled). A cancelled order's lines are kept
+ *               with qty 0 (never a sale), all units returned and cancelled, as Shopify's reports count them.
  *
  * Paced by Shopify's own cost budget: waits whenever less than half of it is left,
  * so the store's other apps are never starved.
@@ -77,8 +80,12 @@ const STOCK_Q = `query Stock($after: String) {
 const LINE_FIELDS = 'id quantity currentQuantity sku variant { id } discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } } taxLines { priceSet { shopMoney { amount } } }';
 /** Stored order prices are ex tax since 1.1.1. A store whose orders were read before (tax-inclusive) re-reads them once. */
 const PRICE_BASIS = 'exTax';
-/** Stored order lines carry `ordered` since SW-064. A store whose lines were read before re-reads them once (same as PRICE_BASIS). */
-const ORDER_FIELDS = 'ordered';
+/** Stored order lines carry `ordered` (SW-064) and refunds: `returned`, `refund`, `cancelled`, and cancelled orders' lines
+ *  (1.1.3). A store whose lines were read before re-reads its last 60 days once (same as PRICE_BASIS). */
+const ORDER_FIELDS = 'refunds';
+/** Refund lines: units, restock type (CANCEL = removed before shipping), the line's ₹ after discounts and its tax. */
+const REFUND_FIELDS = 'id createdAt refundLineItems(first: 50) { pageInfo { hasNextPage endCursor } nodes { quantity restockType lineItem { id } subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } } }';
+const REFUNDS_PER_ORDER = 10;
 const ORDERS_Q = `query Orders($after: String, $q: String) {
   orders(first: 40, after: $after, query: $q, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
@@ -88,6 +95,22 @@ const ORDERS_Q = `query Orders($after: String, $q: String) {
         pageInfo { hasNextPage endCursor }
         nodes { ${LINE_FIELDS} }
       }
+      refunds(first: ${REFUNDS_PER_ORDER}) { ${REFUND_FIELDS} }
+    }
+  }
+}`;
+
+/** An order with more refunds than ORDERS_Q reads (rare): all of them. */
+const MORE_REFUNDS_Q = `query Refunds($id: ID!) {
+  order(id: $id) { refunds(first: 250) { ${REFUND_FIELDS} } }
+}`;
+
+/** A refund with more than 50 lines (rare): the rest, page by page. */
+const REFUND_LINES_Q = `query RefundLines($id: ID!, $after: String) {
+  refund(id: $id) {
+    refundLineItems(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { quantity restockType lineItem { id } subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } }
     }
   }
 }`;
@@ -144,16 +167,45 @@ function netUnitPrice(order, l) {
   return Math.max(0, Math.round((paid - tax / q) * 100) / 100);
 }
 
-/** An order → its sale lines. Cancelled and test orders have none. qty = units kept (currentQuantity); ordered = units
- *  first ordered (quantity), so ordered − qty = refunded / returned / removed (SW-064). A fully refunded line stays, qty 0,
- *  so its return counts; the engine leaves qty-0 lines out of sales. */
-function orderRows(order, lines) {
-  if (order.test || order.cancelledAt) return [];
-  const t = Date.parse(order.createdAt);
-  return lines.filter((l) => l.variant?.id && (l.currentQuantity > 0 || l.quantity > 0)).map((l) => {
-    const qty = Math.max(0, Number(l.currentQuantity) || 0);
-    const r = { t, order: order.name, line: String(l.id || '').replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '', qty, price: netUnitPrice(order, l) };
-    if (Number(l.quantity) > 0) r.ordered = Math.max(qty, Number(l.quantity));
+/** The order's refunds per line item ID: units, ₹ ex GST (the refund line's subtotal after discounts, less its tax when
+ *  the order's prices include tax, as Shopify's "Returns") and units cancelled before shipping (restock type CANCEL). */
+function refundsByLine(order, refunds) {
+  const by = new Map();
+  for (const f of refunds || []) {
+    for (const x of f?.refundLineItems?.nodes || []) {
+      const id = String(x?.lineItem?.id || ''); if (!id) continue;
+      const q = Math.max(0, Number(x.quantity) || 0);
+      const sub = Number(x.subtotalSet?.shopMoney?.amount) || 0, tax = Number(x.totalTaxSet?.shopMoney?.amount) || 0;
+      const r = by.get(id) || { units: 0, value: 0, cancel: 0 };
+      r.units += q; r.value += order.taxesIncluded ? sub - tax : sub;
+      if (x.restockType === 'CANCEL') r.cancel += q;
+      by.set(id, r);
+    }
+  }
+  return by;
+}
+
+/** An order → its lines (LOGIC.md §What counts as a sale, §9e). Test orders have none.
+ *  qty = units kept: currentQuantity, less refunded units (a return need not lower currentQuantity); ordered = Shopify's
+ *  quantity; returned / refund ₹ / cancelled from the order's refunds (only when > 0). A cancelled order: qty 0, every
+ *  unit returned and cancelled. A line with qty 0 is kept so its return counts; the engine leaves it out of ₹ sold. */
+function orderRows(order, lines, refunds = order.refunds) {
+  if (order.test) return [];
+  const t = Date.parse(order.createdAt), gone = !!order.cancelledAt, back = refundsByLine(order, refunds);
+  const keep = (l) => l.variant?.id && (gone ? Number(l.quantity) > 0 : (l.currentQuantity > 0 || l.quantity > 0));
+  return lines.filter(keep).map((l) => {
+    const id = String(l.id || ''), ordered = Math.max(0, Number(l.quantity) || 0), price = netUnitPrice(order, l);
+    const rf = back.get(id) || { units: 0, value: 0, cancel: 0 };
+    const returned = gone ? ordered : (ordered ? Math.min(ordered, rf.units) : rf.units);
+    const qty = gone ? 0 : Math.max(0, Math.min(Number(l.currentQuantity) || 0, ordered ? ordered - returned : Infinity));
+    const r = { t, order: order.name, line: id.replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '', qty, price };
+    if (ordered > 0) r.ordered = Math.max(qty, ordered);
+    if (returned > 0) {
+      r.returned = returned;
+      r.refund = Math.round((rf.value + Math.max(0, returned - rf.units) * price) * 100) / 100;   // units with no refund line: at the price paid
+      const cancelled = gone ? ordered : Math.min(returned, rf.cancel);
+      if (cancelled > 0) r.cancelled = cancelled;
+    }
     return r;
   });
 }
@@ -190,7 +242,18 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
         const m = await q(MORE_LINES_Q, { id: o.id, after: li.endCursor });
         lines.push(...m.order.lineItems.nodes); li = m.order.lineItems.pageInfo;
       }
-      rows.push(...orderRows(o, lines));
+      let refunds = o.refunds || [];
+      if (refunds.length >= REFUNDS_PER_ORDER) refunds = (await q(MORE_REFUNDS_Q, { id: o.id })).order.refunds || [];
+      for (let i = 0; i < refunds.length; i++) {   // one call at a time, so the cost pacing holds
+        const rl = refunds[i].refundLineItems; if (!rl?.pageInfo?.hasNextPage) continue;
+        const nodes = [...rl.nodes]; let pi = rl.pageInfo;
+        while (pi.hasNextPage) {
+          const m = await q(REFUND_LINES_Q, { id: refunds[i].id, after: pi.endCursor });
+          nodes.push(...m.refund.refundLineItems.nodes); pi = m.refund.refundLineItems.pageInfo;
+        }
+        refunds = refunds.map((f, j) => (j === i ? { ...f, refundLineItems: { nodes } } : f));
+      }
+      rows.push(...orderRows(o, lines, refunds));
       cursor = Math.max(cursor, Date.parse(o.updatedAt) || Date.parse(o.createdAt) || 0);
     }
     total += rows.length;
@@ -200,4 +263,4 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
   return { total, cursor };
 }
 
-module.exports = { gql, assertReadOnly, diffStock, orderRows, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, ORDER_FIELDS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };
+module.exports = { gql, assertReadOnly, diffStock, orderRows, refundsByLine, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, ORDER_FIELDS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };

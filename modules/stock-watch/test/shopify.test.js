@@ -138,13 +138,51 @@ test('keys: client ID + secret are swapped for a 24-hour token, reused until nea
   } finally { process.env = keep; global.fetch = realFetch; K.clear(); }
 });
 
-/* SW-064: each line keeps Shopify's original `quantity` as `ordered`; ordered − currentQuantity = units returned. */
-test('orders: lines keep `ordered`; a fully refunded line stays with qty 0 so its return counts', () => {
+/* SW-064, 1.1.3: each line keeps Shopify's `quantity` as `ordered`; returns come from the order's refunds. Live check
+ * (Sammsara, 20 Nov 2026): a refund need not lower currentQuantity, and Shopify's Returns count cancelled orders. */
+const refund = (lines, at = '2026-11-19T10:00:00Z') => ({ id: 'gid://shopify/Refund/1', createdAt: at, refundLineItems: { pageInfo: { hasNextPage: false }, nodes: lines.map(([id, q, sub, tax, type = 'RETURN']) => ({ quantity: q, restockType: type, lineItem: { id: `gid://shopify/LineItem/${id}` }, subtotalSet: { shopMoney: { amount: String(sub) } }, totalTaxSet: { shopMoney: { amount: String(tax) } } })) } });
+const gstLine = (id, qty, cur) => ({ id: `gid://shopify/LineItem/${id}`, quantity: qty, currentQuantity: cur, sku: 'A', variant: { id: 'gid://shopify/ProductVariant/9' },
+  discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: '1180' } }, taxLines: [{ priceSet: { shopMoney: { amount: String(180 * qty) } } }] });
+
+test('orders: returns from refunds — units, ₹ ex GST, cancelled before shipping; currentQuantity not trusted to drop', () => {
   const o = { name: '#1002', createdAt: '2026-11-18T10:00:00Z', test: false, cancelledAt: null, taxesIncluded: true };
-  const line = (id, qty, cur) => ({ id: `gid://shopify/LineItem/${id}`, quantity: qty, currentQuantity: cur, sku: 'A', variant: { id: 'gid://shopify/ProductVariant/9' },
-    discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: '1180' } }, taxLines: [{ priceSet: { shopMoney: { amount: String(180 * qty) } } }] });
-  const rows = S.orderRows(o, [line(1, 3, 2), line(2, 1, 0)]);
-  assert.deepEqual(rows.map((r) => [r.line, r.qty, r.ordered, r.price]), [['1', 2, 3, 1000], ['2', 0, 1, 1000]]);   // price ex GST
-  assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-19T00:00:00Z' }, [line(1, 3, 2)]), [], 'cancelled orders stay out');
-  assert.equal(S.ORDER_FIELDS, 'ordered');
+  /* line 1: 3 ordered, 1 returned, currentQuantity still 3; line 2: 1 ordered, removed before shipping (CANCEL), current 0;
+     line 3: an order edit took 1 off (current 1 of 2), no refund: not a return */
+  const rows = S.orderRows({ ...o, refunds: [refund([[1, 1, 1180, 180], [2, 1, 1180, 180, 'CANCEL']])] }, [gstLine(1, 3, 3), gstLine(2, 1, 0), gstLine(3, 2, 1)]);
+  assert.deepEqual(rows.map((r) => [r.line, r.qty, r.ordered, r.returned, r.refund, r.cancelled, r.price]),
+    [['1', 2, 3, 1, 1000, undefined, 1000], ['2', 0, 1, 1, 1000, 1, 1000], ['3', 1, 2, undefined, undefined, undefined, 1000]]);
+  /* refunds over two refund objects add up; taxesIncluded false: the subtotal is already ex tax */
+  const two = S.orderRows({ ...o, taxesIncluded: false, refunds: [refund([[1, 1, 900, 50]]), refund([[1, 1, 900, 50]])] }, [gstLine(1, 3, 3)]);
+  assert.deepEqual([two[0].qty, two[0].returned, two[0].refund], [1, 2, 1800]);
+  /* a cancelled order: lines kept with qty 0, every unit returned and cancelled, ₹ from its refund (₹0 gift line stays ₹0) */
+  const gone = S.orderRows({ ...o, cancelledAt: '2026-11-18T10:04:00Z', refunds: [refund([[1, 3, 3540, 540, 'CANCEL'], [2, 1, 0, 0, 'CANCEL']])] }, [gstLine(1, 3, 0), gstLine(2, 1, 0)]);
+  assert.deepEqual(gone.map((r) => [r.qty, r.ordered, r.returned, r.refund, r.cancelled]), [[0, 3, 3, 3000, 3], [0, 1, 1, 0, 1]]);
+  /* cancelled without refund lines (unpaid): every unit at the price paid */
+  assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-18T11:00:00Z', refunds: [] }, [gstLine(1, 2, 0)]).map((r) => [r.qty, r.returned, r.refund, r.cancelled]), [[0, 2, 2000, 2]]);
+  assert.deepEqual(S.orderRows({ ...o, test: true }, [gstLine(1, 3, 3)]), [], 'test orders stay out');
+  assert.equal(S.ORDER_FIELDS, 'refunds');
+});
+
+test('orders: refunds are read with the order; over 10 refunds and over 50 refund lines are paged; read-only, one call at a time', async () => {
+  const now = Date.parse('2026-11-19T00:00:00Z');
+  const ten = Array.from({ length: 10 }, () => refund([[1, 0, 0, 0]]));
+  const big = { ...refund([[1, 1, 1180, 180]]), id: 'gid://shopify/Refund/9' };
+  big.refundLineItems.pageInfo = { hasNextPage: true, endCursor: 'r1' };
+  const page = { orders: { pageInfo: { hasNextPage: false }, nodes: [
+    { id: 'o1', name: '#1', createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z', taxesIncluded: true, lineItems: { pageInfo: { hasNextPage: false }, nodes: [gstLine(1, 4, 4)] }, refunds: ten },
+  ] } };
+  const docs = []; let inFlight = 0, most = 0;
+  const q = async (doc, v) => {
+    S.assertReadOnly(doc); docs.push(doc.match(/query (\w+)/)[1]);
+    inFlight++; most = Math.max(most, inFlight); await new Promise((r) => setTimeout(r, 1)); inFlight--;
+    if (doc.includes('query Refunds')) { assert.equal(v.id, 'o1'); return { order: { refunds: [big, refund([[1, 1, 1180, 180]])] } }; }
+    if (doc.includes('query RefundLines')) { assert.deepEqual([v.id, v.after], ['gid://shopify/Refund/9', 'r1']); return { refund: { refundLineItems: { pageInfo: { hasNextPage: false }, nodes: refund([[1, 1, 1180, 180]]).refundLineItems.nodes } } }; }
+    assert.match(doc, /refunds\(first: 10\)/); assert.match(doc, /restockType/);
+    return page;
+  };
+  const rows = [];
+  await S.pullOrders(null, { q, now, onPage: (n, r) => rows.push(...r) });
+  assert.deepEqual(docs, ['Orders', 'Refunds', 'RefundLines']);
+  assert.equal(most, 1, 'never two calls at once (cost pacing)');
+  assert.deepEqual([rows[0].ordered, rows[0].returned, rows[0].qty, rows[0].refund], [4, 3, 1, 3000]);
 });

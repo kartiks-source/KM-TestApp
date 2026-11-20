@@ -9,6 +9,14 @@ Older entries: [2026-11](devlog/2026-11.md)
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+## 2026-11-20 · returns from refunds, sales checked vs Shopify (1.1.3)
+stock-watch 1.1.3, on `main` (not pushed, not deployed). Fixes the SW-064 live check (app 5 units returned vs Shopify 259, 60 d).
+- Cause (found live, read-only): Shopify's *Returns* = cancelled orders (refund lines, restock CANCEL / RETURN), which we left out; Sammsara had no post-delivery refunds in 60 d. Also a refund need not lower `currentQuantity`.
+- Pull: orders query reads `refunds(first: 10) { refundLineItems(first: 50) { quantity restockType lineItem subtotalSet totalTaxSet } }` (cost 247 asked / 44 used; >10 refunds and >50 lines paged one call at a time; read-only guard). Lines get `returned`, `refund` (₹ ex GST), `cancelled`; qty = min(currentQuantity, ordered − refunded); cancelled orders' lines stored with qty 0. `ORDER_FIELDS` 'refunds' → one 60-day re-read.
+- Engine: Returns % = returned ÷ ordered incl. cancelled orders, by order date; `unitsCancelled`; product rows for variants only on cancelled orders. Demand (`demandQty`) = kept + returned after the sale, never cancelled; ₹ sold unchanged. CALC_VERSION 1.1.3. Demo sammsara-9.
+- Live check (real `pullOrders` vs ShopifyQL, IST days): returned 7/30/60 d app 30/94/185 vs Shopify 33/102/259; ₹ 1.20 L/3.78 L/7.61 L vs 1.40 L/4.03 L/10.13 L. Same orders restricted: ₹7,61,206 vs ₹7,61,208, top products exact; the gap = returns on orders placed before the window (52 orders bulk-cancelled 30 Sep). Sold vs Net sales: ₹12.40 L/67.33 L/1.348 Cr vs 12.21 L/67.07 L/1.323 Cr (+1.60/+0.38/+1.91%), gap = the same returns ₹ to ₹10. Kept by order date (LOGIC §What counts as a sale).
+- Open: Shopify return target (within 5% for 60 d by Shopify's own date) can't be met by order date on this window; documented.
+
 ## 2026-11-20 · roles off, brand switch only (1.1.2)
 stock-watch 1.1.2, on `main` (not pushed, not deployed). User: "remove roles, just keep it brand switch".
 - Store pill only switches brands (one brand: plain name, doesn't open); phone store bar the same. No role menu, no *Show me* on Data. Everyone sees everything.

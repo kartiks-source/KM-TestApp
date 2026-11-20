@@ -78,5 +78,20 @@ test('pull: orders read before SW-064 (no orderFields) are read again once from 
   S.pullOrders = prev;
   assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
   assert.ok(sinces[1] > 12345, 'then incremental');
-  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'ordered');
+  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'refunds');
+});
+
+/* 1.1.3: lines read by SW-064 (orderFields 'ordered') lack refunds: the 60-day backfill is read once more. */
+test('pull: orders read by SW-064 (orderFields "ordered") are read again once for refunds', async () => {
+  const store = require('../src/store');
+  const sinces = [];
+  const prev = S.pullOrders;
+  S.pullOrders = async (since, opts) => { sinces.push(since); return prev(since, opts); };
+  scope.run('alpha', () => store.setShopify({ priceBasis: 'exTax', orderFields: 'ordered', ordersCursor: 12345 }));
+  await syncShopify('alpha');
+  await syncShopify('alpha');
+  S.pullOrders = prev;
+  assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
+  assert.ok(sinces[1] > 12345, 'then incremental');
+  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'refunds');
 });

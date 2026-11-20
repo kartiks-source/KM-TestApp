@@ -296,6 +296,7 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: pull keeps each line's original `quantity` as `ordered` (no extra API call); returned = ordered − currentQuantity, by order date; per product `unitsOrdered`, `unitsReturned`, `returnPct` (null under 5 ordered), `refundValue` (ex GST) + store totals; demand / ₹ lost unchanged; one 60-day re-read for old lines; Products column Returns % (amber 15%+, – under 5), High returns chip, drawer line; LOGIC §9e; demo returns.
 - Source: owner, 20 Nov 2026.
 - Status: Done (branch `feature/returns`). Tests: `shopify`, `engine`, `scheduler`, `server`, browser `ui-returns`. Open: `ui-helpers` chip count 6 → 7 for the integrator; not checked live against ShopifyQL `quantity_returned` yet.
+- Fix 1.1.3: live check failed (5 vs 259 units, 60 d). Returns now from `order.refunds`, cancelled orders included (Shopify counts them as returns); demand = kept + returned after the sale, never cancelled. Checked live: same orders agree to ₹2; by Shopify's return date 185 vs 259 (52 orders placed before the window, cancelled 30 Sep). LOGIC §9e, DEVLOG 2026-11-20.
 
 ## Later
 

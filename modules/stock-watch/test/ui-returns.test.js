@@ -45,7 +45,7 @@ test('1440: Returns % column (amber at 15%+), High returns chip, drawer line', o
   assert.ok(cells.length > 0 && cells.every((c) => parseFloat(c) >= 15), `every row 15%+: ${cells.join(' ')}`);
   await pg.click('#view table tbody tr');
   await pg.waitForSelector('#returns-tile');
-  assert.match(await pg.textContent('#returns-tile'), /^Returned: [\d.]+% \([\d,]+ of [\d,]+\) · ₹.+ refunded$/);
+  assert.match(await pg.textContent('#returns-tile'), /^Returned: [\d.]+% \([\d,]+ of [\d,]+(, [\d,]+ cancelled)?\) · ₹.+ refunded$/);
   assert.equal(await sideways(pg), 0);
   assert.deepEqual(pg.errors, []);
 });

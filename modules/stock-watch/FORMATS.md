@@ -31,7 +31,7 @@ The same two columns sets everywhere: Shopify Flow → Google Sheet tabs, Sheet 
 | 2 | Order | | order name, e.g. `#1042` |
 | 3 | Variant ID | yes | as above |
 | 4 | SKU | | |
-| 5 | Qty | yes | must be > 0 (refunds netted before it gets here; only the Shopify pull stores a qty-0 fully refunded line, with `ordered`) |
+| 5 | Qty | yes | must be > 0 (refunds netted before it gets here; only the Shopify pull stores qty-0 lines, fully refunded or on a cancelled order, with `ordered` and `returned`) |
 | 6 | Unit price | | price paid after discounts; blank = 0 |
 
 ### Header names (CSV and Sheet)
@@ -184,7 +184,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
   },
   "stock":  [ { "t": 0, "variantId": "", "sku": "", "product": "", "variant": "", "before": 0, "now": 0, "price": 0,
                 "type": "?", "cost": "?", "vendor": "?", "src": "shopify|flow|sheet|csv|demo|rebuilt" } ],
-  "orders": [ { "t": 0, "order": "#1001", "line": "?", "variantId": "", "sku": "", "qty": 1, "ordered": 1, "price": 0, "src": "…" } ],   // price: Shopify pull = ex tax (1.1.1); ordered: Shopify pull only (SW-064)
+  "orders": [ { "t": 0, "order": "#1001", "line": "?", "variantId": "", "sku": "", "qty": 1, "ordered": 1, "returned": "?0", "refund": "?0", "cancelled": "?0", "price": 0, "src": "…" } ],   // price: Shopify pull = ex tax (1.1.1); ordered, returned, refund, cancelled: Shopify pull only (SW-064, 1.1.3)
   "catalog": { "<variantId>": { "productId": "", "product": "", "variant": "", "sku": "", "type": "", "vendor": "", "tags": [],
                 "price": 0, "cost": null, "status": "ACTIVE|ARCHIVED|DRAFT|UNTRACKED|DELETED", "tracked": true, "active": true,
                 "stock": 0, "seenAt": 0, "inactiveSince": "?",
@@ -193,7 +193,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
   "lastSync": null, "lastSyncError": null,
   "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null, "writeScopes": "?['write_products']",
                "priceBasis": "?'exTax'",
-               "orderFields": "?'ordered'",
+               "orderFields": "?'refunds'",
                "historyRebuiltAt": "?0", "history": "?{ at, v, ok, kept, total, changed, flat, dropped, droppedLog, droppedCheck, check: { lines, bad, badUnits, variants }, from, until, rows, calls, note }" },
   "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)|server (env)", "key": "leadDays|…|digest.hour|digest.roles|digest.paused|digest.webhook", "old": 7, "new": 10 } ],
   "syncRuns":    [ { "kind": "shopify|sheet", "start": 0, "ms": 0, "stock": 0, "orders": 0, "lines": 0, "error": null, "notes": [] } ],
@@ -209,6 +209,6 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 - `shopify.writeScopes` (optional, SW-051): the `write_*` scopes the last pull's token had; only ever non-empty for Performity's token (our own apps with one are refused), shown on Data as "Token also allows writes; this app only reads". Older files without it load as `[]`.
 - `src: 'rebuilt'` stock rows (SW-063, LOGIC §1c): stock before the store's first Shopify read, rebuilt from Shopify's change log; same fields as a pulled row, only times before the first live row; replaced whole on each rebuild (`store.setRebuilt`). `shopify.historyRebuiltAt` (optional) = when the rebuild last ran (set even when it was skipped, so it runs once per store; reset with the rest of `shopify` by Clear / demo); `shopify.history` = its outcome (`v` = rules version, `history.VERSION`, 2 since 1.1.1; a file without `v` or with an older one is rebuilt on the next pull; `kept` of `total` variants; `dropped` = `droppedLog` (rebuilt stock below min(stock at the first read, 0)) + `droppedCheck` (failed the order check); `check` = order lines in the rebuilt span, how many fell inside a rebuilt stock-out with no logged drop, their units, and the variants they hit; `from`/`until` = rebuilt span; `note` = why it was skipped, refused (check over 1%) or the last re-run failed). Older files without them load as before; no schema bump.
 - Order `price` from the Shopify pull is the unit price paid after all discounts **without tax** when the order's prices include it (1.1.1, LOGIC §What counts as a sale). `shopify.priceBasis: 'exTax'` marks a store whose orders were read that way; a store without it clears `ordersCursor` once on its next pull, so the last 60 days of orders are read again (older stored orders keep the tax-inclusive price until they age out). Flow / Sheet / CSV prices are stored as sent.
-- Order `ordered` (SW-064, LOGIC §9e), Shopify pull only: the line's original `quantity`; `qty` = `currentQuantity` (units kept), so `ordered − qty` = units refunded, returned or removed. A fully refunded line is stored with `qty: 0` (never a sale; the engine drops it from sales). Rows without `ordered` (older pulls, Flow / Sheet / CSV) count no returns. `shopify.orderFields: 'ordered'` marks a store whose lines carry it; a store without it clears `ordersCursor` once on its next pull (the 60-day backfill is read again, like `priceBasis`). No schema bump.
+- Order `ordered`, `returned`, `refund`, `cancelled` (SW-064, 1.1.3, LOGIC §9e), Shopify pull only. `ordered` = the line's `quantity`. From the order's refunds (`order.refunds.refundLineItems`): `returned` = units refunded (any restock type), `refund` = their ₹ (line subtotal after discounts, less its tax when the order's prices include tax; the whole line's, not per unit), `cancelled` = units cancelled before shipping (restock type `CANCEL`); each written only when > 0. `qty` = units kept = `min(currentQuantity, ordered − returned)` (a refund need not lower `currentQuantity`). A **cancelled order**'s lines are stored too: `qty: 0`, `returned` = `cancelled` = `ordered`, `refund` from its refund lines (units without one at the price paid). `qty: 0` lines are never sales. Rows without `returned` count no returns. `shopify.orderFields: 'refunds'` marks a store whose lines carry them; any other value (`'ordered'` from SW-064, or none) clears `ordersCursor` once on its next pull (the 60-day backfill is read again, like `priceBasis`). No schema bump.
 - Keys starting with `_` are in-memory indexes and never written.
 - A file is accepted as a store when it is a JSON object with `stock` and `orders` arrays (restore also needs `settings`).

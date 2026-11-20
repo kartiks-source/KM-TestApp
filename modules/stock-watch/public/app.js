@@ -598,8 +598,8 @@
   /* SW-064: "High returns" (15%+ of units ordered came back, 5+ ordered) only when some product qualifies */
   const HIGH_RETURN = 15;
   const productTabs = (f) => (state.report.totals.highReturns || f === 'returns' ? [...PRODUCT_TABS, ['returns', 'High returns']] : PRODUCT_TABS);
-  const RETURNS_TIP = 'Units refunded, returned or removed ÷ units ordered, orders placed in the period (– under 5 units ordered); ₹ at the price paid, ex GST';
-  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} units came back · ${esc(money(p.refundValue))} refunded">${n1(p.returnPct)}%</span>`);
+  const RETURNS_TIP = 'Units returned or cancelled ÷ units ordered, orders placed in the period, cancelled orders included as in Shopify’s Returns (– under 5 units ordered); ₹ refunded ex GST';
+  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} units came back${p.unitsCancelled ? ` (${inr.format(p.unitsCancelled)} cancelled before shipping)` : ''} · ${esc(money(p.refundValue))} refunded">${n1(p.returnPct)}%</span>`);
   const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['slow', 'Slow sellers to decide'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
   const PRODUCT_ALIAS = { over: 'push', decide: 'slow' };   // old links and saved filters
   const pFilter = () => (state.filter.products = PRODUCT_ALIAS[state.filter.products] || state.filter.products);
@@ -879,7 +879,7 @@
           <div class="tile"><b title="${n1(p?.perDay)} per in-stock day">${rate(p?.perDay)}</b><span>sells while in stock${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
           ${gap ? `<div class="tile" id="lost-unknown" title="No stock record before ${esc(dateShort(gap))}, so stock-outs before then can’t be seen (Shopify’s change log didn’t add up for it)"><b>${p.lost ? money(p.lost) : 'Unknown'}</b><span>sales lost${p.lost ? ` since ${esc(dateShort(gap))}` : ''} · before ${esc(dateShort(gap))}: unknown</span></div>`
     : `<div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>`}
-          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Returned: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)}) · ${money(p.refundValue)} refunded</span></div>` : ''}
+          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Returned: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)}${p.unitsCancelled ? `, ${inr.format(p.unitsCancelled)} cancelled` : ''}) · ${money(p.refundValue)} refunded</span></div>` : ''}
         </section>
         ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>

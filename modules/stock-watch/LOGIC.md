@@ -148,14 +148,28 @@ Data → Upload a CSV shows, before anything is stored, what kind of file it is,
 
 | | Shopify pull | Flow / Sheet / CSV |
 |---|---|---|
-| Cancelled orders | left out, also when cancelled after we first read the order | whatever the template sends; send only live orders |
+| Cancelled orders | never a sale, also when cancelled after we first read the order. Since 1.1.3 their lines are stored with qty 0 (all units `returned` and `cancelled`) so Returns % counts them as Shopify does (§9e) | whatever the template sends; send only live orders |
 | Test orders | left out | left out only if the Flow condition excludes them |
-| Refunds and removed items | netted: units are Shopify's `currentQuantity`; the original `quantity` is kept as `ordered` for the return % (§9e), and a fully refunded line is stored with qty 0 (never a sale) | as sent |
+| Refunds and removed items | netted: units kept = `currentQuantity` less the units on the order's refunds (1.1.3: read from `order.refunds`, because a refund need not lower `currentQuantity`); `quantity` is kept as `ordered`, refunded units as `returned` (§9e); a fully refunded line is stored with qty 0 (never a sale) | as sent |
 | Discounts | price after line **and** order-level discounts (`discountedUnitPriceAfterAllDiscountsSet`) | as sent |
 | Tax (GST) | taken out (1.1.1): when the order's prices include tax (`taxesIncluded`), price = price paid − the line's tax lines ÷ its ordered quantity | as sent |
 | Later edits | each run re-reads orders updated since the last run (30-minute overlap) and replaces their lines | not picked up |
 
-**₹ sold = Shopify's Net sales by order date** (1.1.1). Before, it was Shopify's *Total sales* (GST inside): Sammsara includes tax in every price, so ₹ sold ran 5.7–7.3% over Net sales (30 days: ₹71,75,868 vs ₹67,88,993). Checked: 19 Nov, app ₹1,60,252 = Shopify net sales ₹1,60,252.03 (Total ₹1,70,740 = the old number). ₹ lost uses the average price paid from the same lines, so it is ex GST too, and profit lost (§7b) sets an ex-GST price against an ex-GST cost. **Remaining difference:** a refund lowers the line on its *order's* day here; Shopify books *returns* on the day of the return, so a period's net sales can differ by the refunds that cross its edges (≤ 1% on 14 and 30 days, Sammsara). **Upgrade:** a store read before 1.1.1 reads its last 60 days of orders again once (`shopify.priceBasis`); orders older than that keep the tax-inclusive price until they age out. Flow / Sheet / CSV prices are as sent: send ex-tax prices to match.
+**₹ sold = Shopify's Net sales by order date** (1.1.1). Before, it was Shopify's *Total sales* (GST inside): Sammsara includes tax in every price, so ₹ sold ran 5.7–7.3% over Net sales (30 days: ₹71,75,868 vs ₹67,88,993). Checked: 19 Nov, app ₹1,60,252 = Shopify net sales ₹1,60,252.03 (Total ₹1,70,740 = the old number). ₹ lost uses the average price paid from the same lines, so it is ex GST too, and profit lost (§7b) sets an ex-GST price against an ex-GST cost. **Upgrade:** a store read before 1.1.1 reads its last 60 days of orders again once (`shopify.priceBasis`); orders older than that keep the tax-inclusive price until they age out. Flow / Sheet / CSV prices are as sent: send ex-tax prices to match.
+
+**Order date vs return date (checked 1.1.3, Sammsara, 20 Nov 2026, IST calendar days `SINCE -Nd UNTIL today`):** Shopify's Net sales = gross − discounts − *returns*, and books returns (which include **cancelled orders**: a cancellation is a gross sale on the order's day and a return on the cancel day) on the day of the return. We take a cancellation or refund back to its order's day. So: **₹ sold = Shopify (gross − discounts) of the orders placed in the period − their own returns**, and **Shopify Net sales = ₹ sold − returns booked in the period on orders placed before it** (+ returns booked after the period on its orders, none when it ends today):
+
+| Period | App ₹ sold | Shopify Net sales | Gap | Returns in the period on earlier orders (Shopify − app ₹ returned) |
+|---|---|---|---|---|
+| 7 days | ₹12,40,489 | ₹12,20,945 | +1.60% | ₹19,542 |
+| 30 days | ₹67,32,704 | ₹67,07,306 | +0.38% | ₹25,390 |
+| 60 days | ₹1,34,79,814 | ₹1,32,27,574 | +1.91% | ₹2,52,243 (52 orders of 1–20 Sep cancelled on 30 Sep, before the 60 days began) |
+
+The gap equals the last column to within ₹10 in each period, so nothing is missing; it is only *when* a return counts. Gross − discounts − our own returns (by order date) gives ₹ sold to within ₹10 too. Sammsara had **no post-delivery refunds** in these 60 days: every Shopify "return" was a cancellation (185 units) or a line cancelled before shipping (5 units, on 2 orders).
+
+**Why by order date, not matched to Shopify's report (decision 1.1.3):** ₹ sold feeds the daily chart, % of demand and the sales rate. Booking a return on its own day would put a negative day on the chart when old orders are cancelled in bulk (30 Sep: −₹2.4 L from orders placed 1–20 Sep), lower that week's rate for sales that happened weeks earlier, and need orders from before the 60 days we can read. By order date, a period's ₹ sold is "what customers bought in these days and kept". Expect up to ~2% under Shopify's Net sales in a period that starts just after a bulk cancellation, under 1% otherwise.
+
+**Demand counts units ordered, less cancellations (1.1.3, `engine.demandQty`):** the sales rate (and so ₹ lost, reorder quantities, trend, the hour profile) counts **units kept + units returned after the sale**. A return is still a sale the shelf had to cover: the unit left stock, and if it is restocked it comes back as a stock increase the stock data already sees. Counting only units kept would under-order a product that sells and comes back. A **cancellation** (the whole order, or a line cancelled before shipping, restock type `CANCEL`) is not demand: Sammsara's are mostly COD orders cancelled within minutes, or refused at the door and cancelled later; counting them would order stock for sales that never happen. ₹ sold, units sold and the daily chart stay on units kept. For Sammsara today the rate doesn't move (no post-delivery refunds in 60 days).
 
 This matches the DAWBU dashboard's definition (cancelled out, refunds and discounts netted), so the two show the same sales for the same days. One known difference remains: DAWBU sums variants into products **by title**, and we keep **variants by ID**. Totals agree, but per-product rows can differ where two products share a title.
 
@@ -185,6 +199,8 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 **Rule:**
 
 > sales per day = units sold in the last 28 days ÷ days the product was **in stock** during those 28 days (at least 7 days, or the whole span if shorter)
+
+"Units sold" here = units kept + units returned after the sale, never cancelled ones (1.1.3, §What counts as a sale, "Demand counts units ordered").
 
 **How it's shown (1.1.1):** in words, rounded: 1 or more a day → "5 a day"; under 1 a day but at least 1 a week → "3 a week"; slower → "1 every 2 weeks". The exact rate (e.g. 0.43 per in-stock day) is in the tooltip and is what every calculation uses: rounding it would turn a 0.3-a-day seller into 0 (never reordered) or 1 (3× too much stock).
 
@@ -551,7 +567,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Sells / day, Avg price | over the last 28 days (further back for a long stock-out, section 3), whatever period is selected, so the reorder maths doesn't change when you switch the view |
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
-| Returns % | units refunded, returned or removed ÷ units ordered, orders placed in the period; – under 5 units ordered; amber at 15%+ (§9e) |
+| Returns % | units returned or cancelled (Shopify's refunds; cancelled orders included, as in Shopify's Returns) ÷ units ordered, orders placed in the period; – under 5 units ordered; amber at 15%+ (§9e) |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 | Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
@@ -625,32 +641,42 @@ Products → View: Categories / Collections / Tags / Parent products shows a **T
 - **Saved lists**: admin names and saves the list for the whole team (same name, any case, replaces it); everyone picks it from **Saved lists** beside the search box; admin can delete. Per store, at most 100 lists of 2,000 entries.
 - Why: buyers and marketing work from lists (a supplier's SKUs, a campaign's products, the Diwali range) kept in sheets; pasting them answers "how are these doing" in one step.
 
-## 9e. Returns % per product (SW-064, `src/engine.js` `returnsOf`)
+## 9e. Returns % per product (SW-064, 1.1.3, `src/engine.js` `returnsOf`, `src/shopify.js` `orderRows`)
 
-**Rule:** for orders placed in the selected period (by order date, the same lines as ₹ sold):
-- units ordered = Σ `ordered` (Shopify's line `quantity`, as first ordered)
-- units returned = Σ (`ordered` − `qty`), `qty` = Shopify's `currentQuantity` (what the customer kept)
-- **Returns % = returned ÷ ordered**, one decimal; **–** when fewer than 5 units were ordered (too few to mean anything)
-- **₹ refunded = Σ returned × the line's unit price** (after discounts, ex GST: the same price as ₹ sold, §What counts as a sale)
-- **High returns** (chip on Products, amber in the column): Returns % ≥ 15%. `totals` carry the store's `unitsOrdered`, `unitsReturned`, `returnPct`, `refundValue` and `highReturns` (count).
+**Rule:** for orders placed in the selected period (by order date, the same orders as ₹ sold), **cancelled orders included**:
+- units ordered = Σ `ordered` (Shopify's line `quantity`), = Shopify's `quantity_ordered`
+- units returned = Σ `returned`: the units on the order's **refunds** (`order.refunds.refundLineItems.quantity`, any restock type), and every unit of a cancelled order
+- of those, **cancelled** = units cancelled before shipping (restock type `CANCEL`, or the whole order cancelled)
+- **Returns % = returned ÷ ordered**, one decimal; **–** when fewer than 5 units were ordered
+- **₹ refunded = Σ the refund lines' subtotal after discounts, less their tax** when the order's prices include tax (= Shopify's *Returns* ₹, ex GST like ₹ sold); a cancelled line with no refund line (unpaid) at its price paid
+- **High returns** (chip on Products, amber in the column): Returns % ≥ 15%. `totals` carry the store's `unitsOrdered`, `unitsReturned`, `unitsCancelled`, `returnPct`, `refundValue` and `highReturns` (count).
 
-Shown: Products column **Returns %** (optional, on by default, steps aside on narrow screens; only when some line carries `ordered`), chip **High returns** (only when a product qualifies), drawer line "Returned: 12% (5 of 42) · ₹1.2 L refunded", phone cards "x% returned" at 15%+. Sammsara, 60 days: 264 of 4,525 units came back (5.8%), ₹10.35 L refunded; one coffee table had about 48% of its ₹ refunded.
+Shown: Products column **Returns %** (optional, on by default, steps aside on narrow screens; only when some line carries `ordered`), chip **High returns** (only when a product qualifies), drawer line "Returned: 50% (3 of 6, 3 cancelled) · ₹63.5 K refunded", phone cards "x% returned" at 15%+.
 
-**Demand, ₹ sold and ₹ lost don't change:** they keep using units kept (`currentQuantity`). A fully refunded line is stored with qty 0 so its return counts here, and the engine drops qty-0 lines before any sales maths.
+**Why refunds, not `ordered − currentQuantity` (1.1.3, fixes SW-064):** the live check failed: 5 units returned against Shopify's 259 in 60 days. Two causes. (1) Shopify's *Returns* counts **cancelled orders** (a cancellation refunds every line, restock type `CANCEL`, or `RETURN` when a shipped COD order came back), and we left cancelled orders out entirely. (2) A refund need not lower `currentQuantity` (only removals and edits are sure to), so units kept is now `min(currentQuantity, ordered − refunded)`. One extra field on the orders query (`refunds(first: 10)` with up to 50 lines each; more are paged one call at a time); query cost 247 of the 1,000 a query may ask, 44 actually used; no new permission (`read_orders`).
 
-**Why ordered − current:** Shopify already gives both on every line we read, so no extra API call and no new permission (refund objects would need more calls per order). It catches refunds with or without a restock, returns and order edits that removed items, all of which mean "the customer didn't keep it".
+**Checked against Shopify (Sammsara, 20 Nov 2026, ShopifyQL `FROM sales SHOW quantity_ordered, quantity_returned, returns GROUP BY product_variant_id SINCE -Nd UNTIL today`, our numbers from the real `pullOrders` run read-only against the store):**
 
-**By order date, not return date:** a return counts against the period its order was placed in, so the % is "of what we sold in these days, how much came back". Shopify's own report books returns on the day of the return. To check against Shopify: ShopifyQL `FROM sales SHOW quantity_ordered, quantity_returned, returns GROUP BY product_title SINCE -60d` (Analytics → Reports); totals over a long period agree, a short period differs by returns that cross its edges.
+| Period | Units ordered app / Shopify | Units returned app / Shopify | ₹ returned app / Shopify |
+|---|---|---|---|
+| 7 days | 409 / 409 | 30 / 33 | ₹1,20,014 / ₹1,39,556 |
+| 30 days | 2,186 / 2,186 | 94 / 102 | ₹3,77,682 / ₹4,03,072 |
+| 60 days | 4,461 / 4,459 | 185 / 259 | ₹7,61,206 / ₹10,13,449 |
 
-**Upgrade:** lines read before SW-064 have no `ordered`; they count 0 returned and stay out of the denominator. A store read before reads its last 60 days of orders once more on the next pull (`shopify.orderFields: 'ordered'`, same mechanism as the 1.1.1 GST re-read), so history gets it.
+The whole difference is **return date vs order date**: Shopify books a return on the day it happens, we count it against the order's period. Restricted to the same orders (Shopify's returns grouped by order, only orders placed in the period), the 60 days give ₹7,61,208 vs our ₹7,61,206, and per product exactly ours: Evelyn Flamingo Set of 3 24 (Shopify by return date 30), Casablanca Nesting Table Set of 2 24 (28), Cascade Nesting Table Set of 3 12 (22), Sable Leaf Table Set of 3 15 (20), Terrence Coffee Table 3 (3, ₹63,512 both). The 74 units in between are orders placed 1–20 Sep, before the 60 days, cancelled inside them (52 orders bulk-cancelled on 30 Sep). So a period that starts after a bulk cancellation reads lower here than in Shopify; over periods with steady returns the two agree.
 
-**Considered:** Shopify refund objects (`order.refunds`) for the return date and restock flag (more calls per order, more API budget); counting only restocked refunds (misses refunds without a restock, the common case for damaged goods).
+**By order date, not return date:** "of what customers bought in these days, how much came back or was cancelled", the same orders as ₹ sold. Shopify's own report is by return date (above).
+
+**Demand and ₹ sold:** ₹ sold and units sold count units kept; the sales rate counts kept + returned after the sale, never cancelled (§What counts as a sale, "Demand counts units ordered").
+
+**Upgrade:** lines read before 1.1.3 have no `returned`; they count 0 returned. A store read before reads its last 60 days of orders once more on the next pull (`shopify.orderFields: 'refunds'`, was `'ordered'`; same mechanism as the 1.1.1 GST re-read). A cancellation or refund changes the order's `updated_at`, so later ones are picked up by the next incremental pull, which replaces the order's lines whole (checked: the refunded orders' `updatedAt` ≥ their refund's `createdAt`).
+
+**Considered:** returns by return date (matches Shopify's report per period, but a bulk cancellation lands on one day, and needs orders older than the 60 days we read); leaving cancellations out of Returns % (5 units: all of Sammsara's "returns" are cancellations, the number the founder compares with Shopify); counting only restocked refunds (misses refunds without a restock).
 
 **Can be wrong:**
-- An order edit that removes an item counts as a return (the customer changed their mind before shipping; still a lost sale).
+- An order edit that removes an item without a refund is not a return (units kept go down; it is in neither column).
 - An exchange shows as a return of one variant and, if Shopify makes a new order or line for the replacement, a sale of the other.
-- A return of an order placed before the period isn't in the period; a return made after the period ends still lowers it (by order date).
-- Cancelled orders stay out entirely (as for sales), so a cancellation is not a return.
+- A free gift line (Mystery Gift, ₹0) counts in units (Shopify does the same: 46 of its 259) but adds ₹0.
 - Flow / Sheet / CSV rows carry no `ordered`: no return % for those stores.
 
 ---
@@ -692,7 +718,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 | | Shopify pull | Flow / Google Sheet / CSV |
 |---|---|---|
 | Stock-out timing | to within 15 minutes; a stock-out that starts and ends between two reads is missed | to the minute (Flow), or as precise as the file |
-| Cancellations, refunds, removed items | netted: cancelled orders left out, units are Shopify's `currentQuantity`, later edits re-read | **not netted**: counted as sent; a later cancellation or refund isn't picked up |
+| Cancellations, refunds, removed items | netted: cancelled orders never a sale, units kept = `currentQuantity` less refunded units (1.1.3), later edits re-read | **not netted**: counted as sent; a later cancellation or refund isn't picked up |
 | Discounts | price after line and order-level discounts | as sent |
 | Test orders | left out | counted unless the Flow condition excludes them |
 

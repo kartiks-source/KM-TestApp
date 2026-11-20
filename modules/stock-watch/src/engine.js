@@ -4,8 +4,9 @@
  *
  * Inputs (normalised rows):
  *   stock  { t, variantId, sku, product, variant, before, now, price }   one row per stock change
- *   orders { t, order, variantId, sku, qty, price, ordered? }            one row per order line (qty = units kept;
- *                                                                        ordered = units first ordered, SW-064; qty 0 = fully refunded)
+ *   orders { t, order, variantId, sku, qty, price, ordered?, returned?, refund?, cancelled? }   one row per order line:
+ *            qty = units kept (qty 0 = fully refunded or a cancelled order); ordered = Shopify's quantity; returned = units
+ *            refunded or cancelled, refund = their ₹ ex GST, cancelled = units cancelled before shipping (SW-064, 1.1.3)
  *
  * Output: report() → totals, daily sold vs lost, reorder list, every stock-out, per-product summary.
  */
@@ -16,6 +17,9 @@ const DAY = 864e5;
 const TZ = require('./tz');   // the store's time zone (SW-049)
 
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
+/** Units of demand on a line (LOGIC.md §What counts as a sale, 1.1.3): units kept + units returned after the sale. A return
+ *  was still a sale the shelf had to cover (the unit comes back as a stock increase); a cancellation was not. */
+const demandQty = (o) => num(o.qty) + Math.max(0, num(o.returned) - num(o.cancelled));
 /** obj[key] only when it is obj's own key: a variant ID like "constructor" never reads Object.prototype (critic r2 S1). */
 const own = (obj, key) => (obj && typeof obj === 'object' && Object.hasOwn(obj, key) ? obj[key] : undefined);
 const round = (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; };
@@ -40,7 +44,7 @@ function nextLocalHour(t, zone) { return TZ.nextHour(t, zone); }
  */
 function hourProfile(orders, offMin) {
   const b = new Array(24).fill(1);
-  for (const o of orders) b[localHour(o.t, offMin)] += num(o.qty);
+  for (const o of orders) b[localHour(o.t, offMin)] += demandQty(o);
   const mean = b.reduce((a, x) => a + x, 0) / 24;
   return b.map((x) => x / mean);
 }
@@ -112,7 +116,7 @@ function afterLastSale(eps, lines) {
   if (!lines.length || !eps.length) return eps;
   return eps.map((e) => {
     let last = null;
-    for (const o of lines) if (o.t > e.start + HOUR && o.t < e.end && num(o.qty) > 0 && (last == null || o.t > last)) last = o.t;
+    for (const o of lines) if (o.t > e.start + HOUR && o.t < e.end && demandQty(o) > 0 && (last == null || o.t > last)) last = o.t;
     return last == null ? e : { ...e, start: last, soldInside: true };
   });
 }
@@ -150,15 +154,17 @@ const MIN_IN_STOCK_DAYS = 7;
 const LOW_UNITS = 5, LOW_DAYS = 14;
 /** Returns (SW-064, LOGIC.md §9e): a % only from 5 units ordered; 15%+ is "high". */
 const RETURN_MIN_UNITS = 5, HIGH_RETURN_PCT = 15;
-/** Units returned in the period, per variant (and the store): lines with `ordered` only, by order date like sales.
- *  returned = ordered − qty (refunds, returns, removals); refund ₹ = returned × the line's price (ex GST). */
+/** Units returned in the period, per variant (and the store): lines with `ordered` only, by order date like sales,
+ *  cancelled orders included (as Shopify's Returns, 1.1.3). returned = the line's refunded or cancelled units (its
+ *  refunds); refund ₹ = their refund ex GST (else returned × the line's price); cancelled = cancelled before shipping. */
 function returnsOf(orders, from) {
   const by = new Map();
   for (const o of orders) {
     if (o.t < from || !(num(o.ordered) > 0)) continue;
-    const id = String(o.variantId), x = by.get(id) || { ordered: 0, returned: 0, value: 0 };
-    const back = Math.max(0, num(o.ordered) - num(o.qty));
-    x.ordered += num(o.ordered); x.returned += back; x.value += back * num(o.price);
+    const id = String(o.variantId), x = by.get(id) || { ordered: 0, returned: 0, value: 0, cancelled: 0 };
+    const back = Math.min(num(o.ordered), num(o.returned));
+    x.ordered += num(o.ordered); x.returned += back; x.cancelled += Math.min(back, num(o.cancelled));
+    x.value += o.refund != null ? num(o.refund) : back * num(o.price);
     by.set(id, x);
   }
   return by;
@@ -191,7 +197,7 @@ function inStockStart(eps, histFrom, to, wantMs) {
 function demandRate(lines, eps, { winFrom, histFrom, now, wantDays, first = -Infinity }) {
   const measure = (a, b, hi = Infinity) => {        // orders in [a, hi); in-stock days over [a, b]
     const use = lines.filter((o) => o.t >= a && o.t < hi);
-    const units = use.reduce((s, o) => s + num(o.qty), 0);
+    const units = use.reduce((s, o) => s + demandQty(o), 0);
     return { ...demandPerDay(units, a, b, eps), units, lines: use, from: a };
   };
   const win = measure(winFrom, now);
@@ -222,14 +228,14 @@ function trend(lines, eps, now, since = -Infinity) {
   for (let w = 7; w >= 0; w--) {
     const a = now - (w + 1) * 7 * DAY, b = now - w * 7 * DAY;
     if (b <= since) { weeks.push({ units: null, outDays: 0 }); continue; }
-    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
+    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? demandQty(o) : 0), 0);
     const out = eps.reduce((s, e) => s + overlap(e.start, e.end, Math.max(a, since), b), 0);
     weeks.push({ units, outDays: round(out / DAY, 1) });
   }
   const half = (a0, b) => {
     const a = Math.max(a0, since);
     if (b <= a) return { units: 0, inDays: 0, rate: 0 };
-    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? num(o.qty) : 0), 0);
+    const units = lines.reduce((s, o) => s + (o.t >= a && o.t < b ? demandQty(o) : 0), 0);
     const inDays = (b - a - eps.reduce((s, e) => s + overlap(e.start, e.end, a, b), 0)) / DAY;
     return { units, inDays, rate: inDays > 0 ? units / inDays : 0 };
   };
@@ -268,7 +274,7 @@ function trendCall(pct, base) {
 
 /** Bumped whenever a rule that changes a number changes (LOGIC.md): saved daily snapshots made under another value
  *  are worked out again (src/weekly.js), so the weekly panel never mixes old and new maths. */
-const CALC_VERSION = '1.1.1';   // 1.1.1 also: sale inside a stock-out moves its start (afterLastSale); not deployed before
+const CALC_VERSION = '1.1.3';   // 1.1.3: demand counts units returned after the sale (demandQty); 1.1.1: sale inside a stock-out moves its start (afterLastSale)
 
 /** Order today rows (Out now, Critical, Order now) are one group, biggest ₹ of sales a day first (SIMP-2) */
 const TODAY_STATUS = ['Out now', 'Critical', 'Order now'];
@@ -338,9 +344,10 @@ function report(stock, orders, settings = {}, opts = {}) {
   const days = Math.max(1, Math.ceil((now - from) / DAY));
   const off = S.timeZone = TZ.zoneOf(S);   // SW-049: the store's IANA zone (old stores: their saved offset)
   S.tzOffsetMin = TZ.offsetAt(off, now);    // today's offset, for anything that still reads the minutes
-  /* SW-064: fully refunded lines (qty 0) carry returns only; every sales number below uses lines that sold something */
+  /* SW-064: returns come from every line; below, lines with no demand (a cancelled order, a line cancelled before shipping)
+     drop out. ₹ sold and units sold count units kept (qty); the sales rate counts demand, returns included (demandQty) */
   const returns = returnsOf(orders, from);
-  orders = orders.filter((o) => num(o.qty) > 0);
+  orders = orders.filter((o) => demandQty(o) > 0);
   const profile = hourProfile(orders.filter((o) => o.t >= now - 60 * DAY), off);
 
   /* group by product (variant) */
@@ -362,6 +369,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     p.sku = p.sku || o.sku || '';
     p.lines.push(o);
   }
+  for (const id of returns.keys()) get(id);   // a variant ordered in the period only on cancelled orders keeps its returns row
   /* current stock and attributes come from the Shopify catalog when there is one (SW-002, ADR-0010);
      stock rows are then history only. Inactive = archived, draft, untracked or deleted. */
   const cat = opts.catalog && typeof opts.catalog === 'object' ? opts.catalog : {};
@@ -408,13 +416,13 @@ function report(stock, orders, settings = {}, opts = {}) {
     /* a long stock-out (under 7 in-stock days in the window) looks further back, so it keeps its demand */
     const rate = demandRate(p.lines, unsellable(eps, spells, now), { winFrom: pFrom, histFrom: Math.max(now - KEEP_DAYS * DAY, firstOrder, pFirst), now, wantDays: S.demandWindowDays, first: pFirst });
     const units = rate.units;
-    const revenue = rate.lines.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
+    const revenue = rate.lines.reduce((s, o) => s + demandQty(o) * num(o.price), 0);
     const price = units ? revenue / units : p.price;
     let { perDay } = rate, lowData = false;
     if (units > 0 && units < LOW_UNITS && rate.rawDays < LOW_DAYS) {
       lowData = true;
       const firstSale = minMax(p.lines, (o) => o.t).min;
-      const all = p.lines.reduce((s, o) => s + num(o.qty), 0);
+      const all = p.lines.reduce((s, o) => s + demandQty(o), 0);
       perDay = Math.min(perDay, all / Math.max(1, (now - firstSale) / DAY));
     }
     const perSellingHour = perDay / 24;
@@ -461,9 +469,9 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '', onOrder: oo,
     };
-    /* returns in the period (SW-064, LOGIC.md §9e): demand and ₹ lost stay on units kept */
-    const rt = returns.get(String(p.id)) || { ordered: 0, returned: 0, value: 0 };
-    Object.assign(row, { unitsOrdered: rt.ordered, unitsReturned: rt.returned, returnPct: returnPct(rt.ordered, rt.returned), refundValue: Math.round(rt.value) });
+    /* returns in the period (SW-064, 1.1.3, LOGIC.md §9e), cancelled orders included; ₹ sold stays on units kept */
+    const rt = returns.get(String(p.id)) || { ordered: 0, returned: 0, value: 0, cancelled: 0 };
+    Object.assign(row, { unitsOrdered: rt.ordered, unitsReturned: rt.returned, unitsCancelled: rt.cancelled, returnPct: returnPct(rt.ordered, rt.returned), refundValue: Math.round(rt.value) });
     if (lowData) row.lowData = true;
     /* the product's first stock record (UI-1): before it there's no stock history, so ₹ lost there is unknown, not 0 */
     row.historyFrom = p.changes.length ? p.changes[0].t : null;
@@ -590,7 +598,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       storeTrendPct: baseTrend,
       costed: products.filter((p) => p.cost != null && (p.sold || p.lost)).length,
       ...(() => { const o = products.reduce((s, p) => s + p.unitsOrdered, 0), b = products.reduce((s, p) => s + p.unitsReturned, 0);
-        return { unitsOrdered: o, unitsReturned: b, returnPct: returnPct(o, b), refundValue: products.reduce((s, p) => s + p.refundValue, 0), highReturns: products.filter((p) => p.returnPct >= HIGH_RETURN_PCT).length }; })(),
+        return { unitsOrdered: o, unitsReturned: b, unitsCancelled: products.reduce((s, p) => s + p.unitsCancelled, 0), returnPct: returnPct(o, b), refundValue: products.reduce((s, p) => s + p.refundValue, 0), highReturns: products.filter((p) => p.returnPct >= HIGH_RETURN_PCT).length }; })(),
       active: products.filter((p) => p.sold || p.lost).length,
     },
     daily: dailyRows, reorder, stockouts, products,
@@ -632,4 +640,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  CALC_VERSION, TODAY_STATUS, RETURN_MIN_UNITS, HIGH_RETURN_PCT, returnsOf, afterLastSale, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  CALC_VERSION, TODAY_STATUS, RETURN_MIN_UNITS, HIGH_RETURN_PCT, returnsOf, demandQty, afterLastSale, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

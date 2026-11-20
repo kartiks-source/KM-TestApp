@@ -318,8 +318,8 @@ async function pullOne(id) {
     Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
     store.setShopify({ lastQty: s.lastQty });
     let orders = 0;
-    /* 1.1.1: order prices became ex tax (LOGIC §5); SW-064: lines keep `ordered` (returns, LOGIC §9e).
-       Orders read before either are read again once, from the 60-day backfill */
+    /* 1.1.1: order prices became ex tax (LOGIC §5); SW-064 / 1.1.3: lines keep `ordered` and their refunds (returns, LOGIC §9e).
+       Orders read before any of these are read again once, from the 60-day backfill */
     const sh = store.load().shopify;
     if (sh.priceBasis !== shopify.PRICE_BASIS || sh.orderFields !== shopify.ORDER_FIELDS) store.setShopify({ ordersCursor: null, priceBasis: shopify.PRICE_BASIS, orderFields: shopify.ORDER_FIELDS });
     await shopify.pullOrders(store.load().shopify.ordersCursor, {

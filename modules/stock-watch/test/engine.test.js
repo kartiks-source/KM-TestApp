@@ -535,29 +535,34 @@ test('Order today rows: biggest ₹ of sales a day first, not every Out now befo
   assert.deepEqual(r.reorder.map((p) => [p.id, p.status]), [['star', 'Critical'], ['slowout', 'Out now']]);
 });
 
-/* SW-064 (LOGIC.md §9e): return % per product by order date; demand and ₹ sold stay on units kept. */
-test('returns: % of units ordered, under 5 ordered → null, refund ₹ at the line price; qty-0 lines are not sales', () => {
+/* SW-064, 1.1.3 (LOGIC.md §9e): return % per product by order date from the lines' refunds, cancelled orders included;
+ * ₹ sold stays on units kept; demand counts units returned after the sale, never cancelled ones. */
+test('returns: % of units ordered, under 5 ordered → null, refund ₹ from the refunds; qty-0 lines are not sales', () => {
   const now = t0 + 20 * D;
   const stock = [{ t: t0, variantId: 'a', before: null, now: 100, price: 1200 }, { t: t0, variantId: 'b', before: null, now: 100, price: 500 }];
   const orders = [
-    { t: now - 2 * D, order: '#1', variantId: 'a', qty: 3, ordered: 4, price: 1000 },     // 1 of 4 back
-    { t: now - 3 * D, order: '#2', variantId: 'a', qty: 0, ordered: 2, price: 1000 },     // fully refunded
+    { t: now - 2 * D, order: '#1', variantId: 'a', qty: 3, ordered: 4, returned: 1, refund: 950, price: 1000 },          // 1 of 4 back, refunded ₹950
+    { t: now - 3 * D, order: '#2', variantId: 'a', qty: 0, ordered: 2, returned: 2, refund: 2000, cancelled: 2, price: 1000 },   // cancelled order
     { t: now - 4 * D, order: '#3', variantId: 'a', qty: 2, ordered: 2, price: 1000 },
     { t: now - 5 * D, order: '#4', variantId: 'a', qty: 1, price: 1000 },                  // no `ordered` (old line): 0 back, not in the %
-    { t: now - 40 * D, order: '#5', variantId: 'a', qty: 0, ordered: 5, price: 1000 },    // before the period
-    { t: now - 2 * D, order: '#6', variantId: 'b', qty: 2, ordered: 4, price: 500 },      // 4 ordered: too few for a %
+    { t: now - 40 * D, order: '#5', variantId: 'a', qty: 0, ordered: 5, returned: 5, price: 1000 },    // before the period
+    { t: now - 2 * D, order: '#6', variantId: 'b', qty: 2, ordered: 4, returned: 2, price: 500 },      // 4 ordered: too few for a %; no refund ₹: at the price
+    { t: now - 2 * D, order: '#7', variantId: 'b', qty: 1, ordered: 2, price: 500 },       // an edit removed 1, no refund: not a return
   ];
   const r = E.report(stock, orders, {}, { now, days: 30 });
   const a = r.products.find((p) => p.id === 'a'), b = r.products.find((p) => p.id === 'b');
-  assert.deepEqual([a.unitsOrdered, a.unitsReturned, a.returnPct, a.refundValue], [8, 3, 37.5, 3000]);
+  assert.deepEqual([a.unitsOrdered, a.unitsReturned, a.unitsCancelled, a.returnPct, a.refundValue], [8, 3, 2, 37.5, 2950]);
   assert.equal(a.unitsSold, 6, 'sales: units kept only');
   assert.equal(a.sold, 6000);
-  assert.deepEqual([b.unitsOrdered, b.unitsReturned, b.returnPct, b.refundValue], [4, 2, null, 1000]);
-  assert.deepEqual([r.totals.unitsOrdered, r.totals.unitsReturned, r.totals.returnPct, r.totals.refundValue, r.totals.highReturns], [12, 5, 41.7, 4000, 1]);
-  /* the same report without `ordered` on any line: no returns, nothing else moves */
-  const plain = E.report(stock, orders.filter((o) => o.qty > 0).map(({ ordered, ...o }) => o), {}, { now, days: 30 });
-  const pa = plain.products.find((p) => p.id === 'a');
-  assert.deepEqual([pa.unitsOrdered, pa.returnPct, pa.refundValue], [0, null, 0]);
-  assert.equal(pa.perDay, a.perDay, 'demand unchanged by returns');
-  assert.equal(pa.lost, a.lost);
+  assert.deepEqual([b.unitsOrdered, b.unitsReturned, b.returnPct, b.refundValue], [6, 2, 33.3, 1000]);
+  assert.deepEqual([r.totals.unitsOrdered, r.totals.unitsReturned, r.totals.unitsCancelled, r.totals.returnPct, r.totals.refundValue, r.totals.highReturns], [14, 5, 2, 35.7, 3950, 2]);
+  /* demand: kept + returned after the sale (the cancelled order is no demand) */
+  assert.deepEqual(orders.map(E.demandQty), [4, 0, 2, 1, 5, 4, 1]);
+  const kept = E.report(stock, orders.filter((o) => !o.cancelled).map(({ ordered, returned, refund, ...o }) => ({ ...o, qty: E.demandQty({ qty: o.qty, returned }) })), {}, { now, days: 30 });
+  const ka = kept.products.find((p) => p.id === 'a');
+  assert.equal(ka.perDay, a.perDay, 'the rate counts returned units as demand, and leaves the cancelled order out');
+  assert.equal(ka.lost, a.lost);
+  /* the same report without refunds on any line: no returns */
+  const plain = E.report(stock, orders.filter((o) => o.qty > 0).map(({ ordered, returned, refund, cancelled, ...o }) => o), {}, { now, days: 30 });
+  assert.deepEqual([plain.products.find((p) => p.id === 'a').unitsOrdered, plain.totals.returnPct, plain.totals.refundValue], [0, null, 0]);
 });

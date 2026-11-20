@@ -299,7 +299,7 @@ function setRebuilt(rows) {
   return rows.length;
 }
 
-/** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
+/** Replace every line of these orders with `rows` (a test order ends up with none; a cancelled one keeps qty-0 lines for its returns, 1.1.3). */
 function replaceOrders(names, rows, src = 'shopify') {
   const d = load(); const set = new Set(names);
   stamp(rows, src);

@@ -2,6 +2,13 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.3 · 2026-11-20
+
+- Returns % now matches Shopify's Returns: read from each order's refunds, and cancelled orders count (Shopify counts a cancellation as a return). Sammsara, 60 days: 185 of 4,461 units returned or cancelled (was 5), ₹7.61 L; Shopify says 259 / ₹10.13 L because it books a return on its own day, and 52 orders from early September were cancelled on 30 Sep. The drawer says how many were cancelled before shipping. Orders of the last 60 days are read again once after the update.
+- Units kept no longer trust Shopify's current quantity alone: refunded units come off too.
+- Sales rate: a unit returned after the sale still counts as demand (it left the shelf); cancellations never do. Sammsara's numbers don't move (no post-delivery returns in 60 days).
+- ₹ sold stays Shopify's Net sales by order date; checked against Shopify for 7, 30 and 60 days (within 0.4–1.9%, the gap being returns booked in the period on earlier orders, LOGIC §What counts as a sale).
+
 ## 1.1.2 · 2026-11-20
 
 - Products: Returns % per product (units refunded/returned ÷ ordered, by order date), High returns chip, drawer 'Returned' line; one-time 60-day order re-read to pick up units ordered.
