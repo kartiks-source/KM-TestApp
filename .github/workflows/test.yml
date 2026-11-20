@@ -1,6 +1,8 @@
-# CI gate (SW-014): npm test on every push and pull request. Deploy only a green main (docs/RUNBOOK.md).
-# Plain Node, no dependencies, so there is no install step. The Playwright smoke
-# (modules/stock-watch/test/smoke/smoke.js) needs a browser and runs on demand, not here.
+# CI gate (SW-014): every push and pull request. Deploy only a green main (docs/RUNBOOK.md).
+#   test: npm test on Node 20 and 22. Plain Node, no dependencies, no install step (browser tests skip here).
+#   ui:   Playwright 1.65.1 (root devDependency, pinned in package-lock.json; dev tooling only, never in the
+#         Docker image) + cached Chromium. Runs the browser tests (npm run test:ui), the smoke and the roles smoke
+#         at 1280/1440/1920/390x844/360x740 (SW-023), and uploads the screenshots as the "screenshots" artifact.
 name: test
 on:
   push:
@@ -23,3 +25,44 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm test
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMOKE_OUT: ${{ github.workspace }}/screens
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22   # what the Docker image runs
+          cache: npm
+      - run: npm ci
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium and its system libraries
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: System libraries only (Chromium from cache)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx --no-install playwright install-deps chromium
+      - name: Browser tests (test/ui-helpers.test.js)
+        run: npm run test:ui
+      - name: Smoke (1440x900, 390x844, 360x740)
+        if: ${{ !cancelled() }}
+        run: node modules/stock-watch/test/smoke/smoke.js
+      - name: Roles smoke (1280, 1440, 1920, 390x844, 360x740)
+        if: ${{ !cancelled() }}
+        run: node modules/stock-watch/test/smoke/roles-smoke.js
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screens/
+          if-no-files-found: warn
+          retention-days: 14
