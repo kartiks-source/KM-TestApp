@@ -1,9 +1,13 @@
 'use strict';
 /*
- * One-time move of a single-store DATA_DIR into the first store's folder (multi-store, ADR-0015):
+ * One-time move of a single-store DATA_DIR into its store's folder (multi-store, ADR-0015):
  *
  *   DATA_DIR/store.json, onorder.json, decisions.json (+ .bak, .corrupt-*), catalog.json, restore.json, backups/
- *     → DATA_DIR/stores/<first store id>/
+ *     → DATA_DIR/stores/<home id>/   (home = stores.home(): the store SHOPIFY_STORE / PERFORMITY_BRAND_ID names, else the first)
+ *
+ * Once per DATA_DIR, ever: when any stores/<id>/ holds the marker, nothing moves again (the store list may change
+ * order or gain stores between starts); only step 4 below is finished against that marker, and any other old-looking
+ * file at the top (e.g. a restore.json put there by hand) is left alone with a warning.
  *
  * Crash-safe and idempotent:
  *   1. copy every old file into DATA_DIR/stores/.migrating-<id>/ and check each copy's SHA-256 against the original;
@@ -45,9 +49,18 @@ function walk(root, rel) {
  * Move old files into stores/<id>. Returns { migrated: false } when there is nothing to move, else
  * { migrated: true, id, files, removed, kept } (kept = old files left because they changed after the copy).
  */
-function run(root, id) {
+/** The store an earlier run moved the old files into (its folder holds MARKER), else null. */
+function movedTo(root) {
+  const storesDir = path.join(root, 'stores');
+  let ents; try { ents = fs.readdirSync(storesDir, { withFileTypes: true }); } catch { return null; }
+  const hit = ents.find((e) => e.isDirectory() && !e.name.startsWith('.') && fs.existsSync(path.join(storesDir, e.name, MARKER)));
+  return hit ? hit.name : null;
+}
+
+function run(root, wanted) {
   const names = legacy(root);
   const storesDir = path.join(root, 'stores');
+  const id = movedTo(root) || wanted;          // already moved once: finish against that store, never move again
   const target = path.join(storesDir, id);
   const marker = path.join(target, MARKER);
   if (!names.length) return { migrated: false };
@@ -101,4 +114,4 @@ function walkDirs(p) {
   return out;
 }
 
-module.exports = { run, legacy, MARKER, MigrationError };
+module.exports = { run, legacy, movedTo, MARKER, MigrationError };

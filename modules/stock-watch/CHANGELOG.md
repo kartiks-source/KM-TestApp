@@ -7,7 +7,7 @@ User-facing changes, newest first. Semver: minor when a number's rule changes or
 - Added: several stores in one app (ADR-0015). Every brand the Performity key may use is a store (`PERFORMITY_BRAND_ID` limits it to one); Key Vault `STORES=a,b`; one store from Railway variables; no key → two labelled demo stores with different numbers. Each store's data is in its own folder; nothing is ever added up across stores.
 - Added: the store pill is a picker with a green / amber / red dot per store (phones: a store bar under the top bar). The address carries `?store=<id>`; the choice is remembered on this browser. One store shows just its name.
 - Changed: settings, Mark ordered, Decide, the change log, run history, digest settings and backups are per store; passwords are for every store and view-only stays read-only on all of them. Alerts, digests, the PO CSV file name and the tab title name the store; `/status` totals every store.
-- Changed: the old single-store data moves into the first store on the first start (checked copy, safe to interrupt).
+- Changed: the old single-store data moves into its store (`SHOPIFY_STORE` / `PERFORMITY_BRAND_ID`, else the first) on the first start, once per data folder (checked copy, safe to interrupt). A later change to the store list never moves anything again.
 - Changed: everything shows by default: no role chosen ("All"), Reorder opens on All, every optional column is on (untick in Columns…; on a narrow laptop the right-most ones step aside with a note, never a sideways scroll), Overview shows every panel.
 
 ## 0.9.0 · 2026-11-20 · pre-production

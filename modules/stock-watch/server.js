@@ -179,13 +179,13 @@ const PULL_RUNNING = 'A Shopify pull is running. Try again in a minute.';
 
 /* ---------- stores (ADR-0015): open each one once, then run its work inside scope.run ---------- */
 const opened = new Map();   // store id → null (open) or the Error it failed with
-/** Open a store once: the first store takes the old single-store files (src/migrate.js), a pending restore.json is
+/** Open a store once: its home store takes the old single-store files (src/migrate.js, once per DATA_DIR), a pending restore.json is
  *  applied (src/backup.js), then store.json and the side files load. Throws (and keeps throwing) when they can't. */
 function openStore(id) {
   if (opened.has(id)) { const e = opened.get(id); if (e) throw e; return; }
   try {
     scope.run(id, () => {
-      if (stores.first()?.id === id) migrate.run(scope.root(), id);
+      if (stores.home()?.id === id) migrate.run(scope.root(), id);
       backup.prepare();
       store.load(); onorder.all(); decide.all();
     });
@@ -641,7 +641,7 @@ async function main() {
   await stores.refresh();   // Performity: the brand list (the last good one when the API is down)
   const list = stores.list();
   if (!list.length) console.warn(`No store yet (${stores.info().lastError || 'empty brand list'}); retried every 15 minutes.`);
-  /* every store opens now: the first one takes the old single-store files (src/migrate.js), pending restores apply;
+  /* every store opens now: the home store takes the old single-store files (src/migrate.js, once ever), pending restores apply;
      a store that can't be read stops the start, so nothing is overwritten (SW-004, critic r2 X1) */
   for (const s of list) {
     try { openStore(s.id); } catch (e) { console.error(`Refusing to start: ${e.message}`); process.exit(1); }

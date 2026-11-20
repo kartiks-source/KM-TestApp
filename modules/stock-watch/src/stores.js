@@ -78,6 +78,14 @@ function noteShop(id, shop) {
   if (s && s.shop !== shop) { s.shop = shop; writeCache(); }
 }
 
+/** Where an old single-store DATA_DIR belongs (src/migrate.js): the store it was for when that store is listed
+ *  (SHOPIFY_STORE for Key Vault / Railway variables, PERFORMITY_BRAND_ID for Performity), else the first store. */
+function home() {
+  const l = list(), m = mode();
+  const want = m === 'tokenapi' ? pin() : m === 'demo' ? '' : keys.cleanShop(process.env.SHOPIFY_STORE);
+  return (want && l.find((s) => s.id === want)) || l[0] || null;
+}
+
 const get = (id) => list().find((s) => s.id === id) || null;
 const has = (id) => !!get(id);
 const first = () => list()[0] || null;
@@ -100,5 +108,5 @@ function pick(asked, cookie) {
   return { error: 503, message: lastError ? `No store yet: ${lastError}` : 'No store yet: Performity’s brand list hasn’t loaded' };
 }
 
-module.exports = { list, refresh, get, has, first, pick, info, mode, noteShop,
+module.exports = { list, refresh, get, has, first, home, pick, info, mode, noteShop,
   _reset: () => { known = null; lastError = null; refreshedAt = 0; } };

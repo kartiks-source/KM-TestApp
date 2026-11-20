@@ -123,7 +123,7 @@ Railway builds the `Dockerfile` at the repo root, which copies this folder. Atta
 | `ADMIN_PASSWORD` | required in production (any user name) |
 | `RAILWAY_RUN_UID` | `0`, so the app can write to the Railway volume |
 | `PORT` | set by Railway (default 4400 locally) |
-| `DATA_DIR` | where the data lives (default `./data`; `/data` in Docker): `stores/<id>/store.json` and side files per store, `secret` and `stores.json` for all. An old single-store `DATA_DIR` moves into the first store on the first start (`docs/RUNBOOK.md`) |
+| `DATA_DIR` | where the data lives (default `./data`; `/data` in Docker): `stores/<id>/store.json` and side files per store, `secret` and `stores.json` for all. An old single-store `DATA_DIR` moves into its store (`SHOPIFY_STORE` / `PERFORMITY_BRAND_ID`, else the first) on the first start, once (`docs/RUNBOOK.md`) |
 | `STORES` | Key Vault only: several stores, `STORES=brand-a,brand-b` (else `SHOPIFY_STORE`) |
 | Shopify key variables | see "Shopify, read-only" above |
 | `SHOPIFY_API_VERSION` | optional, default `2026-07` |
@@ -141,7 +141,7 @@ Morning digest: `GET /api/digest?role=ops` (JSON) or `/api/digest.txt?role=ops` 
 server.js          HTTP server, API, Flow ingest, sheet sync, Shopify pull schedule (one store at a time)
 src/scope.js       which store the current request / pull is for → its folder DATA_DIR/stores/<id>
 src/stores.js      the store list: Performity brands, STORES / SHOPIFY_STORE, or the two demo stores
-src/migrate.js     one-time move of an old single-store DATA_DIR into the first store
+src/migrate.js     one-time move of an old single-store DATA_DIR into its home store
 src/keys.js        where the Shopify key comes from (Performity, Key Vault or variables), per store
 src/shopify.js     read-only guard + stock and order pulls
 src/engine.js      all the maths (pure, tested)

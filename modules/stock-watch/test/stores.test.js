@@ -183,6 +183,33 @@ test('migration: stores/<id> already holding other data → refuses, touches not
   assert.equal(fs.readFileSync(path.join(root, 'stores', 'brand', 'store.json'), 'utf8'), '{"other":1}');
 });
 
+test('migration is once per DATA_DIR: a later top-level file never moves, even when the first store changes (ISO-1)', () => {
+  const { root } = oldDataDir();
+  migrate.run(root, 'alpha');
+  const a = path.join(root, 'stores', 'alpha');
+  const before = sha(path.join(a, 'store.json'));
+  fs.writeFileSync(path.join(root, 'restore.json'), '{"stock":[],"orders":[]}');      // old-runbook habit
+  fs.mkdirSync(path.join(root, 'stores', 'beta'));
+  fs.writeFileSync(path.join(root, 'stores', 'beta', 'store.json'), '{"beta":1}');   // the new first store already holds data
+  const r = migrate.run(root, 'beta');                                                // must not throw (no crash loop)
+  assert.equal(r.id, 'alpha', 'finished against the store it moved into');
+  assert.equal(fs.readFileSync(path.join(root, 'stores', 'beta', 'store.json'), 'utf8'), '{"beta":1}', 'beta untouched');
+  assert.equal(fs.existsSync(path.join(root, 'stores', 'beta', 'restore.json')), false);
+  assert.equal(fs.existsSync(path.join(root, 'restore.json')), true, 'left at the top, with a warning');
+  assert.equal(sha(path.join(a, 'store.json')), before);
+  migrate.run(root, 'gamma');                                                         // an empty new first store: still nothing moves
+  assert.equal(fs.existsSync(path.join(root, 'stores', 'gamma')), false);
+  assert.equal(migrate.movedTo(root), 'alpha');
+});
+
+test('migration home: the store SHOPIFY_STORE / PERFORMITY_BRAND_ID names when listed, else the first', withEnv({ AZURE_KEY_VAULT_URL: 'https://test-vault.vault.azure.net', AZURE_TENANT_ID: 't', AZURE_CLIENT_ID: 'c', AZURE_CLIENT_SECRET: 's', STORES: 'alpha,beta', SHOPIFY_STORE: 'beta' }, () => {
+  assert.equal(stores.home().id, 'beta');
+  process.env.SHOPIFY_STORE = 'gone';
+  assert.equal(stores.home().id, 'alpha');
+  for (const k of Object.keys(process.env)) if (/^(AZURE_|STORES$)/.test(k)) delete process.env[k];
+  assert.equal(stores.home().id, 'sammsara-demo', 'demo: the first');
+}));
+
 test('server start on an old single-store DATA_DIR: data shows in the first store, the second store gets its own demo', async () => {
   const { root } = oldDataDir();
   fs.writeFileSync(path.join(root, 'store.json'), JSON.stringify({ stock: [{ t: Date.now() - 864e5, variantId: '42', sku: 'OLD', product: 'Old lamp', variant: '', before: 3, now: 2, price: 500 }],
