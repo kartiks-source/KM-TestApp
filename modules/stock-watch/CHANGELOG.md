@@ -12,6 +12,13 @@ Every number checked against Shopify for Sammsara (LOGIC §1c, §3, §5, §6, Wh
 - Sales falling 20%+: the drawer also shows the order at the last 2 weeks' pace (e.g. 133 pcs instead of 188).
 - "Still out" in the digest, `/api/v1/summary` (new `outNotSelling`) and the weekly snapshots now leaves out products that are out but not selling, like the Stock-outs page (87 → 45).
 - This week vs last week: the last 14 days' snapshots are worked out again when the maths, the stock history or the order prices change (they still showed the old rate floor).
+- One stock-out count everywhere: the Overview tile, Copy / WhatsApp summary and `/api/v1/summary` `stockouts` leave out products that are out but not selling (94 → 52, the Stock-outs page's count); new `stockoutsNotSelling`.
+- A sale inside a stock-out moves its start to that sale (a sale proves there was stock): Aspen was "Out 49 d, ₹51,828 lost" though it sold 2 on 31 Oct. Out at the first stock record reads "Out since before <date>".
+- Products with no stock record for part of the period (the rebuild left them out): the drawer hatches the days without history and says sales lost before then is unknown (was a blank chart and ₹0); Data lists them; Stock-outs says "rebuilt for 222 of 253 products".
+- Order today ranks by ₹ of sales a day at stake (Cascade, Sable, Casablanca first, not 12 slow out-of-stock items); the Overview panel shows the 5 biggest orders with ₹.
+- No unit costs: the headline leads with products to order ("Order 24 products today ₹32.07 L at selling price"); Reorder column *Order value*; budget ranks *Sales kept / ₹* and says "keeps ₹X sales"; digest "Overstock at selling price". Free gifts (mostly sold at ₹0) are never ranked first by a budget.
+- Biggest losses leaves out slow sellers, with one "+₹X on N slow sellers: decide" line; This week vs last week shows the weekly flows only (sales lost, stock-outs, movers), not end-of-week states that clashed with the headline.
+- Phones: 44 px budget box and CSV file picker, × on an opaque strip once the drawer scrolls, no text under 11 px, weekly names on two lines, "too few sales for a trend" in words, "Trend" label on group cards; Suppliers counts only listed products (253, not 644).
 
 ## 1.1.0 · 2026-11-20 · Sprint 3
 

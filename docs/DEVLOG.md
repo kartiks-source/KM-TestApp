@@ -6,8 +6,16 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
-<!-- devlog archive links (scripts/rotate-devlog.js) -->
-Older entries: [2026-11](devlog/2026-11.md)
+## 2026-11-20 · UI + mobile fixes (1.1.1)
+stock-watch 1.1.1, on `main` (not pushed, not deployed). Fixes from the UI, simplicity and mobile critics, checked on a copy of the live Sammsara data at 1440 and 360.
+- Counts (P1, UI-2/M2/SIMP-3): `totals.stockouts` leaves out not-selling episodes (`stockoutsNotSelling`, episode `notSelling`); tile/summary 94 → 54 = Stock-outs page "53 products ran out 54 times" (local copy); weekly `ranOut` too. Badge = stillOut 47 = page.
+- M1 (P0): sale inside a stock-out moves its start (`engine.afterLastSale`, LOGIC §2). Aspen ₹51,828 "Out 49 d" → ₹8,089 "Out 21 d". Total lost ₹5.19 L → ₹4.66 L. "Out since before <date>" when out at the first record (SIMP-6).
+- UI-1/M3 (P1): row `historyFrom`; drawer hatches days before it + "Unknown" sales lost; Data lists the 31 (₹53.18 L sold); Stock-outs "for 222 of 253 products".
+- SIMP-2: Order today by ₹/day (Cascade, Sable, Casablanca rows 1-3, were 13-15); Overview panel top 5 by order ₹. SIMP-5: slow sellers out of Biggest losses, "+₹2.26 L on 41 slow sellers: decide". SIMP-4/UI-3: weekly panel flows only.
+- UI-4/SIMP-1 (rest after L3): no-cost headline by count, Reorder "Order value" + banner, budget "Sales kept / ₹" / "keeps ₹X sales", no "est.", PO "Unit price", digest "Overstock at selling price", tips without "cash". M4: `row.gift` (avg paid < 10% list price, no cost) never ranked.
+- Mobile P2: M5 budget 44 px, M6 file picker 44 px, M7 opaque strip behind × once scrolled, M8 ≥ 11-12 px, M9 trend in words / "Trend" label, M10 2-line names, M11 Suppliers 253 not 644.
+- Skipped: SIMP-1 "lead with pcs" kept ₹ beside the count (small grey); SIMP-6 "mark selling on backorder" (the start-move covers it). Overview at 1440×900 still scrolls to the weekly panel (now 2 tiles + movers).
+- Tests: npm test 391 pass; test:ui 37/37; smoke 30/30 + roles. Shared dev log page not updated from here.
 
 ## 2026-11-20 · number validation fixes
 stock-watch 1.1.1, on `main` (not pushed, not deployed). Fixes from the number-validation critics (sales-pull, stock-history, logic, secqa).
@@ -127,6 +135,3 @@ stock-watch, branch `feature/multistore` (5ce0981, 6d5454d, e8f6fba merge of mai
 - Docs: LOGIC §9 table fit, §16 default, §18 picker; README; module AGENTS (files, status); API, FORMATS (browser keys), SECURITY (`sw_store` row), RUNBOOK (picker, local two-store check); CHANGELOG 0.10.0; BACKLOG SW-062 (per-store access).
 - Checked: `npm test` 230 pass / 13 skip (browser); `test:ui` 13/13 (Playwright 1.65.1 from npx cache, `PLAYWRIGHT_CHANNEL=chrome`); `smoke.js` 30/30; `roles-smoke.js` all pass at 5 widths. Stand-in API with `STAND_IN_BRANDS=2`: two uuid stores, red dots with the reason ("no connected Shopify store"). Screenshots of the picker at 1440 and 390 (demo and stand-in) kept outside the repo.
 - Open: five critics not run on this branch; shared dev log page row not added from this worktree; merge to `main` after critics. On Railway the first start moves today's demo data into `sammsara-demo`.
-
-## 2026-11-20 · ops · Railway on the new account, as code
-- Project `stock-watch` on the Limitless Pixel account (`web-production-d8d7a911.up.railway.app`). `.railway/railway.ts` replaces `railway.json` (Config as Code is retired on 1 Dec 2026): Singapore region, 1 replica, health check `/health`, volume `/data`; secrets `preserve()`d. Region moved from sfo with the volume (data kept). Static outbound IPs wait for the Pro plan.

@@ -142,6 +142,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 
 - Stock history (SW-063, branch `feature/stock-history`): past stock rebuilt from Shopify's change log after the first pull (Data line + Rebuild button, Stock-outs note); Stock-outs counts "Out but not selling" apart.
 - 1.1.1 number validation fixes (DEVLOG 2026-11-20): history windows/first hour/order check, order prices ex GST (one 60-day re-read), weekly snapshots retaken on `calc` change, still out vs not selling, low data, pace qty, at-selling-price labels. Not deployed.
+- 1.1.1 UI + mobile fixes (DEVLOG 2026-11-20): `totals.stockouts` without not-selling (+ `stockoutsNotSelling`, episode `notSelling`), sale inside a stock-out moves its start (`engine.afterLastSale`), row `historyFrom` (drawer hatch / Data list / "Out since before"), `gift` (out of budget rank), Order today sorted by ₹/day, no-cost headline by count, weekly panel flows only, slow sellers out of Biggest losses, phone CSS (M5–M10), Suppliers count = listed products. Not deployed.
 
 ## Next
 
