@@ -111,33 +111,38 @@ Data → Upload a CSV shows, before anything is stored, what kind of file it is,
 
 **Rule:** once per store, after its first good pull (and again from Data → *Rebuild stock history*, admin only), the app reads Shopify's stock change log with ShopifyQL (Admin API 2025-10, scope `read_reports`):
 
-> `FROM inventory_adjustment_history SHOW inventory_adjustment_change WHERE inventory_state = 'available' GROUP BY hour, product_variant_id SINCE -Nd UNTIL today`
+> `FROM inventory_adjustment_history SHOW inventory_adjustment_change WHERE inventory_state = 'available' GROUP BY hour, product_variant_id SINCE 2026-09-21 UNTIL 2026-09-27`
 
-and walks it backwards from the stock we saw on the first pull:
+(dates are store-time days, **both ends included**; checked on Sammsara: `SINCE 2026-11-14 UNTIL 2026-11-14` returns that day) and walks it backwards from the stock we saw on the first pull:
 
 > stock at hour t = stock at our first read − the sum of 'available' changes after t (up to that read)
 
 - **60 days back** from the first read (the same as the order backfill), for every variant in that first read (active, tracked).
 - The result is ordinary stock rows (one at the start with the stock then, then one per hour the stock changed), marked `src: 'rebuilt'` and only for times **before** the first read. Stock-outs and ₹ lost (§2–§4) treat them like any other rows; nothing in the engine changed.
-- **Dropped:** a variant whose rebuilt stock goes below 0 at any hour. With "sell when out of stock" off that can't happen, so the log is incomplete for it; it keeps only live rows, and Data says how many were left out.
-- **Paging:** ShopifyQL returns at most 1,000 rows a query. We ask a week at a time; a week that returns 1,000 is split in half, down to one day; a day still at 1,000 is read by day instead of by hour; still 1,000 → no rebuild (note on Data).
+- **The first read's own hour** (1.1.1): ShopifyQL gives one total per store-time hour, and that hour also holds changes made *after* our read. Its logged change is replaced by −(units ordered in that hour before the read), from the order lines, which have exact times. *Why:* Sammsara's first read was 18:10; the 18:00 bucket held a Cascade order at 18:14, so Cascade's whole 60 days read 1 too high and its four real stock-outs (₹10,747 lost in 30 days) vanished.
+- **Dropped:** a variant whose rebuilt stock goes below min(its stock at the first read, 0) at any hour. With "sell when out of stock" off that can't happen, so the log is incomplete for it; it keeps only live rows, and Data says how many were left out. A variant oversold to −1 now may sit at −1 in the past too (1.1.1; before, any value below 0 dropped it).
+- **The order check** (1.1.1): with "sell when out of stock" off nobody can order a product at 0. So for every order line inside a rebuilt stock-out, after the hour it started, the log must show a stock drop for that variant in the order's hour (an oversell logs its drop and passes). A variant with a line that fails is dropped (live rows only). If failing lines are over **1%** of the order lines in the rebuilt span, the whole rebuild is refused: no rebuilt rows, a note on Data, stock-outs from the first read on. Data shows "check: N of M orders fell while out". *Why:* it is the one test of the rebuild that doesn't depend on the log itself; it caught all 5 variants hurt by the 1.1.0 window bug and passed the 4 real oversells.
+- **Paging:** ShopifyQL returns at most 1,000 rows a query. We ask 7 store days at a time (days 60–54, 53–47, … 4–0), each day exactly once; a window that returns 1,000 is split in two halves that still cover every day once, down to one day; a day still at 1,000 is read by day instead of by hour; still 1,000 → no rebuild (note on Data).
+- **Rules version:** a store rebuilt by older rules (`history.v`, 2 since 1.1.1) is rebuilt again on its next pull. A failed re-run keeps an earlier rebuild only when it was made by the same rules; 1.1.0 rows are removed instead.
 - **Never fails a pull.** No `read_reports` permission, a query Shopify won't accept, or any other error → no rebuild, a plain note on Data, and stock-outs count from the first read on. A failed re-run keeps the earlier rebuild.
 - **Stock-outs page:** "Before <first read>: rebuilt from Shopify's change log" when the period reaches back past it.
 
 **Why 'available' only:** Shopify's `inventoryQuantity` (what the pull reads) is the *available* stock. The log also has `committed` (held for unfulfilled orders); adding it double-counts every order (checked by hand on Sammsara: summing both was wrong, available alone matched).
 
-**Validation (Sammsara, 20 Nov 2026, read-only):** 245 of 257 active variants rebuild with stock never below 0 (12 dropped). Last 30 days: 94 products out ≥ 1 day, about ₹2.05 L lost, in line with a sales-gap check (sales of those products while in stock vs while out).
+**1.1.0 bug, fixed in 1.1.1:** windows were asked as `SINCE -60d UNTIL -54d`. ShopifyQL's relative `UNTIL -Nd` leaves day N **out** (`SINCE -3d UNTIL -3d` returns nothing), so days 54, 47, 40, 33, 26, 19, 12 and 5 back (26 Sep, 3, 10, 17, 24, 31 Oct, 7, 14 Nov) were never read: 8 of 61 days. Missing sales pushed earlier levels below 0 (31 of 253 variants dropped, Cascade among them) and missing restocks made phantom stock-outs (Leela 7 Arm out for 60 days, ₹27,270, while it sold until 14 Nov; Aspen out from 2 Oct, ₹51,828, while it held 2 pcs until 31 Oct). The old note here ("245 of 257 kept, ≈₹2.05 L") could not be reproduced.
+
+**Validation (Sammsara, 20 Nov 2026, read-only, live store file + the full change log, 61 days):** 1.1.1 keeps **250 of 253** variants (3 dropped, 1.1.0: 222/253); the order check finds **0 of 4,088** order lines inside a rebuilt stock-out (1.1.0 rows, same log: 6 lines on 5 variants). Cascade 49352313930031 is kept and hits 0 four times (30 Oct, 11, 14, 19 Nov). Same engine as 1.1.0, rebuilt rows only: ₹ lost 30 days ₹6,05,634 → ₹7,40,721, 7 days ₹1,81,194 → ₹2,41,603, stock-outs (30 d) 94 → 128 (with the 1.1.1 low-data rule, §3: ₹6,48,248 and ₹2,12,077). All ₹ in this paragraph are on the stored tax-inclusive prices, before the 1.1.1 order re-read (about 5–7% lower after it). 'available' is the right state: Cascade's 60 days are purchase −299, correction +270 (Sammsara books restocks as corrections), restock +22, against 282 units sold.
 
 **Considered:** order-based guessing (no sales for N days = out: misses slow sellers and stock-outs on busy days); asking the brand for a stock export (one point in time, not history); waiting 30 days for our own history (the brand wants the number on day one).
 
 **When it can be wrong:**
 - **Hour granularity:** a change counts at the start of its hour; a stock-out that started and ended inside one hour is missed. A capped day is read by day (start of day).
-- **The first read's own hour:** a change in the same clock hour as the first read is counted as before it.
+- **The first read's own hour:** built from order lines (above), so a restock or correction in that hour before the read is missed, and an order cancelled later still counts as a sale there.
 - **Several locations:** the change is the variant's total across locations, like the pull (§1); a transfer between locations nets to 0.
 - **Drafts and archived products are left out:** only variants active at the first read are rebuilt; a variant created in the last 60 days that started at 0 reads as out from the start (it sold nothing then, so it shows under *Out but not selling*, below, not in ₹ lost).
 - **Times without a zone** in the log are read in the store's time zone (§0a); set it to the shop's.
 
-**Out but not selling (Stock-outs page):** a product that was out but had no sales and no sales lost in the period lost nothing, so it isn't counted in the headline ("N products ran out", "N still out") or the menu badge; it has its own chip, *Out but not selling*, and one line under the headline. *Why:* rebuilt history brings in old dead items sitting at 0, which made the count look worse than the money says. A product out for the whole period that sold before it is **not** in this group: its rate looks further back (§3), so it has sales lost.
+**Out but not selling (Stock-outs page):** a product that was out but had no sales and no sales lost in the period lost nothing, so it isn't counted in the headline ("N products ran out", "N still out") or the menu badge; it has its own chip, *Out but not selling*, and one line under the headline. Since 1.1.1 the engine applies the same rule: `totals.stillOut` leaves these out and `totals.outNotSelling` counts them, so the digest, `/api/v1/summary` and the weekly snapshots say the same as the page (before: 87 in the digest vs 45 on the page, Sammsara). *Why:* rebuilt history brings in old dead items sitting at 0, which made the count look worse than the money says. A product out for the whole period that sold before it is **not** in this group: its rate looks further back (§3), so it has sales lost.
 
 ### What counts as a sale
 
@@ -147,7 +152,10 @@ and walks it backwards from the stock we saw on the first pull:
 | Test orders | left out | left out only if the Flow condition excludes them |
 | Refunds and removed items | netted: units are Shopify's `currentQuantity` | as sent |
 | Discounts | price after line **and** order-level discounts (`discountedUnitPriceAfterAllDiscountsSet`) | as sent |
+| Tax (GST) | taken out (1.1.1): when the order's prices include tax (`taxesIncluded`), price = price paid − the line's tax lines ÷ its ordered quantity | as sent |
 | Later edits | each run re-reads orders updated since the last run (30-minute overlap) and replaces their lines | not picked up |
+
+**₹ sold = Shopify's Net sales by order date** (1.1.1). Before, it was Shopify's *Total sales* (GST inside): Sammsara includes tax in every price, so ₹ sold ran 5.7–7.3% over Net sales (30 days: ₹71,75,868 vs ₹67,88,993). Checked: 19 Nov, app ₹1,60,252 = Shopify net sales ₹1,60,252.03 (Total ₹1,70,740 = the old number). ₹ lost uses the average price paid from the same lines, so it is ex GST too, and profit lost (§7b) sets an ex-GST price against an ex-GST cost. **Remaining difference:** a refund lowers the line on its *order's* day here; Shopify books *returns* on the day of the return, so a period's net sales can differ by the refunds that cross its edges (≤ 1% on 14 and 30 days, Sammsara). **Upgrade:** a store read before 1.1.1 reads its last 60 days of orders again once (`shopify.priceBasis`); orders older than that keep the tax-inclusive price until they age out. Flow / Sheet / CSV prices are as sent: send ex-tax prices to match.
 
 This matches the DAWBU dashboard's definition (cancelled out, refunds and discounts netted), so the two show the same sales for the same days. One known difference remains: DAWBU sums variants into products **by title**, and we keep **variants by ID**. Totals agree, but per-product rows can differ where two products share a title.
 
@@ -188,6 +196,8 @@ Setting: *Sales history used* [28 days]. If the store's data starts later than 2
 The average price paid (section 4) comes from the same sales. A product launched recently, or a store whose data starts recently, has no older history, so for it nothing changes. The product's `rateBasis` says which rule gave the rate (`window`, `history` or `before-out`) and `rateFrom` when that stretch starts.
 
 *Why:* without this, a best seller out for the whole 28 days sold 0 in the window, so it got a rate of 0: it showed as a Slow seller with ₹0 lost and dropped off the reorder list. The costliest stock-outs vanished from exactly the lists meant to catch them. Example: 5 a day at ₹1,000, out for the last 30 days → still 5 a day, **Out now**, order 5 × 40 = 200, ₹ lost ≈ 30 × 5 × ₹1,000 = ₹1,50,000 over a 30-day view. *Why 7 days:* under a week, one good or bad day swings the rate too much, and weekdays aren't all covered. *Considered:* a fixed 90-day window for everyone (too slow to follow a season) and carrying the last rate forward from before the stock-out (ignores any in-stock days since). *When it can be wrong:* if demand really fell while the product was out (season over, trend passed), the older rate over-orders; check the product's sales chart before a big order.
+
+**Low data (1.1.1):** a rate resting on **fewer than 5 units and fewer than 14 in-stock days** is capped at *units ÷ calendar days since the product's first sale*, the row is marked **low data** (drawer), and it can't be a best seller (A, §7a, so not in *Best sellers at risk*). *Why:* after the stock history rebuild many products were seen in stock only briefly; Tara 5 Arm sold 2 units in the 17 hours before a 40-day stock-out, which read as 0.29 a day, ₹23,280 lost and Out now; at its calendar pace it is 0.03 a day. 28 products with ≤ 3 units carried 44% of Sammsara's 30-day ₹ lost. *Considered:* leaving them out of ₹ lost altogether (hides real stock-outs of slow, pricey items); a higher floor for everyone (holds back real launches: a launch selling 4 in 3 days keeps its rate, since its calendar pace is no lower). *When it can be wrong:* a product that really sells fast but was out almost all the time reads slow until it has 5 sales or 14 in-stock days.
 
 **Days it couldn't be sold** (archived, draft, untracked, deleted: §1) count like out-of-stock days: they're left out of the in-stock days, so a product drafted for three weeks and then reactivated keeps its rate.
 
@@ -253,14 +263,14 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 
 | Number | Rule |
 |---|---|
-| Sold | sum of quantity × price paid for every order line in the period. Totals are the sum of the product rows, so the Overview and the Products page always agree |
+| Sold | sum of quantity × price paid for every order line in the period: **net sales, ex GST** with Shopify (§What counts as a sale; chart legend "Sold ex GST", tooltips say so). Totals are the sum of the product rows, so the Overview and the Products page always agree |
 | Lost to stock-outs | sum of ₹ lost (section 4) for stock-out hours inside the period; a stock-out spanning midnight is split across the days it covers |
 | % of demand | lost ÷ (sold + lost). "Demand" = what was sold plus what would have been sold |
 | Daily chart | the same two numbers per store day (setting *Time zone* [Asia/Kolkata], §0a); the first bar is the partial day the period starts in |
 | Selling items out now | products at 0 stock that sell at least the minimum rate (section 7) |
 | Out of stock right now (list) | every open stock-out, slow sellers included, so it can be higher than the count above |
 | Product-days with an empty shelf | total stock-out hours across all products ÷ 24 |
-| Headline | "Order ₹X today · ₹Y sales lost in N days": ₹X = order cost of the *Order today* rows (§6), ₹Y = Lost to stock-outs above. The lost number is called **sales lost** on every screen |
+| Headline | "Order ₹X today · ₹Y sales lost in N days": ₹X = order cost of the *Order today* rows (§6), ₹Y = Lost to stock-outs above. The lost number is called **sales lost** on every screen. **No unit costs in Shopify** (1.1.1): ₹X, *more to order this week*, *stuck in overstock* and Decide *Clear* values are at **selling price**; the summary, tooltips and drawer say "at selling price" (never "at cost"), and a line under the tiles asks to fill *Cost per item* in Shopify (Sammsara: 0 of 645 variants costed) |
 | Tiles | each says what the headline doesn't (final critic SIMP-1: the same ₹ used to show three times, under two names): **profit lost** (§7b) · % of demand, or, with no unit costs, **% of demand lost** · number of stock-outs; **more to order this week** = order cost of the *This week* rows (whole reorder list − Order today) · products, opens Reorder → This week; **best sellers at risk**; **stuck in overstock** |
 
 ### 5a. "This month" and the Yesterday strip (SW-027, `src/period.js`)
@@ -284,6 +294,7 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 - **The panel** (Overview, below the daily chart, so the chart still ends inside 900 px): *this week* = the newest saved day up to yesterday and the 6 days before; *last week* = the 7 days before those. Flows are added up over the week; states are the newest day's. Each number shows its change (▲▼ and ₹ or count; % on wide screens and in the tooltip): green = better (less lost, fewer out, less overstock), rose = worse; *to reorder* and *order today* are grey (neither good nor bad). A week with fewer than 7 saved days says so ("5 of 7 days").
 - **Movers**: the 5 products whose ₹ lost changed most between the two weeks (absolute change, ties by ₹ lost this week); a click opens the product.
 - **Digest**: Founder and Everyone get one line, `This week: ₹X lost to stock-outs, up/down from ₹Y last week · N stock-outs (M the week before).` The CEO digest already compares weeks (§17), so it doesn't.
+- **Worked out again (1.1.1):** the file keeps `calc` = engine rules version (`CALC_VERSION`) | stock history rebuild time | order price basis. When it changes, the last 14 days are dropped and taken again, whatever took them, so the panel uses the same maths as the daily chart. *Why:* on Sammsara all 8 snapshots were taken at the history rebuild, minutes before the 7-day rate floor; the panel said ₹2,58,406 lost this week vs ₹1,81,970 summed from the chart, and its top mover was a phantom stock-out. Days older than 14 keep what they said then.
 - When it can be wrong: a backfilled day uses today's in-stock rate and today's unit costs, like every ₹ lost figure (§4); a day taken late (no report or pull that day) still has its correct day window, but *still out* and *order today* reflect the rows known by its midnight.
 
 ---
@@ -328,7 +339,9 @@ Settings: *Lead time* [7 days], *Cover after a reorder* [30 days], *Safety stock
 
 **What else we considered:**
 - **Safety stock from demand variability** (the textbook formula using standard deviation and service level) is more precise. But it needs months of clean history per product, and brands find "3 days of extra stock" easier to reason about. It's a good next step once there's more data.
-- **Order value** = order qty × **unit cost** (the cash you commit to the supplier). If a product has no unit cost, the average price paid is used instead, which overstates the cash.
+- **Order value** = order qty × **unit cost** (the cash you commit to the supplier). If a product has no unit cost, the average price paid is used instead, which overstates the cash; the page then says "at selling price" (§5).
+
+**At the last 2 weeks' pace (1.1.1):** when the product's trend (§7d) or the store's typical trend is down 20% or more and the last 14 days' in-stock rate is lower than the 28-day rate, the row also carries `paceQty` = the same formula at that recent rate (with Mark ordered and supplier rounding), shown in the drawer under the order: "131 pcs at last 2 weeks' pace". The order quantity itself still uses the 28-day rate. *Why:* after a festive peak the 28-day rate over-orders: Sammsara 20 Nov, store trend −36%, Cascade 188 pcs at 4.87 a day vs 133 at 3.49; across Order today ₹54.9 L vs ₹41.5 L (tax-inclusive prices, before the 1.1.1 re-read). *Considered:* sizing the order on min(28-day, 14-day) when falling (changes every order on a noisy 14 days; left as the person's call). *When it can be wrong:* a stock-out in the last 14 days leaves few in-stock days (under 3 → no pace shown).
 
 **When it can be wrong:**
 - **Lead time is one number for the whole store** unless the product's supplier has its own (§6c, SW-040).
@@ -437,6 +450,7 @@ Unknown unit cost: margin = price × the store's average margin % (products with
 
 **Rule:** products are ranked by **₹ demand a day** = sales per day (section 3) × average price paid (section 4), both from the 28-day sales history, **not** the selected period. Going down that list, the products that together make the **first 80% of demand are A (best sellers)**, the next 15% are B, and the rest, plus anything with no demand, are C. A products show a **Best seller** tag everywhere. **Inactive products** (archived, draft, untracked or deleted, §2) are not ranked and are always C: they can't be ordered, and they appear in the rows only when they sold or lost sales in the selected period, so ranking them let the period buttons move A slots, best sellers at risk and order value (critic r2 L2: demo with 15 variants archived 6 days ago gave 90 A at 7 days, 97 at 30).
 
+- **Low data** rows (§3, fewer than 5 units and 14 in-stock days) are never A: they rank B at most.
 - **Best sellers at risk** = A products that are Out now, Critical or Order now.
 - The reorder list puts A products first within each status.
 

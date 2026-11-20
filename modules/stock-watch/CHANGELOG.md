@@ -2,6 +2,17 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.1 · 2026-11-20 · number validation fixes
+
+Every number checked against Shopify for Sammsara (LOGIC §1c, §3, §5, §6, What counts as a sale).
+- Past stock-outs: the rebuild from Shopify's change log skipped one day in every seven (8 of 61 days), which made phantom stock-outs and left 31 of 253 products out. It now reads every day, splits the first read's own hour with the order lines, and checks itself against your orders: a product with orders while it was supposedly out is left out, and a rebuild that fails the check for over 1% of orders is not used. Stores rebuilt by 1.1.0 are rebuilt again on the next pull. Data shows the check.
+- ₹ sold is now Shopify's **net sales, ex GST** (it included GST, 5.7–7.3% high). ₹ lost and profit lost follow. Orders of the last 60 days are read again once after the update.
+- No unit costs in Shopify: ₹ to order, overstock and Clear say "at selling price", never "at cost", with a line asking to fill *Cost per item*.
+- Products with under 5 units and 14 in-stock days to go on are marked *low data*, sell at their calendar pace, and are never best sellers (2 units before a long stock-out no longer reads as ₹23,280 lost).
+- Sales falling 20%+: the drawer also shows the order at the last 2 weeks' pace (e.g. 133 pcs instead of 188).
+- "Still out" in the digest, `/api/v1/summary` (new `outNotSelling`) and the weekly snapshots now leaves out products that are out but not selling, like the Stock-outs page (87 → 45).
+- This week vs last week: the last 14 days' snapshots are worked out again when the maths, the stock history or the order prices change (they still showed the old rate floor).
+
 ## 1.1.0 · 2026-11-20 · Sprint 3
 
 - ₹ lost on long stock-outs: the in-stock sales rate counts at least 7 days (was 1), so a product seen in stock for a few hours can't claim units-per-day it never showed (LOGIC §3).
