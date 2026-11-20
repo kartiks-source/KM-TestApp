@@ -7,7 +7,7 @@
  * Order row  columns: Time, Order, Variant ID, SKU, Qty, Unit price
  */
 
-const STOCK_COLS = ['time', 'variant id', 'sku', 'product', 'variant', 'stock before', 'stock now', 'price', 'type', 'cost'];
+const STOCK_COLS = ['time', 'variant id', 'sku', 'product', 'variant', 'stock before', 'stock now', 'price', 'type', 'cost', 'vendor'];
 const ORDER_COLS = ['time', 'order', 'variant id', 'sku', 'qty', 'unit price'];
 /** Columns a CSV / Sheet file must name in its header row (a Flow row without a time is stamped now). */
 const REQUIRED = { stock: ['time', 'variant id', 'stock now'], order: ['time', 'variant id', 'qty'] };
@@ -27,6 +27,7 @@ const ALIASES = {
   price: ['unit price', 'selling price'],
   type: ['product type', 'category'],
   cost: ['unit cost', 'cost price', 'cogs', 'cost per item'],
+  vendor: ['supplier'],
   order: ['order name', 'order id', 'name'],
   qty: ['quantity', 'units'],
   'unit price': ['price', 'net price', 'discounted price'],
@@ -142,6 +143,8 @@ function stockFrom(cells, m) {
   if (type) r.type = type;
   const cost = toNum(g('cost', 9));
   if (cost > 0) r.cost = cost;
+  const vendor = g('vendor', 10);   // supplier, for the PO CSV (SW-045)
+  if (vendor) r.vendor = vendor.slice(0, 100);
   return { r };
 }
 function orderFrom(cells, m) {
@@ -164,9 +167,12 @@ const blankSkips = () => ({ badTime: 0, badNumber: 0, noId: 0, tooOld: 0 });
  */
 function fromCsv(text, kind, opts = {}) {
   if (typeof opts === 'number') opts = { now: opts };
+  return fromGrid(parseCsv(text, sniffDelimiter(text)), kind, opts);
+}
+/** Same as fromCsv, on rows already split into cells (src/csvmap.js builds one from a mapped file, SW-045). */
+function fromGrid(grid, kind, opts = {}) {
   const now = opts.now ?? Date.now(), tz = opts.timeZone ?? opts.tzOffsetMin ?? 330, flow = !!opts.flow;
   const skips = blankSkips();
-  const grid = parseCsv(text, sniffDelimiter(text));
   if (!grid.length) return { rows: [], skipped: 0, skips };
   const wanted = kind === 'stock' ? STOCK_COLS : ORDER_COLS;
   let m = null, start = 0;
@@ -216,4 +222,4 @@ function csvCell(x) {
 const stockKey = (r) => `${r.t}|${r.variantId}|${r.before}|${r.now}`;
 const orderKey = (r) => (r.line ? `${r.order}|L${r.line}` : `${r.order || r.t}|${r.variantId}|${r.qty}`);
 
-module.exports = { parseCsv, sniffDelimiter, toNum, toTime, headerMap, fromCsv, fromWebhook, csvCell, stockKey, orderKey, STOCK_COLS, ORDER_COLS, REQUIRED };
+module.exports = { parseCsv, sniffDelimiter, toNum, toTime, headerMap, fromCsv, fromGrid, fromWebhook, csvCell, stockKey, orderKey, idOf, norm, STOCK_COLS, ORDER_COLS, REQUIRED, LABEL };

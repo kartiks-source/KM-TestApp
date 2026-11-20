@@ -772,9 +772,10 @@
         <div class="field"><label>Header <span class="mono">X-Ingest-Key</span></label><div class="code" id="u-key">${maskKey(s.ingestKey)}</div><small>${s.ingestKeyAt ? `Last changed ${dt(s.ingestKeyAt)}` : 'Not changed since setup'}</small></div>
         <div class="toolbar"><button class="btn ghost" data-copy="u-stock">Copy stock URL</button><button class="btn ghost" data-copy="u-order">Copy order URL</button><button class="btn ghost" id="show-key">Show key</button><button class="btn ghost" id="copy-key">Copy key</button><button class="btn ghost" id="new-key">New key</button></div></details>
       <details class="panel fold"><summary><b>Upload a CSV</b> <span class="muted">one-off history</span></summary>
-        <p class="muted">Columns, with a header row. Stock: <span class="mono">Time, Variant ID, SKU, Product, Variant, Stock before, Stock now, Price</span>. Orders: <span class="mono">Time, Order, Variant ID, SKU, Qty, Unit price</span>. Dates day first: <span class="mono">15/11/2026 10:30</span> or <span class="mono">2026-11-15 10:30</span>.</p>
+        <p class="muted">A Shopify products or orders export works as it is. Any other CSV with a header row: pick which of its columns is which after choosing it. Dates day first: <span class="mono">15/11/2026 10:30</span> or <span class="mono">2026-11-15 10:30</span>.</p>
         <div class="form"><div class="field"><label for="imp-kind">File holds</label><select id="imp-kind"><option value="stock">Stock changes</option><option value="order">Order lines</option></select></div>
           <div class="field"><label for="imp-file">CSV file</label><input type="file" id="imp-file" accept=".csv,text/csv"></div></div>
+        <div id="imp-preview"></div>
         ${src.kind === 'demo' ? '<p class="muted small">Uploading replaces the demo data, with anything marked ordered or decided on it.</p>' : ''}
         <div><button class="btn" id="imp-go">Upload</button></div></details>
 
@@ -800,7 +801,7 @@
 
   const manyStores = () => !!(window.SW_STORES && SW_STORES.list().length > 1);
   const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
-  const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
+  const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days', ...(window.SW_IMPORT ? SW_IMPORT.SKIP : {}) };
   const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" ${type === 'number' ? `type="text" inputmode="decimal" autocomplete="off" data-trial="${k}"` : `type="${type}"`} value="${esc(type === 'number' ? window.SW_TRIAL?.typed(`f-${k}`) ?? v : v)}"><small>${esc(hint)}</small></div>`;   // SW-057: numbers keep what you type
 
   /* ---------- product drawer ---------- */
@@ -990,8 +991,9 @@
       if (t.id === 'imp-go') {
         const f = $('#imp-file').files[0]; if (!f) { toast('Choose a CSV file first'); return; }
         t.disabled = true;
-        const j = await api(`/api/import?kind=${$('#imp-kind').value}`, { method: 'POST', body: await f.text(), json: false, headers: { 'content-type': 'text/csv' } });
+        const j = await api(`/api/import?kind=${$('#imp-kind').value}${window.SW_IMPORT ? SW_IMPORT.query() : ''}`, { method: 'POST', body: await f.text(), json: false, headers: { 'content-type': 'text/csv' } });
         const why = Object.entries(SKIP_WHY).filter(([k]) => j.skips?.[k]).map(([k, l]) => `${j.skips[k]} ${l}`).join(', ');
+        if (window.SW_IMPORT) SW_IMPORT.reset();
         toast(`Read ${j.read} rows, ${j.added} new${j.skipped ? `, ${j.skipped} skipped (${why})` : ''}`); await load();
       }
       if (t.id === 'sheet-save') {

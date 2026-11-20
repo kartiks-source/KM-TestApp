@@ -239,6 +239,20 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: multi-store spec 20 Nov.
 - Status: Done (`src/people.js`, `public/people.js`; `test/people.test.js`, `test/ui-people.test.js`). Open: no self-service reset or email; `access.json` is not in the per-store backups (volume backups cover it; `.bak` keeps the previous copy).
 
+## Sprint 3 · E-data
+
+**SW-045 · Import preview with column mapping; Shopify exports** (P2 · M · builder)
+- Why: a merchant has Shopify's own Products / Orders exports; reformatting them by hand loses rows or money (cancelled orders, discounts).
+- Accept: Data → Upload a CSV shows kind, our column ← their header selects, first 5 rows as read; any mapping changeable; Shopify products + orders exports import with no changes (cancelled / voided / refunded, untracked, draft / archived left out; line discount netted); mapping remembered per store per header set. Tests on real-shaped exports (`test/fixtures/`).
+- Source: QA idea.
+- Status: Done (sprint3/E-data). LOGIC §1b, API `POST /api/import/preview` + `?map=`, FORMATS `mappings.json`. Open: order-level discount codes are not spread over lines; Shopify `Tags` not read (groups come from the catalog).
+
+**SW-050 · `/api/v1` + summary + paginated rows** (P2 · M · builder)
+- Why: other Catalys tools need the ₹ numbers without scraping the page's API, which may change.
+- Accept: every `/api/<x>` also at `/api/v1/<x>` (same auth, handler; old paths stay); `GET /api/v1/summary` headline only; `GET /api/v1/rows?view=reorder|stockouts|products&limit=&cursor=`, stable order, max 500; API.md documents v1 as the stable contract with examples; tests.
+- Source: architect A11, process F10.
+- Status: Done (sprint3/E-data). `src/apiv1.js`, ADR-0017, API §v1, LOGIC §5c, `test/apiv1.test.js`. Open: per-tool API keys (tools use the view password; SW-060).
+
 ---
 
 ## Later
@@ -252,11 +266,9 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-042 | Stock-aware targets on groups + traffic lights | M | builder | DAWBU F5, product ideas |
 | SW-043 | Weekly review page with daily snapshots and tile deltas | M | product | product F5, idea "Weekly review" |
 | SW-044 | Paste-a-list lookup + saved lists | S | builder | DAWBU F9 |
-| SW-045 | Import preview with column mapping; accept Shopify export columns | M | builder | QA idea |
 | SW-046 | Storage move per ADR-0003 (node:sqlite) + cached report + gzip | L | builder | architect A6, SRE-10 |
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
-| SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |

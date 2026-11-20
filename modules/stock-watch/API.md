@@ -1,6 +1,6 @@
 # API: Stock-out Watch (web app)
 
-Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. No `/api/v1` prefix yet (SW-050): routes may change between minor versions; check `CHANGELOG.md`.
+Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. **Use `/api/v1/…` from other tools** (§v1 below, SW-050): it is the stable contract. The bare `/api/…` paths answer the same and stay for the page, but may change between minor versions; check `CHANGELOG.md`.
 
 ## Conventions
 
@@ -32,6 +32,37 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 | `days` | `7`, `14`, `30`, `60` (default 30), or `month` = from the 1st of this month, store time |
 | `timeZone` | trial IANA zone (`Europe/London`), not saved; unknown = the saved zone (SW-049). The answer's `settings` carries `timeZone` and `tzOffsetMin` = today's offset |
 | `leadDays`, `coverDays`, `safetyDays`, `demandWindowDays`, `smallTopUpDays`, `minPerDay`, `tzOffsetMin` | trial values, not saved; clamped to 0–180, 1–365, 0–60, 7–90, 1–60, 0–100, −720–840. Blank or not a number = the saved value |
+
+## v1: the stable contract (SW-050, ADR-0017)
+
+For other Catalys tools and scripts. Source: `src/apiv1.js`.
+
+- **Every `/api/<x>` route above and below also answers at `/api/v1/<x>`**: same auth (cookie or Basic), same `?store=`, same view-only and cross-site checks, same handler, same answer. `/api/report` = `/api/v1/report`, `PUT /api/v1/settings` = `PUT /api/settings`, and so on. The old paths stay. `/ingest/*`, `/health`, `/status`, `/login` are not versioned.
+- **Stable means:** within v1, routes and fields are only added, never renamed, removed or changed in meaning. A breaking change gets `/api/v2/`, with v1 kept alongside for at least one minor version (noted in `CHANGELOG.md`).
+- Money is whole rupees (₹, `currency: "INR"`); times are ms since 1970 (UTC).
+
+Two routes exist only under v1:
+
+| Method · path | Auth | Params | Answer | Errors |
+|---|---|---|---|---|
+| `GET /api/v1/summary` | view | report query values (`days`, trial settings), `store` | headline numbers only, under 1.5 KB: `{ ok, store: { id, name }, generatedAt, days, from, period, currency, money: { sold, lost, lostProfit, stillOutPerDay, orderValueNow, orderValueAll, excessValue }, counts: { products, outNow, stillOut, orderToday, orderNow, orderWeek, bestAtRisk, overstocked, stockouts }, lostPct, storeTrendPct, yesterday: { day, sold, lost, ranOut, back }, source, fresh: { lastPull, ageMin, stale } }`. Each number = the same key in `/api/report` `totals` (LOGIC §5c) | 404 unknown store |
+| `GET /api/v1/rows` | view | `view` = `reorder` \| `stockouts` \| `products` (required); `limit` 1–500 (default 100; more is cut to 500); `cursor` = `next` from the previous page; report query values; `store` | `{ ok, store, view, generatedAt, days, total, limit, rows[], next }`. `rows[]` = the same row objects as `/api/report`'s `reorder[]` / `stockouts[]` / `products[]`, in a **stable order: variant ID as text, then (stock-outs) start time**, not ₹; `next` = null on the last page. A cursor is the key of the last row sent, so rows that change between pages are never repeated or skipped (a row added before the cursor is not seen until the next walk) | 400 bad `view` / `limit` / `cursor`; 404 unknown store |
+
+Examples (Basic auth with the admin or view password; any user name):
+
+```sh
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/summary?store=sammsara-demo'
+# {"ok":true,"store":{"id":"sammsara-demo","name":"Sammsara (demo)"},"days":30,"currency":"INR",
+#  "money":{"sold":12089172,"lost":1172509,"lostProfit":642859,"stillOutPerDay":19284,"orderValueNow":3577863,…},
+#  "counts":{"products":252,"outNow":8,"stillOut":14,"orderToday":77,…},"yesterday":{…},"source":"demo","fresh":{…}}
+
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/rows?view=reorder&limit=200'
+# {"ok":true,"view":"reorder","total":124,"limit":200,"rows":[{"id":"4710000003","name":"…","status":"Order today","orderQty":12,"orderValue":38400,…},…],"next":null}
+
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/rows?view=stockouts&limit=100&cursor=WyI0NzEwMDAwMDUyIiwxNzkzODAyODUwODkxXQ'
+```
+
+Walk every page: call with no `cursor`, then pass each answer's `next` until it is `null`.
 
 ## Open routes
 
@@ -75,7 +106,8 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 | `PUT /api/settings` | JSON ≤ 64 KB: any of the trial keys above (clamped), `storeName` (≤ 60 chars), `timeZone` (IANA name or `+05:30`; an old `tzOffsetMin` alone becomes a zone, 330 = `Asia/Kolkata`), `sheetStockCsv`, `sheetOrderCsv` (≤ 500 chars), `newIngestKey: true` ⚠ rotates the key | `{ ok, settings }` (includes the new key). Each changed value is logged `{at, by, key, old, new}` (key masked) | 400 not a JSON object or an unknown time zone; 413 |
 | ⚠ `POST /api/onorder` | JSON ≤ 256 KB `{ items: [{ id, qty, eta }], by? }`; `qty` 1–1,000,000 whole; `eta` `YYYY-MM-DD` (end of that day, store time) or ms, within −1…+365 days; `qty: 0` or `clear: true` removes; ≤ 500 items | `{ ok, saved, removed }` | 400 `Nothing to mark`, bad qty/date/id, not JSON; 405 other methods |
 | ⚠ `POST /api/decide` | JSON ≤ 16 KB `{ id, decision }`; `decision` = `keep` \| `drop` \| `clear`, or null/'' to remove | `{ ok }` or `{ ok, removed }` | 404 `No such product` (not in the report); 400 bad decision, not JSON, over 5,000 decisions; 405 other methods |
-| ⚠ `POST /api/import?kind=stock\|order` | CSV text (≤ 25 MB) with a header row; `FORMATS.md` §CSV | `{ ok, read, added, skipped, skips: { badTime, badNumber, noId, tooOld } }`. On a demo store the demo goes first, with its Mark ordered and decisions (always; there is no option, SW-007) | 400 missing columns (named); 409 Shopify connected or a pull running; 413 |
+| ⚠ `POST /api/import?kind=stock\|order&map=` | CSV text (≤ 25 MB) with a header row; `FORMATS.md` §CSV. A Shopify products / orders export is read as one (no `map` needed). `map` (SW-045) = JSON `{ "<our column>": "<their header>" \| "@now" \| "@sku" \| "@options" \| "" }`, our columns as in the preview's `columns[].key`; `@now` = import time (stock Time), `@sku` = Variant ID from the SKU, `@options` = Option1–3 values (Variant); missing keys = not used. An import with `map` remembers it for this store and header set | `{ ok, read, added, skipped, skips: { badTime, badNumber, noId, tooOld, cancelled?, untracked?, inactive? }, format?, ignored? }` (`format`, `ignored` = image-only rows: mapped / Shopify imports). On a demo store the demo goes first, with its Mark ordered and decisions (always; there is no option, SW-007) | 400 missing columns (named), `Choose a column for …`, bad `map` (unknown column, header not in the file, not JSON); 409 Shopify connected or a pull running; 413 |
+| `POST /api/import/preview?kind=&map=&head=` | CSV text (≤ 4 MB); `kind` = `stock` \| `order` or none (the file says); `map` = JSON mapping (below) or none (remembered, else detected); `head=1` = the text is the start of a bigger file (its last row is dropped). Writes nothing (admin only, like every POST) | `{ ok, format: 'shopify-products'\|'shopify-orders'\|'stock'\|'order'\|null, label, kind, remembered, headers[], columns[{ key, label, need, specials[{ value, label }] }], map, missing[], rules[], sample[{ raw, read, skip }], tzOffsetMin, timeZone }`; `sample` = first 5 data rows, `read` = the row as stored, `skip` = why it'd be left out (`badTime`, `badNumber`, `noId`, `tooOld`, `cancelled`, `untracked`, `inactive`) | 400 empty file, bad mapping; 409 Shopify connected; 413 |
 | `POST /api/sync` | none | `{ ok, stock, orders }` new rows from the Sheet links, or `{ ok, skipped: true }` with no links | 409 Shopify connected; 502 the Sheet fetch or parse failed (message says which tab: off-Google redirect, > 3 redirects, > 20 MB, no answer in 20 s, HTTP error, bad CSV) |
 | `POST /api/shopify/sync` | none | `{ ok, stock, orders }` when the pull ends within 25 s, else 202 `{ ok, running: true }` (it carries on; poll `/api/settings`) | 400 Shopify isn't connected; 502 the pull failed |
 | ⚠ `POST /api/demo` | none | `{ ok, stock, orders }`: demo data loaded, decisions forgotten (backup first) | 409 Shopify connected; 409 the store holds real data (Clear first) |

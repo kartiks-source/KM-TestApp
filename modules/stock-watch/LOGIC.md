@@ -87,6 +87,24 @@ The upload message lists how many rows were read, new, and skipped for each reas
 
 **When it can be wrong:** a day-first file where every date has day ≤ 12 (e.g. `05/11/2026`) can't be told apart from a US file and is read day first. Decimal commas (`1.299,50`) aren't supported.
 
+### 1b. Import preview, column mapping and Shopify exports (SW-045, `src/csvmap.js`)
+
+Data → Upload a CSV shows, before anything is stored, what kind of file it is, which of its columns feeds each of ours, and the first 5 rows as they will be read (or why each would be left out). Any mapping can be changed with a select; the import then goes through the same row checks as §1a.
+
+| Rule | Why | Considered instead |
+|---|---|---|
+| The kind is read from the header row: a **Shopify products export** (`Handle` + `Variant SKU` + `Variant Inventory Qty` or `Variant Price`) = stock counts; a **Shopify orders export** (`Name` + `Lineitem quantity`) = order lines; our own Stock / Order log headers; else "CSV file" with a suggestion from the §1a aliases | a merchant has these exports already; no reformatting in a spreadsheet | asking the user to pick a template |
+| Shopify exports carry no variant ID: **Variant ID = the SKU**, or the ID this store already uses for that SKU (newest stock row, then the Shopify catalog), so an export joins Flow, Sheet or earlier rows. A row with no SKU is skipped (*no variant ID*) | the same product must be one row, whatever brought it in | product title as key (not unique) |
+| Products export: **Time = the moment you import** (it is a count, not a history); Variant = Option1/2/3 values joined with " / " ("Default Title" = none); Title, Vendor, Type are copied down the rows of one Handle; image-only rows ignored (not counted); variants with a blank *Variant Inventory Tracker* (*stock not tracked*) or a *draft* / *archived* status (*draft or archived*) are left out | Shopify writes product values on the first row only; an untracked count is not real stock | reading every row as a variant |
+| Orders export: Time = *Created at*; Created at, Financial Status, Cancelled at are copied down the rows of one order (*Name*); orders with *Cancelled at* set or status *voided* / *refunded* are left out (*cancelled / refunded*), *partially_refunded* kept; **price paid = Lineitem price − Lineitem discount ÷ Lineitem quantity** (₹14,999 − ₹2,000 ÷ 2 = ₹13,999) | ₹ sold and ₹ lost must not count money that never came in | spreading order-level discount codes over lines (not done: the export doesn't say which lines they hit) |
+| A needed column (stock: Time, Variant ID, Stock now; orders: Time, Variant ID, Qty; SKU when Variant ID is "Use the SKU") with no mapping stops the import on the page and, from scripts, with 400 `Choose a column for …` | same as §1a: never guess | importing by position |
+| The mapping used for an import with `?map=` is **remembered per store, per set of headers** (same names in any order and case), last 50 sets kept; the next file with those headers opens with it. The page always sends the mapping it showed, so it is remembered; a script posting a Shopify export or our own headers without `map` saves none | the same supplier file comes every week | one mapping per store (breaks with two file shapes) |
+| A preview of a file over 256 KB reads its first 256 KB only (5 rows are enough); the import reads all of it | fast on phones | uploading the whole file twice |
+
+**Worked example** (test/fixtures/shopify-orders.csv): #1042 line 1 = 2 × ₹14,999 with ₹2,000 line discount → 2 sold at ₹13,999 = ₹27,998; #1044 voided and #1045 refunded are left out; #1046 gift wrap has no SKU → skipped. 8 rows → 5 read, 3 skipped.
+
+**When it can be wrong:** a products export imported once is one count per variant: stock-outs and restocks show only between two imports (import a fresh export daily, or use Shopify / Flow). Two products sharing one SKU become one row.
+
 ### What counts as a sale
 
 | | Shopify pull | Flow / Sheet / CSV |
@@ -195,6 +213,8 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 
 ## 5. Totals on the Overview
 
+**`/api/v1/summary` (SW-050, §5c below)** gives other tools these same totals, unchanged.
+
 | Number | Rule |
 |---|---|
 | Sold | sum of quantity × price paid for every order line in the period. Totals are the sum of the product rows, so the Overview and the Products page always agree |
@@ -219,6 +239,24 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 - When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
 
 ---
+
+### 5c. Numbers for other tools: `/api/v1/summary` and `/api/v1/rows` (SW-050, `src/apiv1.js`)
+
+No new maths: the summary copies `totals` from the same report the page shows (same period and trial settings), and rows are the report's own `reorder[]`, `stockouts[]`, `products[]`.
+
+| Field | Is |
+|---|---|
+| `money.sold`, `money.lost`, `lostPct` | Sold, Lost to stock-outs, % of demand (above) |
+| `money.lostProfit` | profit lost (§7b) |
+| `money.stillOutPerDay` | ₹ a day the products out right now cost (§15a) |
+| `money.orderValueNow` / `orderValueAll` | order cost of the *Order today* rows / of every row to order (§6) |
+| `money.excessValue` | cash in excess stock (§7c) |
+| `counts.*` | `products` with data, `outNow` selling items out, `stillOut` open stock-outs, `orderToday` / `orderNow` / `orderWeek` rows by status (§6), `bestAtRisk` A items at risk (§7a), `overstocked` (§7c), `stockouts` episodes in the period |
+| `yesterday` | the Yesterday strip (§5a) |
+
+| Rule | Why | Considered instead |
+|---|---|---|
+| Rows are paged in variant-ID order (stock-outs: then start), the cursor = the last row's key, at most 500 a page | a ₹ order moves while someone pages, so rows would repeat or vanish between pages | offset pages in ₹ order |
 
 ## 6. Reorder status and quantity
 

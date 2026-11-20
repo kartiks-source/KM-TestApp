@@ -50,9 +50,21 @@ A CSV or Sheet tab must start with a header row naming at least the required col
 | Price (stock) | unit price, selling price |
 | Type | product type, category (not "collection") |
 | Cost | unit cost, cost price, cogs, cost per item |
+| Vendor (stock, SW-045) | supplier: kept on the stock row for the PO CSV |
 | Order | order name, order id, name |
 | Qty | quantity, units |
 | Unit price (order) | price, net price, discounted price |
+
+### Shopify admin exports and column mapping (SW-045, LOGIC.md §1b)
+
+Read as they come from Shopify admin (Products → Export, Orders → Export, CSV for Excel or plain CSV); detected from the header row:
+
+| Export | Our column ← Shopify column |
+|---|---|
+| Products (`Handle`, `Variant SKU`, `Variant Inventory Qty`) → stock rows | Time ← the import moment; Variant ID ← `Variant ID` if present, else the SKU; SKU ← `Variant SKU`; Product ← `Title`; Variant ← `Option1/2/3 Value`; Stock now ← `Variant Inventory Qty`; Price ← `Variant Price`; Cost ← `Cost per item`; Type ← `Type`; Vendor ← `Vendor`. `Tags` and the rest are not read |
+| Orders (`Name`, `Lineitem quantity`) → order rows | Time ← `Created at`; Order ← `Name`; Variant ID ← `Lineitem variant id` if present, else the SKU; SKU ← `Lineitem sku`; Qty ← `Lineitem quantity`; Unit price ← `Lineitem price` − `Lineitem discount` ÷ qty. `Cancelled at` / `Financial Status` leave rows out |
+
+Any other file: the page shows the suggested mapping and lets each of our columns take any header (or "Not used"). The mapping is sent as `?map=` (API.md) and remembered in `mappings.json`.
 
 ### Numbers and times
 
@@ -132,6 +144,7 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | `onorder.json` | `src/onorder.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ [variantId]: { qty, eta, at, by } }`: units on order, landing time (ms), when marked (ms), who (≤ 40 chars or null). Records due more than 60 days ago are dropped | yes, as `sideFiles['onorder.json']` (SW-005) |
 | `decisions.json` | `src/decide.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ [variantId]: { d: 'keep'\|'drop'\|'clear', base, at } }`: base = sales per day when decided | yes, as `sideFiles['decisions.json']` (SW-005) |
 | `onorder.json.bak`, `decisions.json.bak`, `….corrupt-<time>` | `src/sidefile.js` | the previous good save (used when the file can't be read), and a copy of an unreadable file left for a human; with neither good, the app refuses to start (critic r2 X1) | no |
+| `mappings.json` | `src/csvmap.js` (temp + rename) | `{ sets: { [key]: { kind: 'stock'\|'order', map: { <our column>: <their header>\|'@now'\|'@sku'\|'@options'\|'' }, at } } }`: the column mapping last used for a set of CSV headers (key = first 20 hex of sha256 of the sorted, lower-cased header names); newest 50 kept. An unreadable file is set aside as `mappings.json.corrupt-<time>` and starts empty (SW-045) | no (one re-pick if lost) |
 | `catalog.json` | `src/catalog.js` (temp + rename) | `{ collections: { [collectionId]: { title, productIds[] } }, collectionsAt, pending, lastError, variants, variantsAt }`: Shopify collections cache for Group by, re-read daily; `pending` = a resumable read in progress | no (rebuilt from Shopify within a day) |
 | `backups/store-YYYYMMDD.json`, `backups/store-YYYYMMDD-HHMMSS-<why>.json` | `src/backup.js` | copies of `store.json` plus `sideFiles: { 'onorder.json', 'decisions.json' }` (`why` = `before-clear`, `before-demo`, `before-restore`); newest 14 of each kind | — |
 | `restore.json` | a human | a `store.json` to put in place at the next start (`docs/RUNBOOK.md`) | — |
