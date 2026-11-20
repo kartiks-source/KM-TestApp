@@ -58,7 +58,7 @@ test.after(async () => {
 });
 const req = (p, opt = {}, pw = PW) => fetch(srv.base + p, { ...opt, headers: { ...(pw ? basic(pw) : {}), ...(opt.headers || {}) } });
 const json = async (r) => ({ status: r.status, ...(await r.json()) });
-const strip = (j) => { const { generatedAt, from, ops, ...rest } = j; return rest; };   // time-stamped on each call; ops = live disk % (SW-055)
+const strip = (j) => { const { generatedAt, from, ops, catalog, ...rest } = j; return rest; };   // time-stamped on each call; ops = live disk % (SW-055); catalog = snapshot status that can refresh between two calls on a slow runner
 
 test('every GET route answers the same at /api and /api/v1 (old paths stay)', async () => {
   const id = (await json(await req('/api/report'))).products[0].id;

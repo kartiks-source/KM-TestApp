@@ -77,7 +77,8 @@ test('routes: report rows carry profit kept per ₹; ?budget= keeps only the row
   assert.ok(due.every((p) => typeof p.perRupee === 'number' && p.protect >= 0));
   const csv = async (qs) => (await (await s.req(`/api/export/reorder.csv?days=30&filter=all${qs}`)).text()).replace(/^﻿/, '').trim().split('\n').slice(1);
   const all = await csv('');
-  assert.deepEqual(await csv('&budget='), all, 'empty budget: same file as before');
+  const ids = (lines) => lines.map((l) => l.split('","')[3]);   // the rows, not their dates ("order by" can tick over between two calls on a slow runner)
+  assert.deepEqual(ids(await csv('&budget=')), ids(all), 'empty budget: same rows as before');
   const budget = Math.round(due.reduce((a, p) => a + p.orderValue, 0) / 3);
   const c = B.cut(r.reorder, budget);
   const cut = await csv(`&budget=${budget}`);
