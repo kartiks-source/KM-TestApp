@@ -17,6 +17,8 @@
  *               1.1.3, LOGIC.md §9e): `returned` units, `refund` ₹ ex GST, `cancelled` units (cancelled before
  *               shipping: restock type CANCEL, or the whole order cancelled). A cancelled order's lines are kept
  *               with qty 0 (never a sale), all units returned and cancelled, as Shopify's reports count them.
+ *               Reversal events (1.1.5, reversalEvents): every cancellation and refund line with its own date; the
+ *               first run also reads orders updated in the 60 days, for older orders' reversals (events only).
  *
  * Paced by Shopify's own cost budget: waits whenever less than half of it is left,
  * so the store's other apps are never starved.
@@ -82,9 +84,10 @@ const LINE_FIELDS = 'id quantity currentQuantity sku variant { id } discountedUn
 const PRICE_BASIS = 'exTax';
 /** Stored order lines carry `ordered` (SW-064) and refunds: `returned`, `refund`, `cancelled`, and cancelled orders' lines
  *  (1.1.3). A store whose lines were read before re-reads its last 60 days once (same as PRICE_BASIS). */
-const ORDER_FIELDS = 'refunds';
+const ORDER_FIELDS = 'reversals';   // 1.1.5: + reversal events with their own dates, and older orders reversed in the window
 /** Refund lines: units, restock type (CANCEL = removed before shipping), the line's ₹ after discounts and its tax. */
-const REFUND_FIELDS = 'id createdAt refundLineItems(first: 50) { pageInfo { hasNextPage endCursor } nodes { quantity restockType lineItem { id } subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } } }';
+const RLI_FIELDS = 'id quantity restockType lineItem { id } subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } }';
+const REFUND_FIELDS = `id createdAt refundLineItems(first: 50) { pageInfo { hasNextPage endCursor } nodes { ${RLI_FIELDS} } }`;
 const REFUNDS_PER_ORDER = 10;
 const ORDERS_Q = `query Orders($after: String, $q: String) {
   orders(first: 40, after: $after, query: $q, sortKey: UPDATED_AT) {
@@ -110,7 +113,7 @@ const REFUND_LINES_Q = `query RefundLines($id: ID!, $after: String) {
   refund(id: $id) {
     refundLineItems(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { quantity restockType lineItem { id } subtotalSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } }
+      nodes { ${RLI_FIELDS} }
     }
   }
 }`;
@@ -210,6 +213,48 @@ function orderRows(order, lines, refunds = order.refunds) {
   });
 }
 
+const num2 = (x) => Math.round(x * 100) / 100;
+const gidNum = (gid) => String(gid || '').replace(/^gid:\/\/shopify\/\w+\//, '');
+/**
+ * Reversals with their own dates (1.1.5, LOGIC.md §9e), as Shopify's reports book them: one event per refund line
+ * (t = the refund's createdAt; qty = its units; value = its subtotal after discounts, less its tax when the order's
+ * prices include tax, ex GST like the stored prices), and for a cancelled order one per line for the units no refund
+ * line covers (t = cancelledAt; value = units × the line's price paid ex GST). A cancellation reverses every unit then,
+ * so a refund made after it moves money only and adds no event (Sammsara #92029: cancelled 29 Aug, refunded 17 Nov;
+ * Shopify books its return on 29 Aug only). kind: 'cancel' (the order is cancelled, or restock type CANCEL = removed
+ * before shipping), else 'refund'. id = refund line ID, or 'c' + line ID: the store replaces an order's events whole on
+ * every read and keeps one event per id. Lines without a variant are left out, like their sales. Test orders have none.
+ */
+function reversalEvents(order, lines, refunds = order.refunds) {
+  if (order.test) return [];
+  const byLine = new Map(lines.map((l) => [String(l.id || ''), l])), covered = new Map(), out = new Map();
+  const gone = !!order.cancelledAt, tc = Date.parse(order.cancelledAt);
+  for (const f of refunds || []) {
+    const t = Date.parse(f?.createdAt);
+    if (!Number.isFinite(t) || (gone && t > tc)) continue;   // after the cancel: money only
+    for (const x of f?.refundLineItems?.nodes || []) {
+      const lid = String(x?.lineItem?.id || ''), q = Math.max(0, Number(x?.quantity) || 0);
+      if (!lid || !q) continue;
+      covered.set(lid, (covered.get(lid) || 0) + q);
+      const l = byLine.get(lid); if (!l?.variant?.id) continue;
+      const sub = Number(x.subtotalSet?.shopMoney?.amount) || 0, tax = Number(x.totalTaxSet?.shopMoney?.amount) || 0;
+      const id = x.id ? gidNum(x.id) : `${gidNum(f.id)}:${gidNum(lid)}`;
+      const e = out.get(id) || { id, t, order: order.name, variantId: vid(l.variant.id), qty: 0, value: 0, kind: gone || x.restockType === 'CANCEL' ? 'cancel' : 'refund' };
+      e.qty += q; e.value = num2(e.value + (order.taxesIncluded ? sub - tax : sub));
+      out.set(id, e);
+    }
+  }
+  if (gone && Number.isFinite(tc)) {
+    for (const l of lines) {
+      const lid = String(l.id || ''), rest = Math.max(0, (Number(l.quantity) || 0) - (covered.get(lid) || 0));
+      if (!rest || !l.variant?.id) continue;
+      const id = `c${gidNum(lid)}`;
+      out.set(id, { id, t: tc, order: order.name, variantId: vid(l.variant.id), qty: rest, value: num2(rest * netUnitPrice(order, l)), kind: 'cancel' });
+    }
+  }
+  return [...out.values()];
+}
+
 async function pullStock(lastQty, { q = gql, now = Date.now() } = {}) {
   const all = []; let after = null;
   do {
@@ -222,20 +267,25 @@ async function pullStock(lastQty, { q = gql, now = Date.now() } = {}) {
 
 /**
  * Orders changed since `since` (ms; the newest updatedAt seen last time), oldest change first.
- * First run (no `since`): every order created in the last 60 days.
- * onPage(orderNames, rows, cursor) after each page: the caller replaces those orders' lines whole,
- * and saves the cursor so a long first load resumes where it stopped.
+ * First run (no `since`): every order created in the last 60 days, and every order updated in them (1.1.5): an older
+ * order cancelled or refunded in the 60 days gives its reversal events only (LOGIC.md §9e), never its lines as sales.
+ * onPage(orderNames, rows, cursor, reversals) after each page: the caller replaces those orders' lines whole, and
+ * reversals = { orders, events } replaces the events of `orders` (every order read) whole; it saves the cursor so a
+ * long first load resumes where it stopped.
  */
 async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} } = {}) {
+  const cut = now - BACKFILL_DAYS * 864e5, iso = new Date(cut).toISOString();
   const filter = since
     ? `updated_at:>='${new Date(since - OVERLAP).toISOString()}'`
-    : `created_at:>='${new Date(now - BACKFILL_DAYS * 864e5).toISOString()}'`;
+    : `created_at:>='${iso}' OR updated_at:>='${iso}'`;
   let after = null; let cursor = since || 0; let total = 0;
   do {
     const d = await q(ORDERS_Q, { after, q: filter });
-    const rows = [], names = [];
+    const rows = [], names = [], events = [], all = [];
     for (const o of d.orders.nodes) {
-      names.push(o.name);
+      const older = !since && Date.parse(o.createdAt) < cut;   // backfill: placed before the 60 days, reversed (or touched) in them
+      all.push(o.name);
+      if (!older) names.push(o.name);
       const lines = [...o.lineItems.nodes];
       let li = o.lineItems.pageInfo;
       while (li.hasNextPage) {
@@ -253,14 +303,15 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
         }
         refunds = refunds.map((f, j) => (j === i ? { ...f, refundLineItems: { nodes } } : f));
       }
-      rows.push(...orderRows(o, lines, refunds));
+      if (!older) rows.push(...orderRows(o, lines, refunds));
+      events.push(...reversalEvents(o, lines, refunds));
       cursor = Math.max(cursor, Date.parse(o.updatedAt) || Date.parse(o.createdAt) || 0);
     }
     total += rows.length;
-    await onPage(names, rows, cursor);
+    await onPage(names, rows, cursor, { orders: all, events });
     after = d.orders.pageInfo.hasNextPage ? d.orders.pageInfo.endCursor : null;
   } while (after);
   return { total, cursor };
 }
 
-module.exports = { gql, assertReadOnly, diffStock, orderRows, refundsByLine, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, ORDER_FIELDS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };
+module.exports = { gql, assertReadOnly, diffStock, orderRows, reversalEvents, refundsByLine, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, ORDER_FIELDS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };

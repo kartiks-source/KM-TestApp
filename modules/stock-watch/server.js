@@ -321,9 +321,17 @@ async function pullOne(id) {
     /* 1.1.1: order prices became ex tax (LOGIC §5); SW-064 / 1.1.3: lines keep `ordered` and their refunds (returns, LOGIC §9e).
        Orders read before any of these are read again once, from the 60-day backfill */
     const sh = store.load().shopify;
-    if (sh.priceBasis !== shopify.PRICE_BASIS || sh.orderFields !== shopify.ORDER_FIELDS) store.setShopify({ ordersCursor: null, priceBasis: shopify.PRICE_BASIS, orderFields: shopify.ORDER_FIELDS });
+    /* 1.1.5: reversal events with their own dates (LOGIC §9e); the re-read starts them afresh */
+    if (sh.priceBasis !== shopify.PRICE_BASIS || sh.orderFields !== shopify.ORDER_FIELDS) {
+      if (sh.orderFields !== shopify.ORDER_FIELDS) store.load().reversals = [];
+      store.setShopify({ ordersCursor: null, priceBasis: shopify.PRICE_BASIS, orderFields: shopify.ORDER_FIELDS });
+    }
     await shopify.pullOrders(store.load().shopify.ordersCursor, {
-      onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
+      onPage: (names, rows, cursor, rv) => {
+        const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n;
+        if (rv) store.replaceReversals(rv.orders, rv.events);
+        if (cursor) store.setShopify({ ordersCursor: cursor });
+      },
     });
     runs.finish(store.load(), run);
     store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
@@ -433,8 +441,9 @@ const digestCtx = {
     /* today's digest: the same options as /api/report (catalog snapshot, Mark ordered); a past "7 days before" comparison
        uses the rows as they stood then, plus only the catalog's inactive flags from before then (today's stock and price
        would be wrong for a past date; without the flags an archived-while-out variant never ends its stock-out, §17) */
-    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all(), suppliers: supplierOf(d) } : { catalog: period.catalogAsOf(d.catalog, now), suppliers: supplierOf(d) };
-    const r = helpers.enrich(engine.report(rowsAt.stock, rowsAt.orders, d.settings, { days, now, ...live }));   // still-out ₹/day, Pause list: the page's numbers (§15)
+    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all(), suppliers: supplierOf(d), reversals: d.reversals } : { catalog: period.catalogAsOf(d.catalog, now), suppliers: supplierOf(d), reversals: d.reversals };
+    const { period: _kind, ...span } = period.range(days, now, TZ.zoneOf(d.settings));   // calendar days, as on the page (1.1.5)
+    const r = helpers.enrich(engine.report(rowsAt.stock, rowsAt.orders, d.settings, { ...span, now, ...live }));   // still-out ₹/day, Pause list: the page's numbers (§15)
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
   },
@@ -518,7 +527,7 @@ async function storeApi(req, res, url, role, id) {
   /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
   /* Every report-shaped answer (report, groups, product, CSV) uses the same options, so their numbers agree. */
   const sups = supplierOf(d);   // SW-040: each variant's supplier and terms (lead time, MOQ, case pack)
-  const reportOpts = (extra = {}) => ({ ...span, catalog: d.catalog, onOrder: onorder.all(), suppliers: sups, ...extra });   // span: { days } or { from } (SW-027)
+  const reportOpts = (extra = {}) => ({ ...span, catalog: d.catalog, onOrder: onorder.all(), suppliers: sups, reversals: d.reversals, ...extra });   // span: { days } or { from } (SW-027)
   const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);

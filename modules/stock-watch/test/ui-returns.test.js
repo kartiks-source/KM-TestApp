@@ -45,9 +45,27 @@ test('1440: Returns % column (amber at 15%+), High returns chip, drawer line', o
   assert.ok(cells.length > 0 && cells.every((c) => parseFloat(c) >= 15), `every row 15%+: ${cells.join(' ')}`);
   await pg.click('#view table tbody tr');
   await pg.waitForSelector('#returns-tile');
-  assert.match(await pg.textContent('#returns-tile'), /^Cancelled or refunded: [\d.]+% \([\d,]+ of [\d,]+(, [\d,]+ cancelled)?\) · ₹.+ refunded$/);
+  assert.match(await pg.textContent('#returns-tile'), /^Cancelled or refunded: [\d.]+% \([\d,]+ of [\d,]+ ordered(, [\d,]+ cancelled)?\) · ₹.+ back$/);
   assert.equal(await sideways(pg), 0);
   assert.deepEqual(pg.errors, []);
+});
+
+/* 1.1.5: the period's calendar dates beside the Period buttons; Data → "Check against Shopify" once reversal events exist */
+test('1440: period dates next to the buttons; Data shows the Shopify net sales check', opts, async () => {
+  const scope = require('../src/scope'), store = require('../src/store'), TZ = require('../src/tz');
+  const now = Date.now(), zone = 'Asia/Kolkata';
+  scope.run('sammsara-demo', () => { const d = store.load(); const o = d.orders.find((x) => x.t > now - 3 * 864e5); d.reversals = [{ id: 'r1', t: now - 3600e3, order: o.order, variantId: String(o.variantId), qty: 1, value: 1234, kind: 'refund' }]; });
+  const pg = await open(1440, 900, '/?store=sammsara-demo#overview', '#view .headline h1');
+  const fmt = (t) => { const k = TZ.dayKey(t, zone).split('-'); return `${+k[2]} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+k[1] - 1]}`; };
+  assert.equal(await pg.textContent('#rdates'), `${fmt(TZ.daysStart(now, 30, zone))} – ${fmt(now)}`, '30 days = today and the 29 days before');
+  await pg.click('.range button[data-days="7"]');
+  await pg.waitForFunction((t) => document.querySelector('#rdates').textContent === t, `${fmt(TZ.daysStart(now, 7, zone))} – ${fmt(now)}`);
+  assert.ok(await pg.isVisible('#rdates'));
+  await pg.goto(`${base}/?store=sammsara-demo#data`); await pg.waitForSelector('#shopify-check');
+  assert.match(await pg.textContent('#shopify-check'), /^Check against Shopify · net sales \d+ \w{3} – \d+ \w{3}: ₹[\d,]+ \(₹[\d,]+ ordered − ₹1,234 cancelled\/refunded on these days\)\. Shopify: Analytics → Net sales, same dates\.$/);
+  assert.equal(await sideways(pg), 0);
+  assert.deepEqual(pg.errors, []);
+  scope.run('sammsara-demo', () => { delete store.load().reversals; });
 });
 
 test('390: chip there, high-return cards say so, no sideways scroll', opts, async () => {

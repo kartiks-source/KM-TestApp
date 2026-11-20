@@ -298,6 +298,12 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Status: Done (branch `feature/returns`). Tests: `shopify`, `engine`, `scheduler`, `server`, browser `ui-returns`. Open: `ui-helpers` chip count 6 → 7 for the integrator; not checked live against ShopifyQL `quantity_returned` yet.
 - Fix 1.1.3: live check failed (5 vs 259 units, 60 d). Returns now from `order.refunds`, cancelled orders included (Shopify counts them as returns); demand = kept + returned after the sale, never cancelled. Checked live: same orders agree to ₹2; by Shopify's return date 185 vs 259 (52 orders placed before the window, cancelled 30 Sep). LOGIC §9e, DEVLOG 2026-11-20.
 
+**SW-065 · Cancel/refund % and periods match Shopify exactly** (P1 · M · builder)
+- Why: 30 d external check: 3 of 12 products differed (Cascade 4.7% vs 5.4%), because reversals were dated by order and periods were rolling 24 h blocks.
+- Accept: periods = store-calendar days for every number, dates shown; reversal events with their own dates (refunds, cancels, older orders reversed in the window, deduped); Cancel/refund % = reversed in period ÷ ordered in period; Data "Check against Shopify" net sales; live check 7/30/60 d per product and store.
+- Source: owner, 20 Nov 2026.
+- Status: Done 1.1.5 (LOGIC §5a, §9e). Live: identical except 2 units ordered on one 60-day product added by an order edit. Open (Later): read sales agreements for edited orders to date edit-added units like Shopify (cost: one extra query per edited order).
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.

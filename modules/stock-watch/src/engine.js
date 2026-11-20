@@ -7,6 +7,8 @@
  *   orders { t, order, variantId, sku, qty, price, ordered?, returned?, refund?, cancelled? }   one row per order line:
  *            qty = units kept (qty 0 = fully refunded or a cancelled order); ordered = Shopify's quantity; returned = units
  *            refunded or cancelled, refund = their ₹ ex GST, cancelled = units cancelled before shipping (SW-064, 1.1.3)
+ *   opts.reversals (Shopify, 1.1.5) { id, t, order, variantId, qty, value, kind }: cancellations / refunds dated when
+ *            they happened; Cancel/refund % and totals.shopifyNet count them by that date (LOGIC.md §9e)
  *
  * Output: report() → totals, daily sold vs lost, reorder list, every stock-out, per-product summary.
  */
@@ -154,18 +156,30 @@ const MIN_IN_STOCK_DAYS = 7;
 const LOW_UNITS = 5, LOW_DAYS = 14;
 /** Returns (SW-064, LOGIC.md §9e): a % only from 5 units ordered; 15%+ is "high". */
 const RETURN_MIN_UNITS = 5, HIGH_RETURN_PCT = 15;
-/** Units returned in the period, per variant (and the store): lines with `ordered` only, by order date like sales,
- *  cancelled orders included (as Shopify's Returns, 1.1.3). returned = the line's refunded or cancelled units (its
- *  refunds); refund ₹ = their refund ex GST (else returned × the line's price); cancelled = cancelled before shipping. */
-function returnsOf(orders, from) {
+/** Cancelled or refunded units in the period, per variant (SW-064, LOGIC.md §9e).
+ *  ordered = Σ the lines' `ordered` (Shopify's quantity_ordered) for orders placed in [from, now], cancelled orders
+ *  included. With `reversals` (Shopify, 1.1.5): returned / value / cancelled = the reversal events dated in [from, now]
+ *  (a refund on its refund date, a cancellation on its cancel date, whenever the order was placed), as Shopify's
+ *  reports count them. Without (Flow / Sheet / CSV, a store not read again yet): the lines' own `returned`, by order date. */
+function returnsOf(orders, from, reversals = null, now = Infinity) {
   const by = new Map();
+  const get = (id) => { id = String(id); let x = by.get(id); if (!x) by.set(id, x = { ordered: 0, returned: 0, value: 0, cancelled: 0 }); return x; };
   for (const o of orders) {
-    if (o.t < from || !(num(o.ordered) > 0)) continue;
-    const id = String(o.variantId), x = by.get(id) || { ordered: 0, returned: 0, value: 0, cancelled: 0 };
+    if (o.t < from || o.t > now || !(num(o.ordered) > 0)) continue;
+    const x = get(o.variantId);
+    x.ordered += num(o.ordered);
+    if (Array.isArray(reversals)) continue;
     const back = Math.min(num(o.ordered), num(o.returned));
-    x.ordered += num(o.ordered); x.returned += back; x.cancelled += Math.min(back, num(o.cancelled));
+    x.returned += back; x.cancelled += Math.min(back, num(o.cancelled));
     x.value += o.refund != null ? num(o.refund) : back * num(o.price);
-    by.set(id, x);
+  }
+  if (Array.isArray(reversals)) {
+    for (const e of reversals) {
+      if (!e || e.t < from || e.t > now || !(num(e.qty) > 0)) continue;
+      const x = get(e.variantId);
+      x.returned += num(e.qty); x.value += num(e.value);
+      if (e.kind === 'cancel') x.cancelled += num(e.qty);
+    }
   }
   return by;
 }
@@ -341,12 +355,18 @@ function report(stock, orders, settings = {}, opts = {}) {
   const now = opts.now || Date.now();
   /* opts.from (e.g. the 1st of this month, see src/period.js) overrides opts.days; never more than 90 days back */
   const from = opts.from != null ? Math.min(now, Math.max(now - 90 * DAY, opts.from)) : now - Math.max(1, Math.min(90, Math.round(opts.days || 30))) * DAY;
-  const days = Math.max(1, Math.ceil((now - from) / DAY));
+  /* "N days" from the page = store-calendar days (src/period.js, 1.1.5): from = start of the day N − 1 days ago, days = N */
+  const days = opts.from != null && opts.days ? Math.round(opts.days) : Math.max(1, Math.ceil((now - from) / DAY));
   const off = S.timeZone = TZ.zoneOf(S);   // SW-049: the store's IANA zone (old stores: their saved offset)
   S.tzOffsetMin = TZ.offsetAt(off, now);    // today's offset, for anything that still reads the minutes
   /* SW-064: returns come from every line; below, lines with no demand (a cancelled order, a line cancelled before shipping)
      drop out. ₹ sold and units sold count units kept (qty); the sales rate counts demand, returns included (demandQty) */
-  const returns = returnsOf(orders, from);
+  const reversals = Array.isArray(opts.reversals) ? opts.reversals : null;
+  const returns = returnsOf(orders, from, reversals, now);
+  /* "Check against Shopify" (1.1.5, LOGIC.md §9e): Shopify's Net sales = gross − discounts of the orders placed in the
+     period (cancelled ones included: a cancellation is a reversal on its own day) − reversals dated in the period */
+  let gross = 0;
+  for (const o of orders) if (o.t >= from && o.t <= now) gross += (num(o.ordered) > 0 ? num(o.ordered) : num(o.qty)) * num(o.price);
   orders = orders.filter((o) => demandQty(o) > 0);
   const profile = hourProfile(orders.filter((o) => o.t >= now - 60 * DAY), off);
 
@@ -598,7 +618,9 @@ function report(stock, orders, settings = {}, opts = {}) {
       storeTrendPct: baseTrend,
       costed: products.filter((p) => p.cost != null && (p.sold || p.lost)).length,
       ...(() => { const o = products.reduce((s, p) => s + p.unitsOrdered, 0), b = products.reduce((s, p) => s + p.unitsReturned, 0);
-        return { unitsOrdered: o, unitsReturned: b, unitsCancelled: products.reduce((s, p) => s + p.unitsCancelled, 0), returnPct: returnPct(o, b), refundValue: products.reduce((s, p) => s + p.refundValue, 0), highReturns: products.filter((p) => p.returnPct >= HIGH_RETURN_PCT).length }; })(),
+        return { unitsOrdered: o, unitsReturned: b, unitsCancelled: products.reduce((s, p) => s + p.unitsCancelled, 0), returnPct: returnPct(o, b), refundValue: Math.round([...returns.values()].reduce((s, x) => s + x.value, 0)), highReturns: products.filter((p) => p.returnPct >= HIGH_RETURN_PCT).length }; })(),
+      /* Shopify-style net sales (1.1.5): only when reversals carry their own dates (Shopify pull) */
+      shopifyNet: reversals ? (() => { const back = [...returns.values()].reduce((s, x) => s + x.value, 0); return { gross: Math.round(gross), returns: Math.round(back), net: Math.round(gross - back) }; })() : null,
       active: products.filter((p) => p.sold || p.lost).length,
     },
     daily: dailyRows, reorder, stockouts, products,
@@ -618,7 +640,6 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   const S = { ...DEFAULT_SETTINGS, ...settings };
   const now = opts.now || Date.now();
   const from = opts.from != null ? Math.min(now, Math.max(now - 90 * DAY, opts.from)) : now - Math.max(1, Math.min(90, Math.round(opts.days || 30))) * DAY;
-  const days = Math.max(1, Math.ceil((now - from) / DAY));
   const changes = stock.filter((r) => String(r.variantId) === String(id)).sort((a, b) => a.t - b.t);
   const lines = orders.filter((o) => String(o.variantId) === String(id));
   const before = changes.filter((c) => c.t < from).pop();
@@ -628,10 +649,12 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   if (timeline.length) timeline.push({ t: now, stock: timeline[timeline.length - 1].stock });
   const units = {};
   const zone = TZ.zoneOf(S);
-  for (const k of TZ.dayKeys(now - (days - 1) * DAY, now, zone)) units[k] = 0;
+  /* one bar per store day in the period: a calendar period (1.1.5) starts at a midnight; a rolling one leaves out the partial first day */
+  const first = opts.from != null ? from : from + DAY;
+  for (const k of TZ.dayKeys(first, now, zone)) units[k] = 0;
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, zone); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
-  const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder, suppliers: opts.suppliers });
+  const r = report(stock, orders, S, { now, from, days: opts.from != null ? opts.days : undefined, catalog: opts.catalog, onOrder: opts.onOrder, suppliers: opts.suppliers, reversals: opts.reversals });
   const c = own(opts.catalog, String(id));
   if (!timeline.length && c && c.stock != null) timeline.push({ t: from, stock: num(c.stock) }, { t: now, stock: num(c.stock) });   // never moved: flat at its stock now
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,

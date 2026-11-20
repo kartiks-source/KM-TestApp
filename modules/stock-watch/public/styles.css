@@ -387,6 +387,9 @@ table.fixed td:first-child { max-width: none; }
 .tiles.t4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .headline .hbtn { margin-left: auto; align-self: center; }
 .rlabel { font-size: 12px; color: var(--faint); margin-right: -6px; white-space: nowrap; }
+.rdates { font-size: 11px; color: var(--faint); margin-left: -4px; white-space: nowrap; font-variant-numeric: tabular-nums; }   /* 1.1.5: the period's dates */
+@media (min-width: 761px) and (max-width: 1010px) { .rdates { display: none; } }   /* the one-row header has no room there; the headline says the days */
+@media (max-width: 420px) { .rdates { white-space: normal; width: 42px; font-size: 10.5px; line-height: 1.15; margin-left: -6px; } }   /* small phones: "22 Oct – / 20 Nov" on two lines */
 .colpick { position: relative; }
 .colpick > summary { list-style: none; cursor: pointer; }
 .colpick > summary::-webkit-details-marker { display: none; }

@@ -125,7 +125,7 @@ function load() {
  */
 function endDemo(d = load()) {
   if (d.source !== 'demo') return false;
-  d.stock = []; d.orders = []; d._stockKeys = new Set(); d._orderKeys = new Set(); d.shopify = blankShopify(); d.catalog = {};
+  d.stock = []; d.orders = []; d._stockKeys = new Set(); d._orderKeys = new Set(); d.shopify = blankShopify(); d.catalog = {}; delete d.reversals;
   d.source = 'empty';
   if (Object.keys(onorder.all()).length) onorder.clear();
   decide.clear();
@@ -253,6 +253,7 @@ function prune(force = false, now = Date.now()) {
   const stock = pruneStock(d.stock, cut, d.catalog);
   if (stock.length !== d.stock.length) { d.stock = stock; d._stockKeys = new Set(d.stock.map(stockKey)); }
   if (d.orders.some((r) => r.t < cut)) { d.orders = d.orders.filter((r) => r.t >= cut); d._orderKeys = new Set(d.orders.map(orderKey)); }
+  if (Array.isArray(d.reversals) && d.reversals.some((e) => e.t < cut)) d.reversals = d.reversals.filter((e) => e.t >= cut);
   if (d.catalog) for (const [id, c] of Object.entries(d.catalog)) {
     if (c.status === 'DELETED' && c.inactiveSince < cut) delete d.catalog[id];
     else if (Array.isArray(c.spells) && c.spells.some((x) => x.to < cut)) { c.spells = c.spells.filter((x) => x.to >= cut); if (!c.spells.length) delete c.spells; }
@@ -311,10 +312,25 @@ function replaceOrders(names, rows, src = 'shopify') {
   return { added: rows.length, removed: before - (d.orders.length - rows.length) };
 }
 
+/**
+ * Reversal events (1.1.5, LOGIC.md §9e, src/shopify.js reversalEvents): `{ id, t, order, variantId, qty, value, kind }`,
+ * one per refund line or cancelled line. Every order read replaces its events whole (a refund edited or removed in
+ * Shopify goes too), one event per id across orders, older than KEEP_DAYS dropped. `d.reversals` is absent until the
+ * first pull that reads them (the engine then counts returns by order date, the older way).
+ */
+function replaceReversals(orderNames, events) {
+  const d = load(), set = new Set(orderNames), cut = Date.now() - KEEP_DAYS * 864e5;
+  const fresh = new Map();
+  for (const e of events || []) if (e && e.id != null && Number.isFinite(+e.t) && +e.t >= cut) fresh.set(String(e.id), e);
+  d.reversals = (Array.isArray(d.reversals) ? d.reversals : []).filter((e) => !set.has(e.order) && !fresh.has(String(e.id))).concat([...fresh.values()]);
+  save();
+  return fresh.size;
+}
+
 function replaceAll(stock, orders, source) {
   const d = load();
   if (source === 'demo') { stamp(stock, 'demo'); stamp(orders, 'demo'); }
-  d.stock = stock; d.orders = orders; d.source = source;
+  d.stock = stock; d.orders = orders; d.source = source; delete d.reversals;
   d._stockKeys = new Set(stock.map(stockKey)); d._orderKeys = new Set(orders.map(orderKey));
   d.shopify = blankShopify();   // re-read everything from Shopify on the next pull
   d.catalog = {};
@@ -332,4 +348,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { SCHEMA_VERSION, migrate, SOURCES, load, add, endDemo, setCatalog, setRebuilt, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };
+module.exports = { SCHEMA_VERSION, migrate, SOURCES, load, add, endDemo, setCatalog, setRebuilt, prune, pruneStock, replaceAll, replaceOrders, replaceReversals, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };

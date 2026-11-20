@@ -2,6 +2,14 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.5 · 2026-11-20 · numbers that match Shopify for the same dates
+
+- Periods are calendar days in the store's time zone, today included: on 20 Nov "30 days" = 22 Oct – 20 Nov (was the last 30 × 24 hours). Every number on the page follows, and the dates show next to the Period buttons, so the same dates in Shopify give the same numbers.
+- Cancel/refund % is now Shopify's own rate: units cancelled or refunded **on the days in the period** (whenever the order was placed) ÷ units ordered in the period. Sammsara, checked against Shopify for 7, 30 and 60 days: every product with a cancel or refund identical (30 d: Cascade 5.4%, Casablanca 11.4%, Evelyn Flamingo 10.8%), store totals identical (30 d: 102 of 2,186, ₹4,03,072).
+- Cancellations and refunds of orders placed before the last 60 days are now read too (52 orders bulk-cancelled on 30 Sep, for example). A refund made after an order was already cancelled no longer counts twice.
+- Data → "Check against Shopify": net sales for the period as Shopify counts it (₹67,07,306 for 30 days, Shopify ₹67,07,306.22), to compare with Analytics → Net sales. Sold on the Overview stays by order date (what customers bought on those days and kept).
+- Orders of the last 60 days are read again once after the update.
+
 ## 1.1.4 · 2026-11-20 · plain labels for reversals
 
 - "Returns %" is now "Cancel/refund %" (chip "High cancels/refunds", drawer "Cancelled or refunded"): it counts units cancelled, refunded or removed, not only physical returns (Sammsara had none after delivery in the last 60 days). By order date; Shopify's Returns report counts the same units on the day they're reversed, so a product can differ a little (e.g. 30 d Cascade 4.7% vs 5.4%).

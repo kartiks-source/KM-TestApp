@@ -118,6 +118,9 @@
   function dayStart(t, zone) { const d = local(t, zone); return fromLocal(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()), zone); }
   /** Start of the store's next calendar day after moment t. */
   function nextDayStart(t, zone) { const d = local(t, zone); return fromLocal(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1), zone); }
+  /** Start of the store's calendar day n − 1 days before the day moment t falls in: "the last n days, today included"
+   *  (1.1.5, LOGIC.md §5a). Calendar days, so a 23- or 25-hour day still counts as one. */
+  function daysStart(t, n, zone) { const d = local(t, zone); return fromLocal(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - (Math.max(1, Math.round(n)) - 1)), zone); }
   /** Start of the store's calendar month that moment t falls in. */
   function monthStart(t, zone) { const d = local(t, zone); return fromLocal(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1), zone); }
   /** Start of the store's clock hour after moment t (clocks change on an hour of the store's day, so this never jumps a change). */
@@ -161,7 +164,7 @@
     return allZones;
   }
 
-  const api = { DEFAULT_ZONE, COMMON, valid, canonical, fromOffset, zoneOf, offsetAt, local, dayKey, hour, fromLocal, dayStart, nextDayStart, monthStart, nextHour, dayKeys, offsetLabel, hasDst, all, fixedName, fixedMinutes };
+  const api = { DEFAULT_ZONE, COMMON, valid, canonical, fromOffset, zoneOf, offsetAt, local, dayKey, hour, fromLocal, dayStart, nextDayStart, daysStart, monthStart, nextHour, dayKeys, offsetLabel, hasDst, all, fixedName, fixedMinutes };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.SW_TZ = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -10,6 +10,14 @@ Older entries: [2026-11](devlog/2026-11.md)
 Older entries: [2026-11](devlog/2026-11.md)
 
 
+## 2026-11-20 · 1.1.5 · cancel/refund % and periods match Shopify exactly
+stock-watch 1.1.5, on `main` (not pushed, not deployed). User: cancel/refund % must equal Shopify's.
+- Periods: N store-calendar days, today included (`period.range` → `tz.daysStart`, DST-safe), for every number (report, product, groups, CSV, v1, digest). Dates beside the Period buttons ("22 Oct – 20 Nov"; hidden 761–1010 px, two lines on small phones).
+- Reversal events `{id, t, order, variantId, qty, value, kind}` from refund lines (refund date) and cancelled lines not covered by a refund (cancel date); a refund after the cancel adds nothing (#92029: cancelled 29 Aug, refunded 17 Nov; Shopify counts 29 Aug only). Stored `store.json` `reversals`, replaced per order, one per id. Backfill query `created_at OR updated_at` ≥ 60 d (375 older orders: events only, no lines; token has `read_all_orders`). `ORDER_FIELDS` 'reversals' → one re-read.
+- Cancel/refund % = reversed units dated in the period ÷ units ordered in the period (cancelled included). Data → "Check against Shopify" = gross − discounts by order date − reversals by reversal date. Sold stays by order date (LOGIC §What counts as a sale: chart / rate reasons).
+- Live check (real `pullOrders` + `engine.report`, read-only, explicit dates; ShopifyQL `UNTIL <date>` includes the date): 7/30/60 d ordered 409/2,186/4,461 vs 409/2,186/4,459, reversed 33/102/259 = Shopify, ₹ reversed = Shopify to the rupee, net sales ₹12,20,945 / ₹67,07,306 / ₹1,32,27,574 = Shopify to ₹1. Per variant: 7 d 73/73, 30 d 137/137 identical (Cascade 5.4%, Casablanca 11.4%, Evelyn 10.8%), 60 d 175/176: Meridian Globe ordered 8 vs 6 = order #92916 edited 22 → 23 Sep to add 2 units (Shopify: ₹ on the edit day, `quantity_ordered` 0).
+- Open: order-edit-added units (BACKLOG SW-065); 800 px header already overflowed by 105 px before this change.
+
 ## 2026-11-20 · 1.1.4 · reversal labels
 stock-watch. External check of 30-day rates: 9/12 match Shopify's reversed-quantity rate; 3 differ by dating (order date vs reversal date). Renamed Returns % → Cancel/refund % (not physical returns only), "Losses for" → "Period". LOGIC §9e notes the check.
 ## 2026-11-20 · returns from refunds, sales checked vs Shopify (1.1.3)

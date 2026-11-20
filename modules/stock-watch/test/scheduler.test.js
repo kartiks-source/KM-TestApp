@@ -78,7 +78,7 @@ test('pull: orders read before SW-064 (no orderFields) are read again once from 
   S.pullOrders = prev;
   assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
   assert.ok(sinces[1] > 12345, 'then incremental');
-  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'refunds');
+  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'reversals');
 });
 
 /* 1.1.3: lines read by SW-064 (orderFields 'ordered') lack refunds: the 60-day backfill is read once more. */
@@ -93,5 +93,30 @@ test('pull: orders read by SW-064 (orderFields "ordered") are read again once fo
   S.pullOrders = prev;
   assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
   assert.ok(sinces[1] > 12345, 'then incremental');
-  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'refunds');
+  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'reversals');
+});
+
+/* 1.1.5: reversal events with their own dates. A store read by 1.1.3 / 1.1.4 (orderFields 'refunds') reads the backfill
+ * once more (older orders reversed in the 60 days too), its events start afresh, and each page's events are stored. */
+test('pull: orders read by 1.1.3 (orderFields "refunds") are read again once for reversal events; events stored per order, no doubles', async () => {
+  const store = require('../src/store');
+  const sinces = [];
+  const prev = S.pullOrders;
+  const ev = (id, order, t) => ({ id, t, order, variantId: 'v-alpha', qty: 1, value: 100, kind: 'cancel' });
+  S.pullOrders = async (since, { onPage }) => {
+    sinces.push(since);
+    const t = Date.now() - 3600e3;
+    await onPage(['#a1'], [{ t, order: '#a1', line: '1', variantId: 'v-alpha', sku: 'x', qty: 0, price: 100, ordered: 1, returned: 1, cancelled: 1 }], Date.now() + sinces.length, { orders: ['#a1', '#old'], events: [ev('r1', '#a1', t), ev('c9', '#old', t)] });
+    return { total: 1 };
+  };
+  scope.run('alpha', () => { store.setShopify({ priceBasis: 'exTax', orderFields: 'refunds', ordersCursor: 12345 }); store.load().reversals = [ev('stale', '#zzz', Date.now())]; });
+  await syncShopify('alpha');
+  await syncShopify('alpha');   // the same events read again: replaced, never doubled
+  S.pullOrders = prev;
+  assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
+  assert.ok(sinces[1] > 12345, 'then incremental');
+  const d = scope.run('alpha', () => store.load());
+  assert.equal(d.shopify.orderFields, 'reversals');
+  assert.deepEqual(d.reversals.map((e) => e.id).sort(), ['c9', 'r1'], 'stale events dropped by the re-read; two events, once each');
+  assert.deepEqual(d.orders.filter((o) => o.order === '#old'), [], 'the older order gives events only, no lines');
 });

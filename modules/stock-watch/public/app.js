@@ -132,6 +132,7 @@
       + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
       + shopifyBadge() + appVersion(r.app);
     $$('.range button').forEach((b) => b.classList.toggle('on', b.dataset.days === String(state.days)));
+    if ($('#rdates')) { const sp = periodDates(r); $('#rdates').textContent = sp; $('#rdates').title = `Every number on the page covers ${sp}, store time (${zone()}), today so far included: the same dates in Shopify give the same numbers`; }
     if (viewOnly()) { $('#tabs a[data-view="data"]').hidden = true; pill.removeAttribute('href'); }   // view-only: no Data page (SW-029)
   }
 
@@ -161,6 +162,13 @@
         <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 2 hours' : 'Loads the last 60 days on the first pull'}</dd>
         <dt>Reads only</dt><dd>${scopes} · API ${esc(sh.apiVersion || '')}</dd></dl>
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
+  }
+
+  /* 1.1.5 (LOGIC §9e): one line to check the app against Shopify Analytics → Net sales for the same dates */
+  function shopifyCheck() {
+    const r = state.report, n = r && r.totals && r.totals.shopifyNet;
+    if (!n) return '';
+    return `<p class="muted small" id="shopify-check" title="Shopify’s Net sales = gross sales − discounts − returns: orders placed on these days (cancelled ones too), ex GST, after discounts, less what was cancelled or refunded on these days, whenever the order was placed. No tax, no shipping. Sold on the Overview stays by order date: what customers bought on these days and kept">Check against Shopify · net sales ${esc(periodDates(r))}: <b>${moneyFull(n.net)}</b> (${moneyFull(n.gross)} ordered − ${moneyFull(n.returns)} cancelled/refunded on these days). Shopify: Analytics → Net sales, same dates.</p>`;
   }
 
   /* ---------- sync progress and run history (SW-030) ---------- */
@@ -369,6 +377,8 @@
   const group = (s) => (TODAY.includes(s) ? 'today' : s === 'Order this week' ? 'week' : s === 'Ordered' ? 'ordered' : s === 'OK' ? 'ok' : s === 'Slow seller' ? 'slow' : 'none');
   const GROUP_LABEL = { today: 'Order today', week: 'This week', ordered: 'Ordered', ok: 'OK', slow: 'Slow seller', none: 'No stock data' };
   const dateShort = (t) => { const d = local(t); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+  /* 1.1.5: the period's store-calendar dates, "22 Oct – 20 Nov" (one date when it is today only) */
+  const periodDates = (r) => { const a = dateShort(r.from), b = dateShort(r.generatedAt); return a === b ? a : `${a} – ${b}`; };
   /* on order (LOGIC.md §6b): "Ordered · lands 25 Nov"; late or not enough → a small tag next to the status */
   const poTag = (p) => {
     const o = p.onOrder; if (!o || p.status === 'Ordered') return '';
@@ -598,8 +608,8 @@
   /* SW-064: "High returns" (15%+ of units ordered came back, 5+ ordered) only when some product qualifies */
   const HIGH_RETURN = 15;
   const productTabs = (f) => (state.report.totals.highReturns || f === 'returns' ? [...PRODUCT_TABS, ['returns', 'High cancels/refunds']] : PRODUCT_TABS);
-  const RETURNS_TIP = 'Units cancelled, refunded or removed ÷ units ordered, for orders placed in the period (by order date). Not only physical returns. Shopify’s Returns report counts the same units on the day they’re reversed, so a product can differ a little. – under 5 units ordered; ₹ ex GST';
-  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} units cancelled or refunded${p.unitsCancelled ? ` (${inr.format(p.unitsCancelled)} cancelled before shipping)` : ''} · ${esc(money(p.refundValue))} refunded">${n1(p.returnPct)}%</span>`);
+  const RETURNS_TIP = 'Units cancelled or refunded on the days in the period (whenever the order was placed) ÷ units ordered in the period, as Shopify’s reports count them (quantity returned ÷ quantity ordered). Not only physical returns. – under 5 units ordered; ₹ ex GST';
+  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} units cancelled or refunded in the period, ${inr.format(p.unitsOrdered)} ordered${p.unitsCancelled ? ` (${inr.format(p.unitsCancelled)} cancelled)` : ''} · ${esc(money(p.refundValue))} cancelled/refunded">${n1(p.returnPct)}%</span>`);
   const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['slow', 'Slow sellers to decide'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
   const PRODUCT_ALIAS = { over: 'push', decide: 'slow' };   // old links and saved filters
   const pFilter = () => (state.filter.products = PRODUCT_ALIAS[state.filter.products] || state.filter.products);
@@ -812,7 +822,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. The main passwords open every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${historyLine(sh)}${noHistList()}${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${shopifyCheck()}${historyLine(sh)}${noHistList()}${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
 
       ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
@@ -879,7 +889,7 @@
           <div class="tile"><b title="${n1(p?.perDay)} per in-stock day">${rate(p?.perDay)}</b><span>sells while in stock${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
           ${gap ? `<div class="tile" id="lost-unknown" title="No stock record before ${esc(dateShort(gap))}, so stock-outs before then can’t be seen (Shopify’s change log didn’t add up for it)"><b>${p.lost ? money(p.lost) : 'Unknown'}</b><span>sales lost${p.lost ? ` since ${esc(dateShort(gap))}` : ''} · before ${esc(dateShort(gap))}: unknown</span></div>`
     : `<div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>`}
-          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Cancelled or refunded: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)}${p.unitsCancelled ? `, ${inr.format(p.unitsCancelled)} cancelled` : ''}) · ${money(p.refundValue)} refunded</span></div>` : ''}
+          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Cancelled or refunded: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} ordered${p.unitsCancelled ? `, ${inr.format(p.unitsCancelled)} cancelled` : ''}) · ${money(p.refundValue)} back</span></div>` : ''}
         </section>
         ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>

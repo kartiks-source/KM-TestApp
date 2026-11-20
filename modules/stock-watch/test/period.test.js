@@ -18,9 +18,48 @@ test('month start is the 1st at 00:00 store time', () => {
 
 test('range: "month" gives from = month start; numbers and junk give days', () => {
   assert.deepEqual(P.range('month', now, IST), { period: 'month', from: P.monthStart(now, IST) });
-  assert.deepEqual(P.range('14', now, IST), { period: 'days', days: 14 });
-  assert.deepEqual(P.range(null, now, IST), { period: 'days', days: 30 });
-  assert.deepEqual(P.range('x', now, IST), { period: 'days', days: 30 });
+  /* 1.1.5: N store-calendar days, today included: from 00:00 store time N − 1 days ago */
+  assert.deepEqual(P.range('14', now, IST), { period: 'days', days: 14, from: Date.parse('2026-11-06T00:00:00+05:30') });
+  assert.deepEqual(P.range(null, now, IST), { period: 'days', days: 30, from: Date.parse('2026-10-21T00:00:00+05:30') });
+  assert.deepEqual(P.range('x', now, IST), { period: 'days', days: 30, from: Date.parse('2026-10-21T00:00:00+05:30') });
+  assert.deepEqual(P.range('1', now, IST), { period: 'days', days: 1, from: Date.parse('2026-11-19T00:00:00+05:30') }, '1 day = today so far');
+  assert.equal(P.range('500', now, IST).days, 90, 'never more than 90 days');
+});
+
+test('calendar days (1.1.5): "30 days" on 20 Nov = 22 Oct – 20 Nov, store time; daylight saving zones count calendar days', () => {
+  const t = Date.parse('2026-11-20T16:00:00Z');   // 20 Nov 21:30 IST
+  assert.equal(P.range('30', t, 'Asia/Kolkata').from, Date.parse('2026-10-22T00:00:00+05:30'));
+  assert.equal(P.range('7', t, 'Asia/Kolkata').from, Date.parse('2026-11-14T00:00:00+05:30'));
+  assert.equal(P.range('60', t, 'Asia/Kolkata').from, Date.parse('2026-09-22T00:00:00+05:30'));
+  /* just after midnight: today is the new day */
+  assert.equal(P.range('7', Date.parse('2026-11-20T18:31:00Z'), 'Asia/Kolkata').from, Date.parse('2026-11-15T00:00:00+05:30'));
+  /* London: clocks went back on Sun 25 Oct 2026 (BST → GMT). 7 days on 28 Oct = 22 Oct 00:00 BST, a 25-hour day inside */
+  const lon = Date.parse('2026-10-28T12:00:00Z');
+  assert.equal(P.range('7', lon, 'Europe/London').from, Date.parse('2026-10-22T00:00:00+01:00'));
+  assert.equal(P.range('1', lon, 'Europe/London').from, Date.parse('2026-10-28T00:00:00Z'));
+  /* New York: clocks go forward on 8 Mar 2026 (EST → EDT, a 23-hour day) */
+  assert.equal(P.range('3', Date.parse('2026-03-09T15:00:00Z'), 'America/New_York').from, Date.parse('2026-03-07T00:00:00-05:00'));
+  /* the report over that period: N day buckets, the first one starting at midnight */
+  const r = E.report([], [], { timeZone: 'Europe/London' }, { now: lon, ...P.range('7', lon, 'Europe/London') });
+  assert.equal(r.days, 7);
+  assert.deepEqual(r.daily.map((d) => d.day), ['2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28']);
+});
+
+test('calendar days (1.1.5): every number follows the same dates — an order at 23:59 the day before is out, 00:00 is in', () => {
+  const t = Date.parse('2026-11-20T16:00:00Z'), span = P.range('7', t, 'Asia/Kolkata');
+  const orders = [
+    { t: span.from - 60e3, order: 'a', variantId: 1, sku: 'A', qty: 1, price: 1000, ordered: 1 },   // 13 Nov 23:59 IST
+    { t: span.from, order: 'b', variantId: 1, sku: 'A', qty: 2, price: 1000, ordered: 2 },            // 14 Nov 00:00 IST
+  ];
+  const r = E.report([], orders, { timeZone: 'Asia/Kolkata' }, { now: t, ...span });
+  assert.equal(r.totals.sold, 2000);
+  assert.equal(r.totals.unitsOrdered, 2);
+  assert.equal(r.daily[0].day, '2026-11-14');
+  assert.equal(r.daily.length, 7);
+  /* the product drawer's daily bars: the same 7 days */
+  const d = E.productDetail('1', [], orders, { timeZone: 'Asia/Kolkata' }, { now: t, ...span });
+  assert.deepEqual(d.dailyUnits.map((x) => x.day), r.daily.map((x) => x.day));
+  assert.equal(d.dailyUnits[0].units, 2);
 });
 
 test('report with from = month start counts only this month', () => {

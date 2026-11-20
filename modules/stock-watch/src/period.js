@@ -13,12 +13,14 @@ function monthStart(now, zone) { return TZ.monthStart(now, zone); }
 function dayStart(t, zone) { return TZ.dayStart(t, zone); }
 
 /**
- * What the `days` query value asks for: a number of days (7, 14, 30, 60; 30 when missing), or
- * "month" = from the 1st of this month (store time) until now. Returns engine options.
+ * What the `days` query value asks for (1.1.5, LOGIC.md §5a): N store-calendar days, today included, from 00:00 store
+ * time N − 1 days ago until now (7, 14, 30, 60; 30 when missing; 1–90), so every number can be checked in Shopify with
+ * the same dates. "month" = from the 1st of this month (store time) until now. Returns engine options.
  */
 function range(daysParam, now, zone) {
   if (String(daysParam) === 'month') return { period: 'month', from: monthStart(now, zone) };
-  return { period: 'days', days: Number(daysParam) || 30 };
+  const days = Math.max(1, Math.min(90, Math.round(Number(daysParam)) || 30));
+  return { period: 'days', days, from: TZ.daysStart(now, days, zone) };
 }
 
 /** Rows as they stood at time t (for "the 7 days before" comparisons): nothing recorded after t. */

@@ -81,7 +81,7 @@ test('orders: first run loads 60 days by creation; later runs re-read changed or
   const r = await S.pullOrders(null, { q, now, onPage: (names, rows, cursor) => seen.push([names, rows.map((x) => x.variantId), cursor]) });
   assert.equal(r.total, 2);
   assert.deepEqual(seen, [[['#1'], ['1', '2'], Date.parse('2026-11-11T00:00:00Z')], [['#2'], [], Date.parse('2026-11-12T05:00:00Z')]]);   // #2 cancelled → no lines, so its old lines get removed
-  assert.match(filter, /^created_at:>='2026-09-20/);
+  assert.equal(filter, "created_at:>='2026-09-20T00:00:00.000Z' OR updated_at:>='2026-09-20T00:00:00.000Z'", '1.1.5: orders updated in the 60 days too (reversals of older orders)');
   await S.pullOrders(Date.parse('2026-11-18T00:00:00Z'), { q, now });
   assert.match(filter, /^updated_at:>='2026-11-17T23:30/);       // 30-minute overlap
 });
@@ -160,7 +160,7 @@ test('orders: returns from refunds — units, ₹ ex GST, cancelled before shipp
   /* cancelled without refund lines (unpaid): every unit at the price paid */
   assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-18T11:00:00Z', refunds: [] }, [gstLine(1, 2, 0)]).map((r) => [r.qty, r.returned, r.refund, r.cancelled]), [[0, 2, 2000, 2]]);
   assert.deepEqual(S.orderRows({ ...o, test: true }, [gstLine(1, 3, 3)]), [], 'test orders stay out');
-  assert.equal(S.ORDER_FIELDS, 'refunds');
+  assert.equal(S.ORDER_FIELDS, 'reversals');
 });
 
 test('orders: refunds are read with the order; over 10 refunds and over 50 refund lines are paged; read-only, one call at a time', async () => {
