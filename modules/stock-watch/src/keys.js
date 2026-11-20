@@ -14,6 +14,9 @@
  *        PERFORMITY_POC_API_URL  base address Performity sends with the key   (alias TOKEN_API_URL)
  *        PERFORMITY_POC_API_KEY  our key, sent as X-Api-Key on every call    (alias TOKEN_API_KEY)
  *        PERFORMITY_BRAND_ID     optional: limits the app to this one allowed brand (else every allowed brand is a store)
+ *        PERFORMITY_ORIGIN       our app's address, sent as Origin (Performity allows calls only from the domain
+ *                                it registered for our key: 403 "Origin not allowed" otherwise). Defaults to
+ *                                https://$RAILWAY_PUBLIC_DOMAIN, which Railway sets.
  *      GET  {base}/catalys/shopify/service/external/brands        → [{ brand_id, brand_name }]
  *      POST {base}/catalys/shopify/service/external/fresh-token   {brand_id}
  *                                                                  → { access_token, shop_domain, expires_at }
@@ -163,6 +166,8 @@ async function exchange(shop, clientId, clientSecret) {
 /* ---- Performity POC API (option A) ---- */
 const apiBase = () => (env('PERFORMITY_POC_API_URL') || env('TOKEN_API_URL')).replace(/\/+$/, '');
 const apiKey = () => env('PERFORMITY_POC_API_KEY') || env('TOKEN_API_KEY');
+/** Origin header Performity checks against the domain it registered for our key ('' = none sent). */
+const origin = () => (env('PERFORMITY_ORIGIN') || (env('RAILWAY_PUBLIC_DOMAIN') ? `https://${env('RAILWAY_PUBLIC_DOMAIN')}` : '')).replace(/\/+$/, '');
 const EXT = '/catalys/shopify/service/external';
 const lastShop = new Map();          // brand → shop handle from its last fresh-token
 let brandCache = null, holdUntil = 0, holdWhy = '';
@@ -196,7 +201,7 @@ async function pocCall(path, opts = {}, retried = false) {
     const { brand, ...init } = opts;
     r = await fetch(`${apiBase()}${EXT}${path}`, {
       ...init, redirect: 'error', signal: AbortSignal.timeout(10000),
-      headers: { 'X-Api-Key': apiKey(), accept: 'application/json', ...(opts.body ? { 'content-type': 'application/json' } : {}) },
+      headers: { 'X-Api-Key': apiKey(), accept: 'application/json', ...(origin() ? { origin: origin() } : {}), ...(opts.body ? { 'content-type': 'application/json' } : {}) },
     });
   } catch { throw new Error('Performity POC API is unreachable: pulls pause until it answers'); }
   if (r.ok) return r.json();
@@ -205,6 +210,7 @@ async function pocCall(path, opts = {}, retried = false) {
   if (r.status === 401) hold(15 * 60e3, 'Performity refused our API key (401): check PERFORMITY_POC_API_KEY. Paused 15 minutes so we never get the IP blocked');
   if (r.status === 403 && /ip/i.test(msg)) throw new Error('Performity: IP not allowed. Give Performity this server’s static outbound IP (Railway → service → Settings → Networking)');
   if (r.status === 403 && /brand/i.test(msg)) throw new Error('Performity: brand not allowed for our key. Use a brand from the list or ask Performity to allow it');
+  if (r.status === 403 && /origin/i.test(msg)) throw new Error(`Performity: origin not allowed. It must match the domain Performity registered for our key (we send ${origin() || 'none'}; set PERFORMITY_ORIGIN)`);
   if (r.status === 403) throw new Error(`Performity refused the call (403${msg ? `: ${msg}` : ''})`);
   if (r.status === 404) throw new Error('Performity: this brand has no connected Shopify store');
   if (r.status === 409) throw new Error('Performity: the brand must reconnect its Shopify store in Performity');

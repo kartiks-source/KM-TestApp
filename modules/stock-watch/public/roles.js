@@ -129,11 +129,13 @@
     let st = document.getElementById('role-css');
     if (!st) { st = document.createElement('style'); st.id = 'role-css'; document.head.appendChild(st); }
     st.textContent = css(role);
-    const nm = document.getElementById('role-name');
-    if (nm) nm.textContent = role ? ROLES[role].name : '';
-    const menu = document.getElementById('role-menu');
-    if (menu) {
-      menu.innerHTML = '<p class="rp-h">Show me</p>' + ['', ...ORDER].map((r) => `<button class="linkbtn${r === role ? ' on' : ''}" data-role="${r}" aria-pressed="${r === role}"><b>${r ? esc(ROLES[r].name) : ALL}</b><small>${r ? esc(ROLES[r].lands) : 'Every page, every number (default)'}</small></button>`).join('');
+    paint();
+  }
+  /* the pill's role name and menu, and their phone copies in the store bar (stores.js redraws it, then calls this) */
+  function paint() {
+    for (const nm of [document.getElementById('role-name'), document.getElementById('role-name-m')]) if (nm) nm.textContent = role ? ROLES[role].name : '';
+    for (const menu of [document.getElementById('role-menu'), document.getElementById('role-menu-m')]) {
+      if (menu) menu.innerHTML = '<p class="rp-h">Show me</p>' + ['', ...ORDER].map((r) => `<button class="linkbtn${r === role ? ' on' : ''}" data-role="${r}" aria-pressed="${r === role}"><b>${r ? esc(ROLES[r].name) : ALL}</b><small>${r ? esc(ROLES[r].lands) : 'Every page, every number (default)'}</small></button>`).join('');
     }
   }
   function choose(r) {
@@ -144,6 +146,7 @@
 
   Object.assign(API, {
     current: () => role,
+    paint,
     /** app.js: is this table column removed for the current role? */
     hidesCol: (table, k) => hides(role, `col:${table}:${k}`),
     /** app.js on start: land on the role's home page and tab (see landing()). */
@@ -154,14 +157,14 @@
       if (L.filter) state.filter[L.view] = L.filter;
       if (L.setHash) history.replaceState(null, '', '#' + L.view);
     },
-    /** The "Show me" field on Data & settings (the store menu is hidden on phones). */
+    /** The "Show me" field on Data & settings (also in the store bar's menu on phones). */
     field: () => `<div class="field"><label for="f-role">Show me</label><select id="f-role">${['', ...ORDER].map((r) => `<option value="${r}" ${r === role ? 'selected' : ''}>${r ? esc(ROLES[r].name) : `${ALL} (default)`}</option>`).join('')}</select><small>Remembered on this browser. Link for a role: /?role=ceo</small></div>`,
   });
   root.SW_ROLES = API;
 
   apply();
   document.addEventListener('click', (e) => {
-    const b = e.target.closest && e.target.closest('#role-menu [data-role]');
+    const b = e.target.closest && e.target.closest('#role-menu [data-role], #role-menu-m [data-role]');
     if (b) { e.preventDefault(); choose(b.dataset.role); }
   });
   document.addEventListener('change', (e) => { if (e.target.id === 'f-role') choose(e.target.value); });

@@ -91,7 +91,7 @@ test('phone 390 and 360: a store bar under the top bar, 44 px targets, no sidewa
   }
 });
 
-test('one store: the pill is the plain name (no dot, no store menu); phones show the name in the store bar, no menu', opts, async () => {
+test('one store: the pill is the plain name (no dot, no store menu); phones show the name in the store bar, whose menu is the role picker (final critic M1)', opts, async () => {
   for (const [w, h] of [[1440, 900], [390, 844]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h } });
     await ctx.route('**/api/stores', async (route) => {
@@ -102,8 +102,8 @@ test('one store: the pill is the plain name (no dot, no store menu); phones show
     await pg.goto(base + '/#overview'); await pg.waitForSelector('.tiles');
     assert.equal(await pg.$eval('#store-name', (e) => e.innerHTML), 'Sammsara (demo)');
     assert.equal(await pg.$eval('#store-menu', (e) => e.innerHTML), '');
-    const bar = await pg.$eval('#storebar', (e) => ({ shown: getComputedStyle(e).display !== 'none', text: e.textContent, menu: !!e.querySelector('details, .sdot') }));
-    assert.deepEqual(bar, { shown: w <= 760, text: 'Sammsara (demo)', menu: false }, `${w}: store bar (UI-5)`);
+    const bar = await pg.$eval('#storebar', (e) => ({ shown: getComputedStyle(e).display !== 'none', text: e.querySelector('summary').textContent, dot: !!e.querySelector('.sdot'), stores: e.querySelectorAll('[data-store]').length, roles: e.querySelectorAll('#role-menu-m [data-role]').length }));
+    assert.deepEqual(bar, { shown: w <= 760, text: 'Sammsara (demo)', dot: false, stores: 0, roles: 8 }, `${w}: store bar (UI-5, M1)`);
     assert.deepEqual(errors, []);
     await ctx.close();
   }

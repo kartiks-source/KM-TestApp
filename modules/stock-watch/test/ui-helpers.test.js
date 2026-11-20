@@ -230,3 +230,104 @@ test('Columns: every optional column is on by default; ones that do not fit step
   assert.ok((await heads(pg)).includes('In stock'), 'the others stay on');
   await ctx.close();
 });
+
+test('final critic round 1, desktop: focus ring inside the period buttons (UI-1); Pause rows one line (UI-2); Reorder keeps In stock at 1280 (UI-3)', opts, async () => {
+  const pg = await page(1440, 900);
+  await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('.range button');
+  await pg.focus('.range button:nth-child(2)'); await pg.keyboard.press('Shift+Tab');
+  const ring = await pg.evaluate(() => { const b = document.activeElement; return { range: !!b.closest('.range'), off: getComputedStyle(b).outlineOffset, w: getComputedStyle(b).outlineWidth }; });
+  assert.deepEqual(ring, { range: true, off: '-2px', w: '2px' }, 'keyboard focus: the ring sits inside, so .range (overflow hidden) does not clip it');
+  await pg.context().close();
+  for (const w of [1280, 1440, 1920]) {
+    const p2 = await page(w, 900);
+    await p2.goto(base + '/?role=marketing'); await p2.waitForSelector('[data-filter-products="pause"].on .c');
+    const hs = await p2.$$eval('.tbl.desk tbody tr', (r) => r.map((x) => x.getBoundingClientRect().height));
+    assert.ok(hs.length && Math.max(...hs) < 40, `${w}: Pause rows ${Math.max(...hs)} px (Back in stock wrapped)`);
+    assert.equal(await p2.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${w}: no sideways scroll`);
+    if (w === 1280) {
+      await p2.goto(base + '/?role=all#reorder'); await p2.waitForSelector('.tbl.desk table');
+      assert.ok((await heads(p2)).includes('In stock'), `1280: In stock on screen (${await heads(p2)})`);
+      const why = await p2.$$eval('.tbl.desk tbody .why', (x) => x.map((e) => [e.textContent, e.title]));
+      assert.ok(why.every(([t]) => !/supplier takes/.test(t)), 'table Why leaves out the lead time tail');
+      assert.ok(why.some(([, t]) => /supplier takes \d+ d$/.test(t)), 'its tooltip keeps it');
+    }
+    assert.deepEqual(p2.errors, []);
+    await p2.context().close();
+  }
+});
+
+test('final critic round 1: Overview tiles do not repeat the headline (SIMP-1); Reorder All headline adds up to its list (SIMP-2)', opts, async () => {
+  const r = await (await fetch(base + '/api/report?days=30')).json(), t = r.totals;
+  const pg = await page(1440, 900);
+  await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('.tiles');
+  const h1 = await pg.textContent('.headline h1');
+  assert.match(h1, /^Order ₹.+ today · ₹.+ sales lost in 30 days$/, h1);
+  const money = (sel) => pg.$eval(sel, (x) => x.textContent);
+  const tiles = await pg.$$eval('#view > .tiles .tile b', (b) => b.map((x) => x.textContent));
+  for (const v of tiles) assert.ok(!h1.includes(v), `tile ${v} repeats the headline`);
+  assert.match(await money('.tile.lost span'), t.hasCost ? /^profit lost · / : /^of demand lost · /);
+  await pg.click('.tile.amber'); await pg.waitForSelector('[data-filter-reorder="week"].on');
+  await pg.click('[data-filter-reorder="all"]'); await pg.waitForSelector('[data-filter-reorder="all"].on');
+  const week = r.reorder.filter((p) => p.status === 'Order this week'), today = r.reorder.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status));
+  const sum = (l) => l.reduce((a, p) => a + p.orderValue, 0);
+  assert.equal(sum(today), t.orderValueNow); assert.equal(sum(today) + sum(week), t.orderValueAll, 'the All tab adds up to today + this week');
+  assert.equal(today.length + week.length, r.reorder.length, 'All = Order today + This week');
+  const rh = await pg.textContent('.headline h1');
+  assert.match(rh, new RegExp(`today across ${t.orderToday} products · ₹.+ more this week \\(${week.length}\\)$`), rh);
+  await pg.click('[data-filter-reorder="today"]'); await pg.waitForSelector('[data-filter-reorder="today"].on');
+  assert.doesNotMatch(await pg.textContent('.headline h1'), /this week/, 'Order today tab: today only');
+  assert.deepEqual(pg.errors, []);
+  await pg.context().close();
+});
+
+test('final critic round 1, phones 390 and 360 (M1–M8, M10): role in the store bar, Pause names readable, chips, cards, folds, range, text sizes', opts, async () => {
+  for (const [w, h] of PHONES) {
+    const pg = await page(w, h);
+    await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
+    assert.match(await pg.textContent('#storebar summary'), /Marketing/, `${w}: M1 role shown`);
+    await pg.click('#storebar summary');
+    const roles = await pg.$$eval('#storebar #role-menu-m [data-role]', (b) => b.map((x) => x.getBoundingClientRect().height));
+    assert.ok(roles.length >= 7 && roles.every((x) => x >= 44), `${w}: M1 role menu ${roles}`);
+    assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${w}: menu open, no sideways scroll`);
+    await Promise.all([pg.waitForNavigation(), pg.click('#storebar #role-menu-m [data-role=""]')]);
+    await pg.waitForSelector('.tiles');
+    assert.equal(await pg.evaluate(() => document.documentElement.dataset.role), '', `${w}: M1 role switched from the store bar`);
+    await pg.goto(base + '/?role=marketing#products'); await pg.waitForSelector('.phone .mcard');
+    const h3 = await pg.$$eval('.phone .mcard header h3', (x) => x.slice(0, 20).map((e) => e.getBoundingClientRect().width));
+    assert.ok(Math.min(...h3) >= 150, `${w}: M2 Pause card names ${Math.min(...h3)} px wide`);
+    const sortBy = await pg.$eval('.msort > span', (e) => e.getBoundingClientRect().height);
+    assert.ok(sortBy < 25, `${w}: M10 "Sort by" on one line (${sortBy})`);
+    await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('.phone .mcard');
+    const left = await pg.$$eval('.phone .mcard header h3', (x) => x.slice(0, 30).map((e) => Math.round(e.getBoundingClientRect().left)));
+    assert.equal(new Set(left).size, 1, `${w}: M4 names start at one left edge (${[...new Set(left)]})`);
+    const range = await pg.$$eval('.top .range button', (b) => b.map((x) => [x.innerText, x.getBoundingClientRect().width, x.getAttribute('aria-label')]));
+    assert.ok(range.every(([, bw]) => bw >= 44), `${w}: M6 range widths ${range.map((x) => x[1])}`);
+    assert.deepEqual(range.slice(0, 4).map((x) => [x[0], x[2]]), [['7d', '7 days'], ['14d', '14 days'], ['30d', '30 days'], ['60d', '60 days']], 'M6 short labels, full names for screen readers');
+    /* M3: with an Ordered chip the row overflows; the active chip is scrolled in by the least (its right edge at the box's), not to the left edge */
+    const r = await (await fetch(base + '/api/report?days=30')).json(), one = r.reorder.find((p) => p.status === 'Order this week');
+    const eta = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10);
+    assert.equal((await fetch(base + '/api/onorder', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: [{ id: one.id, qty: 5, eta }] }) })).status, 200);
+    try {
+      await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('[data-filter-reorder="ordered"]');
+      await pg.click('[data-filter-reorder="ordered"]'); await pg.waitForSelector('[data-filter-reorder="ordered"].on');
+      const m = await pg.$eval('.wrap > .toolbar .chips', (c) => { const b = c.getBoundingClientRect(), a = c.querySelector('.on').getBoundingClientRect(); return { over: c.scrollWidth > c.clientWidth + 1, scrolled: c.scrollLeft, l: a.left - b.left, r: b.right - a.right }; });
+      assert.ok(m.over, `${w}: fixture: the chips row overflows`);
+      assert.ok(m.l >= 0 && m.r >= 0, `${w}: M3 Ordered chip in full ${JSON.stringify(m)}`);
+      assert.ok(m.scrolled === 0 || m.r <= 12, `${w}: M3 scrolled the least (Order today stays in view as far as it can) ${JSON.stringify(m)}`);
+    } finally {
+      await fetch(base + '/api/onorder', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: [{ id: one.id, qty: 0 }] }) });
+    }
+    await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('.phone .mcard');
+    await pg.click('.phone .mcard h3'); await pg.waitForSelector('svg[aria-label^="Stock over time"] text');
+    const over = await pg.$eval('svg[aria-label^="Stock over time"]', (svg) => { const W = svg.viewBox.baseVal.width; return [...svg.querySelectorAll('text')].map((t) => t.getBBox()).filter((b) => b.x + b.width > W + 0.5 || b.x < -0.5).length; });
+    assert.equal(over, 0, `${w}: M8 stock chart labels inside the chart`);
+    await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('.tiles');
+    assert.equal(await pg.$eval('.tile span', (e) => getComputedStyle(e).fontSize), '12px', `${w}: M7 tile context 12 px`);
+    await pg.goto(base + '/?role=all#data'); await pg.waitForSelector('.panel.fold');
+    const folds = await pg.$$eval('.panel.fold:not([open])', (f) => f.map((x) => x.getBoundingClientRect().height - x.querySelector('summary').getBoundingClientRect().height));
+    assert.ok(folds.length && folds.every((d) => d <= 3), `${w}: M5 closed fold = its label (${folds})`);
+    assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+});

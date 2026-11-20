@@ -57,7 +57,7 @@ Google Sheet CSV / upload ───┘
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
 | `src/digest.js` | morning digest text per role, pure (SW-028) |
 | `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
-| `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
+| `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (the phone bar also shows the role and holds the role list, `#role-menu-m`, filled by `SW_ROLES.paint()`) (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
 | `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |

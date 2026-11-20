@@ -3,6 +3,12 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · Performity connected (Origin header)
+stock-watch, `main`. KD sent the real base URL (Azure App Service, dev API); Railway var updated by the user.
+- Live calls gave `403 Origin not allowed`: Performity allows our key only from the domain we gave them, checked on `Origin` (not in the calling guide). `keys.pocCall` now sends `Origin: https://$RAILWAY_PUBLIC_DOMAIN` (or `PERFORMITY_ORIGIN`); clear error for that 403. Tests: 2 new (default/override/none; error text).
+- Checked by hand (key and token never printed): brands → 1 (TATA Motors); fresh-token → 200, `new-test-store-glcl79bh.myshopify.com`, expiry ~1 h; read-only Shopify query → New Test Store, INR, Asia/Kolkata, 22 products, 11 orders. No IP allow-list hit, so no static IP needed yet.
+- Open: compare a pull against Shopify admin; Performity's prod base URL when they move off dev; static IP only if they enable `EXTERNAL_POC_ALLOWED_IPS`.
+
 ## 2026-11-20 · finish sprints · last gaps
 stock-watch 1.0.0-rc.1, on `main` (cdcf303 + this entry; not pushed, not deployed).
 - SW-056: `src/version.js`; `/health`, `/status`, `/api/report` `app`, footer `v1.0.0-rc.1 · <sha>` (`dev` unstamped). SHA from `RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or `BUILD_SHA` file (`npm run stamp` before `railway up`, then delete; not gitignored because `railway up` skips ignored files). Dockerfile copies it (glob next to package.json). Hex only.

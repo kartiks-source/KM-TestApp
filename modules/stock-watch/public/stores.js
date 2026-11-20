@@ -67,8 +67,11 @@
     const bar = document.getElementById('storebar');
     if (bar) {
       bar.hidden = !c;
-      bar.innerHTML = !c ? '' : !many ? `<p class="store-m one"><span class="sm-name">${esc(c.name)}</span></p>` : `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}. Change store">${dot(c)}<span class="sm-name">${esc(c.name)}</span><span class="sm-n">${list.length} stores</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
-        + `<div class="menu" role="group" aria-label="Stores">${items()}</div></details>`;
+      /* phones (critic M1): the bar is the store and role picker, as the pill is on a laptop; the role is shown in it
+         (#role-name-m) and chosen in its menu (#role-menu-m), both filled by roles.js */
+      bar.innerHTML = !c ? '' : `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}. Change ${many ? 'store or ' : ''}what you see">${many ? dot(c) : ''}<span class="sm-name">${esc(c.name)}</span><span class="sm-n sm-role" id="role-name-m"></span>${many ? `<span class="sm-n">${list.length} stores</span>` : ''}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
+        + `<div class="menu">${many ? `<p class="rp-h" id="store-h-m">Store</p><div role="group" aria-labelledby="store-h-m">${items()}</div>` : ''}<div id="role-menu-m"></div></div></details>`;
+      if (root.SW_ROLES && root.SW_ROLES.paint) root.SW_ROLES.paint();
     }
     document.documentElement.classList.toggle('multi-store', many);
   }

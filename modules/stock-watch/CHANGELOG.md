@@ -14,11 +14,17 @@ The first version meant for production, once the open items in `docs/BACKLOG.md`
 
 New in this release:
 
+- Performity calls send our app's domain as `Origin` (Performity allows our key only from it); `PERFORMITY_ORIGIN` overrides it. A `403 Origin not allowed` now says which origin was sent.
+
 - Added: `/health`, `/status` and the page footer show the app version and the commit it was built from (`v1.0.0-rc.1 · abc1234`; `dev` for an unstamped build). Deploy step: `npm run stamp` before `railway up` (SW-056, `docs/RUNBOOK.md`).
 - Added: `store.json` carries `schemaVersion: 1`. Older files load and are saved with it; a file or `restore.json` from a newer version is refused and never overwritten (SW-047, `FORMATS.md`).
 - Added: group rows (Group by) show the 8-week trend bars like product rows: desktop Trend cell, phone card header (SW-021).
 - Fixed: real data arriving on a demo store (Flow, Sheet, CSV or Shopify) now also clears the demo's Mark ordered and slow-seller decisions, so a demo PO never lowers a real order. Removed the CSV upload's "Remove the demo data first" checkbox, which did nothing (SW-007).
 - Fixed: a variant set to draft or archived while sold out and made active again on restock no longer has its stock-out run through the inactive days: ₹ lost, past daily bars and Yesterday stay as they were. The inactive days don't count as in-stock days for the sales rate either (LOGIC §1, §3; final critic L1).
+- Changed: Overview headline reads "Order ₹X today · ₹Y sales lost in N days" ("sales lost" on every screen), and its tiles no longer repeat it: the first shows profit lost (or % of demand lost without costs), the second what more to order this week (final critic SIMP-1).
+- Changed: Reorder's All tab headline adds "· ₹Z more this week (M)", so it adds up to the list, CSV and Tick all under it (SIMP-2). The table's Why cell leaves "supplier takes N d" to its tooltip and is narrower up to 1440 px, so In stock stays on a laptop screen (UI-3).
+- Fixed: keyboard focus ring on the period buttons was clipped (UI-1); Pause promotion rows no longer wrap "Back in stock" onto two lines at 1440–1920 (UI-2).
+- Fixed (phones): the store bar shows the role and opens the role list, so a view-only sign-in can change role (M1); Pause cards put a long "Back in stock" under the name (M2); the active chip scrolls in by the least (M3); card names line up on the left (M4); closed folds on Data are just their label (M5); period buttons 7d / 14d / 30d / 60d, at least 44 px wide (M6); tile context 12 px, best-seller tag 11.5 px (M7); the stock chart's last date fits (M8); 16 px sign-in fields (no iOS zoom) and 44 px targets (M9); "Sort by" on one line (M10).
 - Changed: morning digest settings (hour, who gets it, pause) and a change of the server's digest webhook show in the settings change log (SW-029).
 
 ## 0.10.0 · 2026-11-20 · several stores, everything shown by default

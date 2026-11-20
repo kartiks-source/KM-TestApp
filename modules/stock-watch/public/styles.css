@@ -211,6 +211,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 60; font-weight: 500; }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.range button:focus-visible { outline-offset: -2px; }   /* critic UI-1: .range clips (overflow hidden), so the ring sits inside */
 
 .pname { color: var(--brand); font-weight: 500; }
 .abc { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 6px; border-radius: 4px; background: var(--brand); color: #fff; font-size: 10px; font-weight: 700; vertical-align: 1px; }
@@ -510,6 +511,7 @@ table.fixed td:first-child { max-width: none; }
 .why.out { color: var(--lost); font-weight: 500; }
 .why.crit { color: var(--lost); }
 .tbl td .why { max-width: 380px; }
+@media (max-width: 1440px) { .tbl td .why { max-width: 260px; } }   /* critic UI-3: In stock keeps its place on a laptop; full text in the tooltip */
 .mfacts .why, .dwhy .why { white-space: normal; }
 .dwhy { margin: 2px 0 12px; font-size: 14px; }
 .dwhy .why { font-size: 14px; }
@@ -600,13 +602,17 @@ table.fixed td:first-child { max-width: none; }
 .storebar { display: none; }
 @media (max-width: 760px) {
   .storebar:not([hidden]) { display: block; margin: 10px 10px 0; }
-  .store-m.one { display: flex; align-items: center; margin: 0; min-height: 32px; font-weight: 600; font-size: 14px; color: var(--ink-2); }
   .storepick { position: relative; }
   .storepick > summary.store-m { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; background: var(--card); border: 1px solid var(--line-2); border-radius: 10px; font-weight: 600; font-size: 14px; color: var(--ink-2); }
   .store-m .sm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .store-m .sm-n { font-weight: 500; font-size: 12px; color: var(--soft); white-space: nowrap; }
   .store-m svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .storepick .menu { left: 0; right: 0; min-width: 0; }
+  .storepick .menu { left: 0; right: 0; min-width: 0; max-height: calc(100vh - 180px); overflow-y: auto; overscroll-behavior: contain; }
+  .store-m .sm-role { color: var(--brand); font-weight: 600; }   /* critic M1: the role is shown, and chosen, in the store bar */
+  .store-m .sm-role:empty { display: none; }
+  .store-m .sm-role::before { content: "· "; color: var(--faint); }
+  .storepick .menu .rp-h { margin: 2px 8px 4px; font-size: 12px; color: var(--faint); }
+  .storepick .menu #role-menu-m:not(:first-child) { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
   .storepick .menu .linkbtn { display: grid; gap: 0; width: 100%; }
   .storepick .menu .linkbtn small { color: var(--soft); font-size: 12px; }
   .storepick .menu .linkbtn.on { background: var(--brand-wash); }
@@ -614,3 +620,25 @@ table.fixed td:first-child { max-width: none; }
 }
 /* show everything: an optional column that doesn't fit this screen steps aside (fitTables in app.js), never a sideways scroll */
 .tbl .sq { display: none; }
+
+/* ---- phones, final critic round 1 (M2, M4–M7, M10). Inside ≤760 px only: desktop untouched. ---- */
+.range .ph-d { display: none; }
+@media (max-width: 760px) {
+  /* M2: Pause cards: a long "Back in stock" pill moves under the name instead of squeezing it */
+  .mcard header:has(> .bk) { flex-wrap: wrap; row-gap: 4px; }
+  .mcard header:has(> .bk) h3 { flex: 1 1 150px; }
+  /* M4: names start at the left edge even without the spark */
+  .mcard h3 { flex: 1 1 auto; }
+  /* M5: a closed fold is just its 44 px label */
+  .panel.fold:not([open]) { padding-bottom: 0; gap: 0; }
+  .panel.fold:not([open]) > summary { margin-bottom: 0; }
+  /* M6: period buttons at least 44 px wide, short labels (7d … 60d); the full name stays in aria-label */
+  .range button { min-width: 44px; }
+  .range .ph-d { display: inline; }
+  /* M7: decision context no smaller than 12 px */
+  .tile span { font-size: 12px; }
+  .best { font-size: 11.5px; }
+  /* M10: "Sort by" on one line */
+  .msort > span { white-space: nowrap; flex: none; }
+  .msort select { min-width: 0; }   /* the list gives way, never the page (long option names) */
+}

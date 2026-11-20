@@ -10,7 +10,7 @@ function withEnv(vars, fn) {
   return async () => {
     const keep = { ...process.env }, realFetch = global.fetch;
     try {
-      for (const k of Object.keys(process.env)) if (/^(AZURE_|SHOPIFY_|TOKEN_API|ALERT_|PERFORMITY_)/.test(k)) delete process.env[k];
+      for (const k of Object.keys(process.env)) if (/^(AZURE_|SHOPIFY_|TOKEN_API|ALERT_|PERFORMITY_|RAILWAY_PUBLIC_DOMAIN)/.test(k)) delete process.env[k];
       Object.assign(process.env, vars); K.clear(); K._resetPoc(); K._pace(0, 0); await fn();
     } finally { process.env = keep; global.fetch = realFetch; K.clear(); K._resetPoc(); K._pace(2100, 6100); }
   };
@@ -23,7 +23,7 @@ const ENV = { PERFORMITY_POC_API_URL: 'https://poc.example.com/', PERFORMITY_POC
 function fakeApi({ brands = [{ brand_id: BRAND, brand_name: 'Sammsara' }], token = (n) => ({ access_token: `tok-${n}`, shop_domain: 'sammsara.myshopify.com', expires_at: inMin(60) }) } = {}) {
   const calls = [];
   global.fetch = async (url, opt) => {
-    calls.push({ url, method: opt.method || 'GET', key: opt.headers['X-Api-Key'], body: opt.body });
+    calls.push({ url, method: opt.method || 'GET', key: opt.headers['X-Api-Key'], origin: opt.headers.origin, body: opt.body });
     if (url.endsWith('/catalys/shopify/service/external/brands')) return json(200, brands);
     if (url.endsWith('/catalys/shopify/service/external/fresh-token')) return typeof token === 'function' ? json(200, token(calls.length)) : token;
     return json(404, { error: 'nope' });
@@ -135,4 +135,18 @@ test('alerts: one message on failure, reminder after 6 h, one on recovery, token
   assert.match(sent[0], /Stock-out Watch \(Brand One\)/, 'names the store');
   assert.match(sent[1], /\(Brand Two\).*other store down/);
   assert.match(sent[2], /Brand One.*still failing for 6 h/); assert.match(sent[3], /Brand One.*work again/);
+}));
+
+test('Origin: our Railway domain by default, PERFORMITY_ORIGIN wins, none when neither is set', withEnv({ ...ENV, RAILWAY_PUBLIC_DOMAIN: 'web-x.up.railway.app' }, async () => {
+  let calls = fakeApi(); await K.brands({ fresh: true });
+  assert.equal(calls[0].origin, 'https://web-x.up.railway.app');
+  process.env.PERFORMITY_ORIGIN = 'https://stock.catalys.co/'; calls = fakeApi(); await K.brands({ fresh: true });
+  assert.equal(calls[0].origin, 'https://stock.catalys.co');
+  delete process.env.PERFORMITY_ORIGIN; delete process.env.RAILWAY_PUBLIC_DOMAIN; calls = fakeApi(); await K.brands({ fresh: true });
+  assert.equal(calls[0].origin, undefined);
+}));
+
+test('403 Origin not allowed says which origin we sent and how to fix it', withEnv({ ...ENV, PERFORMITY_ORIGIN: 'https://a.example' }, async () => {
+  global.fetch = async () => json(403, { error: 'Origin not allowed' });
+  await assert.rejects(K.brands({ fresh: true }), /origin not allowed.*https:\/\/a\.example.*PERFORMITY_ORIGIN/);
 }));

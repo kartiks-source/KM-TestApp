@@ -319,7 +319,7 @@
 
   function stockChart(tl, from, to) {
     if (tl.length < 2) return '<p class="muted">No stock changes recorded in this period.</p>';
-    const W = narrow() ? 340 : 680, H = narrow() ? 200 : 220, L = 40, R = narrow() ? 16 : 26, T = 10, B = 28;
+    const W = narrow() ? 340 : 680, H = narrow() ? 200 : 220, L = 40, R = narrow() ? 24 : 26, T = 10, B = 28;   // M8: room for the last date label
     const max = Math.max(1, ...tl.map((p) => p.stock));
     const top = Math.ceil(max / niceStep(max / 4)) * niceStep(max / 4);
     const x = (t) => L + (W - L - R) * ((t - from) / (to - from));
@@ -397,7 +397,8 @@
     return `<span class="days"><span class="num ${p.daysLeft <= 3 ? 'lostv' : ''}">${n1(p.daysLeft)}</span><span class="meter"><i style="width:${Math.min(100, (p.daysLeft / (warn + 7)) * 100)}%;background:${color}"></i></span></span>`;
   }
   /* SW-024: one plain sentence (LOGIC.md §15a), the same text the drawer and the digest use */
-  const whyCell = (p) => (p.why ? `<span class="why${p.stock != null && p.stock <= 0 ? ' out' : p.daysLeft != null && p.daysLeft <= 3 ? ' crit' : ''}" title="${esc(p.why)}">${esc(p.why)}</span>` : '–');
+  /* short: the Reorder table leaves out the " · supplier takes N d" tail, the same on most rows and in Plan settings (critic UI-3); the tooltip keeps it */
+  const whyCell = (p, short) => (p.why ? `<span class="why${p.stock != null && p.stock <= 0 ? ' out' : p.daysLeft != null && p.daysLeft <= 3 ? ' crit' : ''}" title="${esc(p.why)}">${esc(short ? p.why.replace(/ · supplier takes \d+ d$/, '') : p.why)}</span>` : '–');
   const trendOnly = (p) => (p.trendPct == null && !p.trendNew ? '<span class="muted" title="Not enough sales yet to call a trend">–</span>' : trendChip(p));
 
   function summaryText() {
@@ -417,16 +418,19 @@
   function overview() {
     const r = state.report, t = r.totals;
     const today = r.reorder.filter((p) => TODAY.includes(p.status));
+    const week = r.reorder.filter((p) => p.status === 'Order this week').length, weekValue = Math.max(0, t.orderValueAll - t.orderValueNow);
     const top = r.products.filter((p) => p.lost > 0).slice(0, 5), maxLost = Math.max(1, ...top.map((p) => p.lost));
     return `
       <section class="headline">
-        <h1><span class="h-order">Order <span class="amberv">${money(t.orderValueNow)}</span> today · </span><span class="h-lost">stock-outs cost <span class="lost">${money(t.lost)}</span> ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</span></h1>
+        <h1><span class="h-order">Order <span class="amberv">${money(t.orderValueNow)}</span> today · </span><span class="h-lost"><span class="lost">${money(t.lost)}</span> sales lost ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</span></h1>
         ${window.SW_DIGEST ? SW_DIGEST.shareMenu() : '<button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>'}
         ${ydayStrip(r.yesterday)}
       </section>
       <section class="tiles t4">
-        <button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost while products were out of stock (${n1(t.lostPct)}% of demand)"><b>${money(t.lost)}</b><span>sales lost${t.hasCost ? ` · ${money(t.lostProfit)} profit${t.costed < t.active ? ` (${t.costed}/${t.active} costed)` : ''}` : ''}</span></button>
-        <button class="tile amber" data-go="reorder" data-filter="today" title="Cash to commit at unit cost for everything that needs ordering today"><b>${money(t.orderValueNow)}</b><span>to order today · ${t.orderToday} products</span></button>
+        ${t.hasCost
+    ? `<button class="tile lost" data-go="stockouts" data-filter="all" title="Profit on the ${money(t.lost)} of sales lost while products were out of stock: units lost × (price paid − unit cost)${t.costed < t.active ? `. Only ${t.costed} of ${t.active} products have a cost, so it is a minimum` : ''}"><b>${money(t.lostProfit)}</b><span>profit lost · ${n1(t.lostPct)}% of demand${t.costed < t.active ? ` (${t.costed}/${t.active} costed)` : ''}</span></button>`
+    : `<button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost ÷ (sold + sales lost)"><b>${n1(t.lostPct)}%</b><span>of demand lost · ${inr.format(t.stockouts)} stock-outs</span></button>`}
+        <button class="tile amber" data-go="reorder" data-filter="week" title="Cash to commit at unit cost for what needs ordering this week, after today’s order"><b>${money(weekValue)}</b><span>more to order this week · ${week} products</span></button>
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that need ordering today"><b>${t.bestAtRisk}<small> of ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
         <button class="tile plum" data-go="products" data-filter="push" title="Cash in stock beyond what lead time + days to last + buffer need, for overstocked products: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
       </section>
@@ -482,7 +486,7 @@
     ] : [
       { k: 'name', label: 'Product', f: (p) => (canPick(p) ? `<input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}>` : (viewOnly() ? '' : '<span class="pick-sp"></span>')) + nameCell(p, true, true) },
       ...(f === 'all' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
-      { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: whyCell, val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
+      { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: (p) => whyCell(p, true), val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
@@ -499,7 +503,7 @@
     const head = ordered
       ? `<h1>${open.length ? `${inr.format(open.length)} on order · ${inr.format(soon)} due this week${late ? ` · <span class="lost">${inr.format(late)} late</span>` : ''}` : 'Nothing on order'}</h1>
         ${due.length ? `<p class="exp">Next lands ${dateShort(due[0].onOrder.eta)}. Late = past its date with less than 90% received: chase the supplier.</p>` : ''}`
-      : `<h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products</h1>
+      : `<h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products${f === 'all' && week ? ` <span class="nw">· ${money(Math.max(0, t.orderValueAll - t.orderValueNow))} more this week (${week})</span>` : ''}</h1>
         <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p>`;
     return `
       <section class="headline">${head}</section>
@@ -629,7 +633,7 @@
     const tot = rows.reduce((a, p) => ({ sold: a.sold + p.sold, lost: a.lost + p.lost, stock: a.stock + (p.stock > 0 ? p.stock : 0) }), { sold: 0, lost: 0, stock: 0 });
     let cols = PRODUCT_COLS().filter((c) => !c.hide);
     /* Pause: "Back in stock" in place of Order; Push: Overstock ₹ in place of Order; Decide: the decision in place of Status and Order */
-    if (f === 'pause') cols = cols.map((c) => (c.k === 'orderQty' ? { k: 'backIn', label: 'Back in stock', tip: 'The marked order’s date, or the earliest an order placed today could land', f: (p) => `<span class="muted">${esc(p.backIn || '–')}</span>` } : c));
+    if (f === 'pause') cols = cols.map((c) => (c.k === 'orderQty' ? { k: 'backIn', label: 'Back in stock', nw: 1, tip: 'The marked order’s date, or the earliest an order placed today could land', f: (p) => `<span class="muted">${esc(p.backIn || '–')}</span>` } : c));
     if (f === 'push') cols = cols.map((c) => (c.k === 'orderQty' ? { ...PRODUCT_COLS().find((x) => x.k === 'excessValue'), opt: 0 } : c)).filter((c, i, a) => c.k !== 'excessValue' || a.findIndex((x) => x.k === 'excessValue') === i);
     if (f === 'slow') cols = cols.filter((c) => !['status', 'orderQty', 'daysLeft'].includes(c.k)).concat([{ k: 'decide', label: 'Decide', f: decideCell, val: (p) => decideOf().get(p.id)?.value || 0 }, ...(viewOnly() ? [] : [{ k: 'act', label: '', f: decideBtns }])]);
     const moreOn = PRODUCT_MORE.some(([k]) => k === f);
@@ -640,7 +644,7 @@
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
         ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products', null, (f === 'pause' || f === 'push') && rows.length ? `<button class="linkbtn" id="csv-mkt">Download this list (CSV)</button>` : '')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week">${esc(p.backIn || '–')}</span>` : status(p)}</header>
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week bk">${esc(p.backIn || '–')}</span>` : status(p)}</header>
         <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
       ${f === 'slow' ? decidedNote() : ''}`;
   }
@@ -838,7 +842,7 @@
     $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>' : '');
     if (narrow()) {   // M3: phones scroll the chips row sideways; keep the active chip in view (pure DOM: the page doesn't move)
       const on = $('.wrap > .toolbar .chips .on');
-      if (on) { const c = on.parentElement, a = on.getBoundingClientRect(), b = c.getBoundingClientRect(); if (a.left < b.left || a.right > b.right) c.scrollLeft += a.left - b.left - 10; }
+      if (on) { const c = on.parentElement, a = on.getBoundingClientRect(), b = c.getBoundingClientRect(); if (a.right > b.right) c.scrollLeft += a.right - b.right + 10; else if (a.left < b.left) c.scrollLeft -= b.left - a.left + 10; }   // critic M3: the least that shows it
     }
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }

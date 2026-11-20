@@ -222,3 +222,10 @@ test('bad input → 400, not 500; settings body capped at 64 KB (SW-018)', async
   }
   assert.doesNotMatch(s.log(), /SyntaxError|URIError|TypeError/, 'nothing reached the 500 handler');
 });
+
+test('login page on a phone: 16 px fields (no iOS zoom on the autofocused password) and 44 px targets (final critic M9)', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: PASSWORD }); t.after(s.stop);
+  const html = await (await s.req('/login')).text();
+  assert.match(html, /@media\(max-width:760px\)\{input,button\{font-size:16px;min-height:44px\}\}/);
+  assert.match(html, /autofocus/);
+});
