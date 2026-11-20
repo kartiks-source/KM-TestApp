@@ -12,13 +12,13 @@ What to do when something breaks, and how to get data back. For secrets and who 
 | Health | `GET /health` → `{"ok":true}` (no login) |
 | Logs | Railway dashboard → service → Deployments → View logs (lines start `backup:`, `restore:`, `shopify:`) |
 
-## Connect the first store (option A: token API)
+## Connect the first store (option A: Performity POC API)
 
-1. Dev team: token API live with our key; our outbound IP and the first store allow-listed; scopes confirmed (`read_products`, `read_inventory`, `read_orders`).
-2. Railway → project `stock-watch` → service `web` → **Variables**: set `TOKEN_API_URL`, `TOKEN_API_KEY`, `SHOPIFY_STORE`, `ALERT_WEBHOOK_URL`; keep `ADMIN_PASSWORD` (12+ chars). Saving redeploys. Do it after 22:00 IST: the first pull loads 60 days of orders.
-3. Data page shows "Connected to Shopify"; demo data is cleared automatically. Watch Railway → service → **Logs** for `shopify: … stock changes, … order lines`.
-4. Next morning: compare 10 days of Sold and order counts with Shopify admin (Analytics → Reports → Net sales), and stock for 10 SKUs. Only then show numbers to anyone.
-5. If anything looks wrong: remove `TOKEN_API_URL` (pulls stop at once), tell the dev team, fix, reconnect.
+1. Railway → service `web` → **Settings → Networking → Enable Static IPs** (Pro plan), then redeploy. Copy the IPv4 address(es) and send them to Performity for `EXTERNAL_POC_ALLOWED_IPS`.
+2. Performity sends the base URL and our key (one-time link). Railway → service `web` → **Variables**: set `PERFORMITY_POC_API_URL`, `PERFORMITY_POC_API_KEY`, `ALERT_WEBHOOK_URL`; keep `ADMIN_PASSWORD` (12+ chars). If they allow more than one brand, also `PERFORMITY_BRAND_ID`. Saving redeploys. Do it after 22:00 IST: the first pull loads 60 days of orders on Performity's shared Shopify limit.
+3. Data page shows "Connected to Shopify" with the store; demo data is cleared automatically. Railway → service → **Deployments → View logs**: `shopify: … stock changes, … order lines`. Errors are in plain words (IP not allowed, brand not allowed, store must reconnect…).
+4. Next morning: compare 10 days of Sold and order counts with Shopify admin (Analytics → Net sales) and stock for 10 SKUs. Only then show numbers.
+5. To stop at once: delete `PERFORMITY_POC_API_URL` in Variables. A wrong key is never retried in a loop (5 wrong keys block our IP for 15 minutes).
 
 ## Deploy and roll back
 

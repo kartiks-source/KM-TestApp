@@ -220,6 +220,7 @@ function syncShopify() {
   if (!keys.status().source) return Promise.resolve({ skipped: true });
   if (shopifyRun) return shopifyRun;
   shopifyRun = (async () => {
+    keys.beginPull();                                   // Performity POC API: fresh token before each pull
     const started = Date.now();
     const run = shopifyProgress = runs.begin('shopify', started);
     try {
