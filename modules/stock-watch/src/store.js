@@ -17,6 +17,7 @@ const { DEFAULT_SETTINGS } = require('./engine');
 const scope = require('./scope');
 const onorder = require('./onorder');   // Mark ordered and decisions made on demo data go with it (SW-007)
 const decide = require('./decide');
+const suppliers = require('./suppliers');   // SW-040: demo supplier terms go with the demo
 
 const KEEP_DAYS = 120;
 /*
@@ -128,6 +129,7 @@ function endDemo(d = load()) {
   d.source = 'empty';
   if (Object.keys(onorder.all()).length) onorder.clear();
   decide.clear();
+  suppliers.clearDemo();
   save();
   console.log('store: real data arrived, demo data cleared (rows, Mark ordered, decisions)');
   return true;

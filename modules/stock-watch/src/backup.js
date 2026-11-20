@@ -22,11 +22,12 @@ const path = require('node:path');
 const store = require('./store');
 const onorder = require('./onorder');
 const decide = require('./decide');
+const suppliers = require('./suppliers');   // SW-040
 const { parse, writeAtomic: writeSide } = require('./sidefile');
 const scope = require('./scope');
 
 /* the side files a backup carries, by file name (<store folder>/<name>) */
-const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
+const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide, [suppliers.FILE_NAME]: suppliers };
 
 /* the current store's folder (src/scope.js) */
 const dir = () => path.join(scope.dir(), 'backups');
