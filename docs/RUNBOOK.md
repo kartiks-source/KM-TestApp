@@ -31,6 +31,19 @@ Both routes are open by design and return no names, keys or error details (`SECU
 4. Next morning: compare 10 days of Sold and order counts with Shopify admin (Analytics → Net sales) and stock for 10 SKUs. Only then show numbers.
 5. To stop at once: delete `PERFORMITY_POC_API_URL` in Variables. A wrong key is never retried in a loop (5 wrong keys block our IP for 15 minutes).
 
+## Railway configuration (infrastructure as code)
+
+`.railway/railway.ts` defines the project: service `web` in **Singapore** (`asia-southeast1-eqsg3a`, closest to India and Performity; static outbound IPs are per region, so don't move it after Performity allow-lists our IP), exactly 1 replica, health check `/health`, volume `web-volume` at `/data`. Secrets stay in the Railway dashboard (`preserve()`), never in the file.
+
+```bash
+npm install --no-save railway   # the IaC SDK, only needed to plan/apply
+railway config plan             # safe preview
+railway config apply            # asks before changing anything
+```
+Run `railway` directly (not through `timeout` or another wrapper: the SDK checks the version of the command that launched it).
+
+**Static outbound IP (Pro plan):** Railway → service `web` → Settings → Networking → Enable Static IPs (or `railway outbound-network static-ip enable --service web`), redeploy, send the IPv4 address(es) to Performity for `EXTERNAL_POC_ALLOWED_IPS`.
+
 ## Deploy and roll back
 
 Deploys are a local `railway up` (no auto-deploy from GitHub yet; ADR-0012):

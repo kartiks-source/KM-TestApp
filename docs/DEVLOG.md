@@ -3,6 +3,9 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+
+## 2026-11-20 · ops · Railway on the new account, as code
+- Project `stock-watch` on the Limitless Pixel account (`web-production-d8d7a911.up.railway.app`). `.railway/railway.ts` replaces `railway.json` (Config as Code is retired on 1 Dec 2026): Singapore region, 1 replica, health check `/health`, volume `/data`; secrets `preserve()`d. Region moved from sfo with the volume (data kept). Static outbound IPs wait for the Pro plan.
 ## 2026-11-20 · finish sprints · W4-ci
 stock-watch, branch `finish/W4-ci` (ede2ef7, 5ceb950, bbebac2; not pushed, not deployed). Closes SW-014 (browser tests never ran in CI) and the CI half of SW-023 (360×740, screenshots kept).
 - Root `package.json`: devDependency `playwright` pinned to 1.65.1 + `package-lock.json` (dev tooling only; the Dockerfile copies `modules/stock-watch`, so the deployed app stays dependency-free). Scripts `test:ui` (fails instead of silently skipping when Playwright is missing) and `test:smoke` (smoke + roles smoke).
