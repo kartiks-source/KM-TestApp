@@ -3,6 +3,17 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · finish sprints · last gaps
+stock-watch 1.0.0-rc.1, on `main` (cdcf303 + this entry; not pushed, not deployed).
+- SW-056: `src/version.js`; `/health`, `/status`, `/api/report` `app`, footer `v1.0.0-rc.1 · <sha>` (`dev` unstamped). SHA from `RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or `BUILD_SHA` file (`npm run stamp` before `railway up`, then delete; not gitignored because `railway up` skips ignored files). Dockerfile copies it (glob next to package.json). Hex only.
+- SW-047: `store.json` `schemaVersion: 1` on every save; `MIGRATIONS` (0 → 1 = add key); newer file → refuse to start, untouched; newer `restore.json` rejected.
+- SW-021: `groups.js` `weeks` (summed units, avg out-days ≥ 0.1 when any variant out, `outProducts`); group Trend cell = spark + chip; phone group card spark.
+- SW-007: `store.endDemo()` clears demo rows, catalog, Mark ordered, decisions; used by `goLive` (Flow, Sheet, CSV, Shopify orders) and `pullOne`. Import checkbox + CSS + smoke step removed.
+- SW-029: digest PUT → change log `digest.hour/roles/paused` (who = role); env webhook host change → `digest.webhook` by `server (env)`, once, hosts only. Change log refreshes in place after digest save.
+- Tests: version (4), store schema (4) + demo→live per path (3), backup newer-schema, digest log (2 + route), groups spark (2), ui-helpers 390+360 loops, group sparks 1280/1440/1920/390/360, footer + no checkbox; docs: CHANGELOG top = package version.
+- Checked: `npm test` 250 pass / 20 skip (browser); `test:ui` 20/20 (`PLAYWRIGHT_CHANNEL=chrome`); `test:smoke` 30/30 + roles all pass.
+- Open: five critics not run on this cycle; shared dev log page row not added; git tag `v1.0.0-rc.1` at deploy (SW-056); Dockerfile `BUILD_SHA*` glob not built locally (no docker here). Group rose mark shows under most weeks for big groups (LOGIC §9a limit).
+
 ## 2026-11-20 · multi-store critic round
 stock-watch, branch `feature/multistore` (92e6c02, a32cf51, 82ebbfe + this entry; not pushed, not deployed).
 - ISO-1 (P1): migration is once per `DATA_DIR` (a marker in any `stores/<id>/` = done for good) and goes to the store `SHOPIFY_STORE` / `PERFORMITY_BRAND_ID` names, else the first (`stores.home()`). A later top-level `restore.json` or a store-list change no longer moves files into another store or crash-loops the start.
