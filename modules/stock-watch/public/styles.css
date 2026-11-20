@@ -701,3 +701,18 @@ table.fixed td:first-child { max-width: none; }
   .wk-c:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .wk-row { min-height: 44px; }
 }
+/* targets on groups (SW-042): light, sales so far of target, month-end forecast; admin edits in the cell */
+.tg { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; white-space: nowrap; }
+.tg-l { display: inline-flex; align-items: center; gap: 4px; }
+.tg-f { font-size: 12px; color: var(--soft); }
+.tg-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.tg-dot.green { background: var(--ok); } .tg-dot.amber { background: #D98A1E; } .tg-dot.red { background: var(--lost); }
+.tg-e { font-size: 12px; margin-left: 4px; }
+.tg-ed { display: inline-flex; align-items: center; gap: 4px; }
+.tg-in { width: 104px; height: 30px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; font: inherit; font-size: 13px; }
+@media (max-width: 760px) {
+  .tg-m .tg-set, .tg-m .tg-e, .tg-m .btn { min-height: 44px; min-width: 44px; }
+  .tg-m .tg-in { height: 44px; width: 120px; font-size: 16px; }
+  .tg-m .tg { white-space: normal; }
+}
+.tg .linkbtn, .tg-set { display: inline-flex; padding: 2px 4px; color: var(--brand); }

@@ -64,4 +64,25 @@ test('GET /api/review needs login; a viewer can read it', async (t) => {
   assert.equal((await s.call('GET', '/api/review', { pass: VIEW })).status, 200);
 });
 
-module.exports = { start, ADMIN, VIEW };
+test('targets (SW-042): admin sets a monthly target per group; viewer reads, never writes; cross-site refused', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: ADMIN, VIEW_PASSWORD: VIEW }); t.after(s.stop);
+  const g = (await s.call('GET', '/api/groups?lens=type&days=month', { pass: ADMIN })).body.groups[0];
+  assert.ok(g && g.key, 'demo has categories');
+  assert.equal((await s.call('GET', '/api/targets?lens=nope', { pass: ADMIN })).status, 400);
+  const empty = await s.call('GET', '/api/targets?lens=type', { pass: VIEW });
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.body.rows, {});
+  assert.equal((await s.call('POST', '/api/targets', { pass: VIEW, body: { lens: 'type', key: g.key, amount: 100000 } })).status, 403, 'viewer can never write');
+  assert.equal((await s.call('POST', '/api/targets', { pass: ADMIN, headers: { 'sec-fetch-site': 'cross-site' }, body: { lens: 'type', key: g.key, amount: 100000 } })).status, 403, 'CSRF');
+  assert.equal((await s.call('POST', '/api/targets', { pass: ADMIN, body: { lens: 'type', key: g.key, amount: -1 } })).status, 400);
+  const ok = await s.call('POST', '/api/targets', { pass: ADMIN, body: { lens: 'type', key: g.key, amount: 100000 } });
+  assert.equal(ok.status, 200);
+  const r = (await s.call('GET', '/api/targets?lens=type', { pass: VIEW })).body;
+  const row = r.rows[g.key];
+  assert.equal(row.target, 100000);
+  assert.equal(row.sold, Math.round(g.sold), 'month to date = the This month group row');
+  assert.ok(['green', 'amber', 'red'].includes(row.light));
+  assert.ok(row.forecastFull >= row.forecast);
+  assert.equal((await s.call('PUT', '/api/targets', { pass: ADMIN, body: {} })).status, 405);
+  assert.equal((await s.call('POST', '/api/targets', { pass: ADMIN, body: { lens: 'type', key: g.key, amount: 0 } })).body.removed, true);
+});

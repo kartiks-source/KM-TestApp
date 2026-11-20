@@ -697,6 +697,7 @@
     ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
     { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
     { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
+    ...(window.SW_TARGETS ? [SW_TARGETS.col(lens, { canEdit: !viewOnly(), rerender: () => { if (state.view === 'products' && state.lens === lens) render(); } })] : []),   // SW-042
     { k: 'trendPct', label: 'Trend', tip: 'Units sold per week by the group’s products, last 8 weeks (rose = one or more of them out part of that week); % = the group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendCell, val: (g) => g.trendPct ?? -999 },
   ];
   function groupView() {
@@ -717,7 +718,7 @@
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
         <header><h3><span class="pname">${esc(g.label)}</span></h3>${mspark(g)}<div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
-        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
+        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>${window.SW_TARGETS ? SW_TARGETS.card(g) : ''}`)}</div>
       <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
   }
   function openGroup(key) {

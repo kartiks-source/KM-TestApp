@@ -435,6 +435,26 @@ Each group row adds up its variants' rows, with the same rules as the Products p
 - Needs only `read_products`, which the app already has.
 - Demo data gets product IDs, tags and collections derived from the Sammsara catalog's product types and names (section 10).
 
+## 9c. Targets on groups, stock-aware (SW-042, `src/targets.js`, `public/targets.js`)
+
+Products → View: Categories / Collections / Tags / Parent products shows a **Target this month** column (a line on phone cards). Admin sets a monthly sales target (₹) per group in the cell (**Set target** / **Edit**); the same target counts every month until changed or removed. View-only sees it, can't change it.
+
+| Number | Rule |
+|---|---|
+| Sold so far | the group's *Sold* (§5) from the 1st of this month, store time, until now: the This month period on the saved settings (trial values don't move it), whatever period the page shows |
+| Lost so far | the group's *Sales lost* (§4) over the same window |
+| Days gone | (now − the 1st 00:00) ÷ 24 h, at least 1 (the first hours of a month would otherwise multiply a few sales by 30) |
+| Forecast (→) | sold so far + sold so far ÷ days gone × days left in the month: where the month ends at this pace, stock-outs and all |
+| Forecast with nothing out | (sold + lost) so far + (sold + lost) ÷ days gone × days left: the same pace if no product had been out of stock |
+| Gap | max(0, target − forecast) |
+| "₹X is stock-outs" | min(gap, forecast with nothing out − forecast): the part of the shortfall that stock-outs explain; the rest is demand |
+| Light | **green** forecast ≥ target · **amber** forecast ≥ 90% of target (within 10%) · **red** below 90% |
+
+- Example: target ₹1,00,000, day 10 of 30, sold ₹30,000, lost ₹10,000 → forecast ₹90,000 (amber), with nothing out ₹1,20,000, gap ₹10,000, all of it stock-outs.
+- Collections and tags overlap (a product in two counts in both), so each group's target stands alone; targets don't add up to a store target.
+- A target stays when its group has no sales this month (₹0 so far, red). Clear and a demo load keep targets (they are settings, not data).
+- When it can be wrong: a straight-line pace ignores weekends, festivals and payday peaks; early in the month one big day swings the forecast.
+
 ---
 
 ## 10. Demo data (not real)
