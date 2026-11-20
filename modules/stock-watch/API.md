@@ -29,6 +29,7 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 | Param | Meaning |
 |---|---|
 | `days` | `7`, `14`, `30`, `60` (default 30), or `month` = from the 1st of this month, store time |
+| `timeZone` | trial IANA zone (`Europe/London`), not saved; unknown = the saved zone (SW-049). The answer's `settings` carries `timeZone` and `tzOffsetMin` = today's offset |
 | `leadDays`, `coverDays`, `safetyDays`, `demandWindowDays`, `smallTopUpDays`, `minPerDay`, `tzOffsetMin` | trial values, not saved; clamped to 0–180, 1–365, 0–60, 7–90, 1–60, 0–100, −720–840. Blank or not a number = the saved value |
 
 ## Open routes
@@ -36,7 +37,7 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 | Method · path | Auth | Answer |
 |---|---|---|
 | `GET /health` | open | 200 `{"ok":true,"version":"1.0.0","sha":"abc1234"}`; 503 `{"ok":false,"error":"…","version","sha"}` while any opened store can't be read or saving fails. `version` = `package.json`; `sha` = the build's commit, 7 characters, or `null` (unstamped build; SW-056, `src/version.js`) |
-| `GET /status` | open | `{ ok, version, sha, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, stores, uptimeMin }`, over **every store**: `stale` / `pullFailing` = any store, `ageMin` = the oldest store's, `lastPull` = the oldest store's last good pull, sizes and counts summed, `source` = the stores' source or `mixed`, `stores` = how many; **503** when any store's last good Shopify pull is over 45 min old (or none 45 min after start), saving fails, or there is no store. Without Shopify, `stale` is always false. No names, ids, keys or error text |
+| `GET /status` | open | `{ ok, version, sha, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, stores, uptimeMin, warnings[{ code, text }], writing }`, over **every store**: `stale` / `pullFailing` = any store, `ageMin` = the oldest store's, `lastPull` = the oldest store's last good pull, sizes and counts summed, `source` = the stores' source or `mixed`, `stores` = how many; **503** when any store's last good Shopify pull is over 45 min old (or none 45 min after start), saving fails, or there is no store. Without Shopify, `stale` is always false. `warnings`: capacity (`store-size`, `rows`, `disk`; LOGIC §14a), never a 503. `writing: false` = another copy holds the data folder (SW-055). No names, ids, keys or error text |
 | `GET /login` | open | sign-in page (302 to `/` when already signed in) |
 | `POST /login` | open | form `password=…` (≤ 4 KB). Right → 303 to `/` with `set-cookie: sw_session=…; HttpOnly; SameSite=Lax; Max-Age=2592000` (`Secure` behind https). Wrong → 401 page; limited → 429 page. No `ADMIN_PASSWORD` → 303 to `/` |
 | `POST /logout` | open | 303 to `/login`, cookie cleared. `GET /logout` → 303 to `/` (does nothing) |
@@ -60,7 +61,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 | `GET /api/product/:id` | report query values; `:id` = variant ID, URL-encoded | `{ ok, id, product, timeline[{t, stock}], dailyUnits[{day, units}], stockouts[] }`; `product` is null for an ID with no rows (still 200). Bad `%` encoding → 400 `Bad product ID in the address` |
 | `GET /api/groups` | none | `{ ok, lenses[], catalog }`: which lenses this catalog can offer |
 | `GET /api/groups?lens=` | `lens` = `product`, `type`, `collection`, `tag`; `all=1` shows catch-all collections; report query values | `{ ok, lens, overlap, groups[{ key, label, n, needOrder, sold, lost, lostProfit, orderValue, excessValue, ids[], trendPct, trendCall }], total, store, hidden[], storeTrendPct, catalog }`. `total` is null for `collection` / `tag` (a product can be in many). Unknown lens → 400 `Unknown group` |
-| `GET /api/settings` | none | `{ ok, store: { id, name }, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify }`. View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion }` (never a secret) |
+| `GET /api/settings` | none | `{ ok, store: { id, name }, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify, ops: { warnings[{ code, text }], readOnly } }` (`readOnly` = why this copy doesn't write, else null; SW-055). View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion }` (never a secret) |
 | `GET /api/onorder` | none | `{ ok, onOrder: { variantId: { qty, eta, at, by } } }` |
 | `GET /api/decide` | none | `{ ok, decisions: { variantId: { d, base, at } } }` |
 | `GET /api/export/reorder.csv` | `filter` = `all` (default), `today`, `week`, `ordered`; `q` = search on name/SKU; report query values | CSV download `reorder-<store-name>-YYYY-MM-DD.csv` (UTF-8 BOM; the store name in lower case, dashes for anything else). Columns in `FORMATS.md` §PO CSV |
@@ -70,7 +71,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 
 | Method · path | Body / params | Answer | Errors |
 |---|---|---|---|
-| `PUT /api/settings` | JSON ≤ 64 KB: any of the trial keys above (clamped), `storeName` (≤ 60 chars), `sheetStockCsv`, `sheetOrderCsv` (≤ 500 chars), `newIngestKey: true` ⚠ rotates the key | `{ ok, settings }` (includes the new key). Each changed value is logged `{at, by, key, old, new}` (key masked) | 400 not a JSON object; 413 |
+| `PUT /api/settings` | JSON ≤ 64 KB: any of the trial keys above (clamped), `storeName` (≤ 60 chars), `timeZone` (IANA name or `+05:30`; an old `tzOffsetMin` alone becomes a zone, 330 = `Asia/Kolkata`), `sheetStockCsv`, `sheetOrderCsv` (≤ 500 chars), `newIngestKey: true` ⚠ rotates the key | `{ ok, settings }` (includes the new key). Each changed value is logged `{at, by, key, old, new}` (key masked) | 400 not a JSON object or an unknown time zone; 413 |
 | ⚠ `POST /api/onorder` | JSON ≤ 256 KB `{ items: [{ id, qty, eta }], by? }`; `qty` 1–1,000,000 whole; `eta` `YYYY-MM-DD` (end of that day, store time) or ms, within −1…+365 days; `qty: 0` or `clear: true` removes; ≤ 500 items | `{ ok, saved, removed }` | 400 `Nothing to mark`, bad qty/date/id, not JSON; 405 other methods |
 | ⚠ `POST /api/decide` | JSON ≤ 16 KB `{ id, decision }`; `decision` = `keep` \| `drop` \| `clear`, or null/'' to remove | `{ ok }` or `{ ok, removed }` | 404 `No such product` (not in the report); 400 bad decision, not JSON, over 5,000 decisions; 405 other methods |
 | ⚠ `POST /api/import?kind=stock\|order` | CSV text (≤ 25 MB) with a header row; `FORMATS.md` §CSV | `{ ok, read, added, skipped, skips: { badTime, badNumber, noId, tooOld } }`. On a demo store the demo goes first, with its Mark ordered and decisions (always; there is no option, SW-007) | 400 missing columns (named); 409 Shopify connected or a pull running; 413 |
@@ -85,7 +86,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 |---|---|---|---|---|
 | `GET /api/digest` | view | `role` = `ceo`, `founder`, `ops`, `buyer`, `marketing`, `finance`, `warehouse`, or none / `all` = everyone | `{ ok, role, roleName, title, lines[], link, text }` (≤ 6 lines + link) | 400 unknown role |
 | `GET /api/digest.txt` | view | same | the text (`text/plain`) | 400 unknown role |
-| `GET /api/digest/settings` | view | none | `{ ok, webhook: { set, host }, tzOffsetMin, hour, roles[], paused, scheduled[{ role, name, cadence, host, own }], log[] }` (last 20 sends; never a webhook URL) | — |
+| `GET /api/digest/settings` | view | none | `{ ok, webhook: { set, host }, tzOffsetMin, timeZone, hour, roles[], paused, scheduled[{ role, name, cadence, host, own }], log[] }` (last 20 sends; never a webhook URL) | — |
 | `PUT /api/digest/settings` | admin | JSON ≤ 64 KB `{ hour?: 0–23, roles?: [...], paused?: bool }`; roles without a scheduled digest (buyer, warehouse, unknown) dropped | same as GET; each changed value goes to the store's change log (`digest.hour` / `digest.roles` / `digest.paused`, SW-029) | 400 bad hour, not JSON, or any `webhookUrl` (env only) |
 | ⚠ `POST /api/digest/send` | admin | `role` (none = every ticked role) | 200 `{ ok, sent[{ at, role, trigger, ok, status, error }] }`; 502 with `error` when any send failed | 400 no roles ticked; 400 no webhook (`DIGEST_WEBHOOK_URL` / `_<ROLE>`) |
 

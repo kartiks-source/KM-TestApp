@@ -15,6 +15,7 @@
  * store's tick inside scope.run (server.js), one store at a time; every digest names its store.
  */
 const scope = require('./scope');
+const TZ = require('./tz');   // the store's time zone (SW-049)
 const store = require('./store');
 const R = require('../public/roles');
 const digest = require('./digest');
@@ -51,7 +52,7 @@ function checkUrl(u) {
 function publicConf() {
   const c = conf(), u = env('DIGEST_WEBHOOK_URL');
   return {
-    webhook: { set: anyWebhook(SCHEDULED), host: hostOf(u) }, tzOffsetMin: store.load().settings.tzOffsetMin, hour: c.hour, roles: c.roles, paused: c.paused,
+    webhook: { set: anyWebhook(SCHEDULED), host: hostOf(u) }, tzOffsetMin: TZ.offsetAt(TZ.zoneOf(store.load().settings), Date.now()), timeZone: TZ.zoneOf(store.load().settings), hour: c.hour, roles: c.roles, paused: c.paused,
     scheduled: SCHEDULED.map((r) => ({ role: r, name: R.ROLES[r].name, cadence: R.ROLES[r].digest, host: hostOf(webhookUrl(r)), own: !!env(`DIGEST_WEBHOOK_URL_${r.toUpperCase()}`) })),
     log: c.log.slice(-20).reverse(),
   };
@@ -144,7 +145,7 @@ async function send(role, ctx, trigger, now = Date.now(), note = '') {
 function due(now = Date.now()) {
   const c = conf();
   if (c.paused) return [];
-  const local = new Date(now + store.load().settings.tzOffsetMin * 60e3);
+  const local = TZ.local(now, TZ.zoneOf(store.load().settings));   // the store's wall clock, daylight saving included
   const since = (local.getUTCHours() - c.hour + 24) % 24;   // whole hours since the set hour
   if (since >= CATCH_UP_HOURS) return [];
   const slot = new Date(local.getTime() - since * 36e5);

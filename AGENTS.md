@@ -2,12 +2,32 @@
 
 This repo holds small, standalone Catalys tools ("modules"). They're vibe-coded fast, but built so each can go to production without a rewrite. Every agent (Orca, Claude Code, Codex, anything else) reads this file first.
 
+## Read only what the task needs (SW-058)
+
+| Task | Read first (stock-watch paths under `modules/stock-watch/`) |
+|---|---|
+| Any change | this file, then `modules/stock-watch/AGENTS.md` (files table, status) |
+| A number on the page is questioned / engine change | `LOGIC.md` index at its top → that section only; `src/engine.js`, `test/engine.test.js` |
+| New or changed route | `API.md`; `server.js` (`storeApi`); `src/access.js` (view-only gate); `SECURITY.md` endpoints table |
+| Stored file or row format | `FORMATS.md`; `src/store.js`, `src/rows.js` |
+| Secrets, auth, logs | `SECURITY.md`; `src/keys.js`, `src/log.js` |
+| Deploy, backups, restore, incidents, container | `docs/RUNBOOK.md`; root `Dockerfile`, `modules/stock-watch/scripts/entrypoint.sh` |
+| UI change | `public/app.js` (+ the feature's own `public/*.js`), `public/styles.css` tokens at the top; ADR-0006, ADR-0013; `test/ui-*.test.js` |
+| Dates, days, hours | `public/tz.js` (LOGIC §0a); never a fixed +5:30 |
+| What to build next / done criteria | `docs/BACKLOG.md`, `docs/DEFINITION-OF-DONE.md` |
+| Why something is the way it is | `docs/adr/README.md` → the ADR; `docs/DECISIONS.md` |
+| Recent history | `docs/DEVLOG.md` (newest 15; older in `docs/devlog/`) |
+| Critic round | `docs/ORCA.md` prompts; save reports in `docs/reviews/` |
+
+Fast checks: `npm run test:agent` (dots, failures only). `.ignore` keeps `node_modules`, data and screenshots out of searches.
+
 ## Layout
 
 ```
 AGENTS.md                 this file: rules for every module
 CLAUDE.md                 imports this file for Claude Code
-docs/DEVLOG.md            what changed, when, and why (newest first)
+docs/DEVLOG.md            what changed, when, and why (newest first; newest 15, older in docs/devlog/<YYYY-MM>.md via npm run devlog:rotate)
+docs/reviews/             saved critic reports (README says how)
 docs/DECISIONS.md         decisions that apply across modules
 docs/ORCA.md              how to run several agents in parallel with Orca
 docs/RUNBOOK.md           deploy, rollback, backups, restore, what to do when something breaks

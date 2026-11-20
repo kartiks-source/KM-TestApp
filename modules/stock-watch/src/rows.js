@@ -79,23 +79,25 @@ function toNum(x) {
 const validDate = (y, mo, d, h = 0, mi = 0, se = 0) => mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && h <= 23 && mi <= 59 && se <= 59
   && new Date(Date.UTC(y, mo - 1, d)).getUTCDate() === d;   // 31/02 is not a date
 
+const TZ = require('./tz');   // the store's time zone (SW-049)
+
 /**
  * Parse a time. Returns ms or null.
  * - ISO "2026-11-17T10:22:31+05:30", "2026-11-17 10:22:31", "2026-11-17" (date only = 00:00 store time)
  * - dd/mm/yyyy [hh:mm[:ss]] (Indian order; US mm/dd/yyyy like 11/15/2026 is rejected, not guessed)
  * - Sheets serial number
- * No zone given → the store's time zone (`tzOffsetMin`, minutes east of UTC; India = 330).
+ * No zone given → the store's time zone (src/tz.js: an IANA name with daylight saving, or minutes east of UTC;
+ * India = 330). A clock time skipped by daylight saving reads as the moment the clock jumps.
  */
-function toTime(x, tzOffsetMin = 330) {
+function toTime(x, zone = 330) {
   if (x instanceof Date) return Number.isNaN(+x) ? null : +x;
   const s = clean(x);
   if (!s) return null;
-  const tz = tzOffsetMin * 60e3;
-  if (/^\d{5}(\.\d+)?$/.test(s)) return Math.round((+s - 25569) * DAY - tz);   // Sheets serial (store time)
+  if (/^\d{5}(\.\d+)?$/.test(s)) return TZ.fromLocal(Math.round((+s - 25569) * DAY), zone);   // Sheets serial (store time)
   const dm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if (dm) {
     const [d, mo, y, h, mi, se] = [+dm[1], +dm[2], +dm[3], +(dm[4] || 0), +(dm[5] || 0), +(dm[6] || 0)];
-    return validDate(y, mo, d, h, mi, se) ? Date.UTC(y, mo - 1, d, h, mi, se) - tz : null;
+    return validDate(y, mo, d, h, mi, se) ? TZ.fromLocal(Date.UTC(y, mo - 1, d, h, mi, se), zone) : null;
   }
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i);
   if (iso) {
@@ -103,7 +105,7 @@ function toTime(x, tzOffsetMin = 330) {
     if (!validDate(y, mo, d, h, mi, se)) return null;
     const base = Date.UTC(y, mo - 1, d, h, mi, se) + Math.round(+(iso[7] || 0) * 1000);
     const z = iso[8];
-    if (!z) return base - tz;
+    if (!z) return TZ.fromLocal(base, zone);
     if (/^z$/i.test(z)) return base;
     const zm = z.match(/^([+-])(\d{2}):?(\d{2})$/);
     return base - (zm[1] === '-' ? -1 : 1) * (+zm[2] * 60 + +zm[3]) * 60e3;
@@ -155,14 +157,14 @@ const blankSkips = () => ({ badTime: 0, badNumber: 0, noId: 0, tooOld: 0 });
 
 /**
  * CSV text → rows of one kind. Returns { rows, skipped, skips: { badTime, badNumber, noId, tooOld } }.
- * opts: now, tzOffsetMin (store time zone), keepDays (rows older than this are skipped as tooOld),
+ * opts: now, timeZone (the store's zone, src/tz.js; the older tzOffsetMin minutes still work), keepDays (rows older than this are skipped as tooOld),
  *       flow (Shopify Flow: no header needed; a missing or unreadable time is stamped `now`).
  * CSV / Sheet files must start with a header row naming the required columns, else this throws
  * an Error with status 400 and `missing` (the column names).
  */
 function fromCsv(text, kind, opts = {}) {
   if (typeof opts === 'number') opts = { now: opts };
-  const now = opts.now ?? Date.now(), tz = opts.tzOffsetMin ?? 330, flow = !!opts.flow;
+  const now = opts.now ?? Date.now(), tz = opts.timeZone ?? opts.tzOffsetMin ?? 330, flow = !!opts.flow;
   const skips = blankSkips();
   const grid = parseCsv(text, sniffDelimiter(text));
   if (!grid.length) return { rows: [], skipped: 0, skips };

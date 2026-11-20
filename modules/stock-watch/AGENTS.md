@@ -35,6 +35,10 @@ Google Sheet CSV / upload ───┘
 | `FORMATS.md` | every row format and stored file; `store.json` `schemaVersion` and how to migrate (SW-047) |
 | `.env.example` | every variable the code reads, blank |
 | `src/version.js` | app version (`package.json`) + build commit (`RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or the `BUILD_SHA` file from `npm run stamp`) for `/health`, `/status`, `/api/report` `app` and the footer (SW-056) |
+| `src/tz.js` → `public/tz.js` | the store's time zone (SW-049, LOGIC §0a): the ONE place for store-time days, hours, months and stamps; IANA zone with daylight saving; `zoneOf(settings)` |
+| `src/log.js` | one-line JSON logs `{time, level, msg, store, …}` (SW-054); `captureConsole()` makes every `console.*` line JSON; every line scrubbed of `shpat_`/Bearer/X-Api-Key/`key=`; request line per API call (path only); boot line names set variables, never values |
+| `src/lock.js` | one app per `DATA_DIR` (SW-055): `instance.lock` with a 30 s heartbeat, taken over after 2 min; without it the server refuses writes (503) and starts no work |
+| `src/capacity.js` | capacity warnings (25 MB, 150k rows, disk 80%) for `/status` and Data (`public/ops.js`), LOGIC §14a |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min (one store at a time, `pullAll`), demo loader; `openStore` / `inStore` / `eachStore` run work for one store |
 | `src/scope.js` | which store the current work is for: `run(id, fn)`, `id()`, `dir()` → `DATA_DIR/stores/<id>`; store id rule (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`); `useDir()` for tests only |
 | `src/stores.js` | the store registry (ADR-0015): `list()`, `refresh()` (Performity brand list, last good one kept in `DATA_DIR/stores.json`), `pick(?store, cookie)` → id or 404/503 |
@@ -59,6 +63,7 @@ Google Sheet CSV / upload ───┘
 | `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
 | `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (the phone bar also shows the role and holds the role list, `#role-menu-m`, filled by `SW_ROLES.paint()`) (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
 | `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
+| `public/tz.js`, `public/ops.js`, `public/trial-input.js` | store time helper (SW-049); Data notice for capacity / read-only (SW-055); number boxes that keep raw text, read on Enter / leave, hint when invalid (SW-057; browser test `test/ui-trial.test.js`) |
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
@@ -83,7 +88,7 @@ Google Sheet CSV / upload ───┘
 
 ## Railway variables now
 
-`ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (so the app can write to the volume), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
+`ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (the container starts as root; `scripts/entrypoint.sh` chowns `/data` to `node` once and drops to `node` with su-exec, SW-053), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
 
 ## Running in production
 

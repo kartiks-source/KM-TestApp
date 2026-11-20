@@ -24,6 +24,7 @@ const onorder = require('./onorder');
 const decide = require('./decide');
 const { parse, writeAtomic: writeSide } = require('./sidefile');
 const scope = require('./scope');
+const TZ = require('./tz');   // the store's time zone (SW-049)
 
 /* the side files a backup carries, by file name (<store folder>/<name>) */
 const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
@@ -32,7 +33,9 @@ const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
 const dir = () => path.join(scope.dir(), 'backups');
 const storeFile = () => path.join(scope.dir(), 'store.json');
 const restoreFile = () => path.join(scope.dir(), 'restore.json');
-const KEEP = 14;
+/** KEEP_DAYS env (SW-055): how many of each kind to keep, 1–365, default 14 (dailies: one per day, so that many days back). */
+const keepFrom = (v) => (/^\d+$/.test(String(v ?? '').trim()) ? Math.min(365, Math.max(1, Number(v))) : 14);
+const KEEP = keepFrom(process.env.KEEP_DAYS);
 const DAILY = /^store-\d{8}\.json$/;
 const EVENT = /^store-\d{8}-\d{6}-[a-z0-9-]+\.json$/;
 
@@ -61,9 +64,9 @@ function writeAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
-/** Local date/time stamps at the store's time-zone offset (minutes). */
-function stamp(t, offMin) {
-  const iso = new Date(t + (offMin || 0) * 60e3).toISOString();
+/** Store-time date/time stamps (zone: src/tz.js; settings → TZ.zoneOf). */
+function stamp(t, zone) {
+  const iso = TZ.local(t, zone ?? 0).toISOString();
   return { day: iso.slice(0, 10).replace(/-/g, ''), time: iso.slice(11, 19).replace(/:/g, '') };
 }
 
@@ -81,7 +84,7 @@ function rotate() {
 function snapshot(why, now = Date.now()) {
   const d = store.load();
   if (!worthKeeping(d)) return null;
-  const s = stamp(now, d.settings.tzOffsetMin);
+  const s = stamp(now, TZ.zoneOf(d.settings));
   const file = path.join(dir(), `store-${s.day}-${s.time}-${String(why).toLowerCase().replace(/[^a-z0-9-]+/g, '-')}.json`);
   writeAtomic(file, text());
   rotate();
@@ -93,7 +96,7 @@ function snapshot(why, now = Date.now()) {
 function daily(now = Date.now()) {
   const d = store.load();
   if (!worthKeeping(d)) return null;
-  const file = path.join(dir(), `store-${stamp(now, d.settings.tzOffsetMin).day}.json`);
+  const file = path.join(dir(), `store-${stamp(now, TZ.zoneOf(d.settings)).day}.json`);
   if (fs.existsSync(file)) return null;
   writeAtomic(file, text());
   rotate();
@@ -109,12 +112,12 @@ function daily(now = Date.now()) {
 function restorePending(now = Date.now()) {
   const RESTORE = restoreFile(), FILE = storeFile(), DIR = dir(), DATA_DIR = scope.dir();
   if (!fs.existsSync(RESTORE)) return null;
-  let ok = false, off = 330;
+  let ok = false, off = TZ.DEFAULT_ZONE;
   try {
     const d = JSON.parse(fs.readFileSync(RESTORE, 'utf8'));
     ok = !!d && Array.isArray(d.stock) && Array.isArray(d.orders) && !!d.settings && typeof d.settings === 'object'
       && !(d.schemaVersion > store.SCHEMA_VERSION);   // a newer app's backup: this one would drop what it doesn't know (SW-047)
-    if (ok && Number.isFinite(d.settings.tzOffsetMin)) off = d.settings.tzOffsetMin;
+    if (ok) off = TZ.zoneOf(d.settings);
   } catch { ok = false; }
   if (!ok) {
     const bad = `${RESTORE}.rejected-${now}`;
@@ -169,11 +172,11 @@ function prepare() { try { return restorePending(); } catch (e) { console.error(
 /** GET /api/export/backup.json (call only after the login check). Returns true when it answered. */
 function route(req, res, url) {
   if (url.pathname !== '/api/export/backup.json' || req.method !== 'GET') return false;
-  const s = stamp(Date.now(), store.load().settings.tzOffsetMin);
+  const s = stamp(Date.now(), TZ.zoneOf(store.load().settings));
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store',
     'content-disposition': `attachment; filename="stock-watch-store-${s.day}-${s.time}.json"` });
   res.end(text());
   return true;
 }
 
-module.exports = { start, prepare, route, snapshot, daily, rotate, restorePending, text, dir, KEEP, SIDES };
+module.exports = { start, prepare, route, snapshot, daily, rotate, restorePending, text, dir, KEEP, keepFrom, SIDES };

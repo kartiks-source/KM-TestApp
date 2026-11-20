@@ -68,6 +68,19 @@ Deploys are a local `railway up` (no auto-deploy from GitHub yet; ADR-0012):
 
 Roll back: Railway dashboard → Deployments → the previous deployment → Redeploy. The volume is not touched by a deploy or a rollback. **Data written by a newer version:** `store.json` carries `schemaVersion` (SW-047, `FORMATS.md`); an older build refuses to start on a file with a higher schemaVersion (log: `… is schema N, written by a newer version of the app …`) rather than overwrite what it doesn't know. Today every release reads and writes schema 1, so rolling back within 1.x is safe; when a release bumps it, its CHANGELOG says so, and rolling back past it means restoring a backup taken before that deploy.
 
+### Container user (SW-053)
+
+The image starts as root only long enough for `/app/entrypoint.sh` to hand `/data` to the `node` user (once: only while `/data` isn't owned by `node`), then runs the app as `node` via `su-exec`. `RAILWAY_RUN_UID=0` stays set (it makes Railway start the container as root so the hand-over can happen).
+
+**Verify after the first deploy with this image:**
+1. Railway → Deployments → Logs: one `entrypoint: giving /data to user node (once)` line on the first boot only, then the JSON `"msg":"boot"` line.
+2. `railway ssh` (or the service shell): `ps -o user,args | grep server.js` shows `node`, not `root`; `ls -ln /data` shows uid 1000.
+3. `/health` 200 with the version you meant; on Data, Save settings works (proves `node` can write the volume).
+
+**Roll back:** Railway → Deployments → the previous deployment → Redeploy. The older image runs as root (`RAILWAY_RUN_UID=0`), which reads the node-owned files fine; nothing to undo on the volume. If the new one can't write (`/health` 503 `Saving data fails`): roll back, then check the volume's mount path is `/data`.
+
+**Update the base image:** the `FROM` line pins `node:<version>-alpine@sha256:<digest>`. Find the newest 22.x tag and its digest: `curl -s "https://hub.docker.com/v2/repositories/library/node/tags?name=22.&page_size=50" | jq -r '.results[] | select(.name|test("^22\\.[0-9]+\\.[0-9]+-alpine$")) | "\(.name) \(.digest)"' | head -1` (or `docker buildx imagetools inspect node:22-alpine`). Change tag and digest together, run `npm test` (it checks the pin's shape), deploy, verify as above.
+
 ## Backups
 
 **1. App backups (on the volume, automatic).** `src/backup.js` writes, for each store, in `/data/stores/<id>/`:
@@ -78,6 +91,8 @@ Roll back: Railway dashboard → Deployments → the previous deployment → Red
 | `backups/store-YYYYMMDD-HHMMSS-before-clear.json` | just before Clear, demo → live, or an import that replaces demo data | newest 14 |
 | `backups/store-YYYYMMDD-HHMMSS-before-demo.json` | just before demo data replaces real data | newest 14 |
 | `backups/store-YYYYMMDD-HHMMSS-before-restore.json` | just before a restore (below) | newest 14 |
+
+**How many:** `KEEP_DAYS` (Railway variable, 1–365, default 14) of each kind; for the dailies that is the number of days back. Raise it only with disk to spare (each file is a full copy; the Data page warns at 80% full).
 
 An empty store and demo data are never backed up (nothing to lose; demo reloads would push real snapshots out). Each file is a full copy of `store.json` **plus `sideFiles`: the Mark-ordered records (`onorder.json`) and slow-seller decisions (`decisions.json`)**, which live next to it on the volume (critic r2 X1: lost PO marks put ordered lines back in Order today, the duplicate PO SW-012 exists to stop). The export below carries them too. So 28 files × the store's size must fit on the volume: at 50 MB (ADR-0003's move trigger) that is 1.4 GB.
 
@@ -129,6 +144,8 @@ From a Railway volume backup all of these come back together. From an app backup
 
 ## When something is wrong
 
+**Logs** (SW-054) are one JSON line each: `{time, level, msg, store, …}`. In Railway → Deployments → Logs, filter on `"level":"error"`, `"msg":"boot"` (version, key source, which variables are set) or a store id. Every API call has one `"msg":"request"` line (method, path, status, ms). Tokens are scrubbed to `***`.
+
 | Symptom | Check | Fix |
 |---|---|---|
 | Uptime monitor: `/status` 503 | Data page: last pull, last error; `ALERT_WEBHOOK_URL` channel | Same as "Shopify data stale" below; `saveOk: false` → same as "Disk full" |
@@ -137,6 +154,8 @@ From a Railway volume backup all of these come back together. From an app backup
 | Numbers look empty after a deploy | Data page row counts; `ls -l /data` | Volume not attached at `/data`, or Clear was pressed: restore (above) |
 | Shopify data stale | Data page: last pull, last error; logs `shopify pull failed:` | Key expired or scopes missing: see SECURITY.md (rotate Shopify key). Press Sync now on the Data page |
 | Flow rows not arriving | Flow run history in Shopify; Data page last row time | Ingest key rotated → update the `X-Ingest-Key` header in both Flows |
+| Data page "Read-only" / writes get 503 "Another copy of the app" | `/status` `writing`; Railway: two deployments running? `cat /data/instance.lock` | Wait: the new copy takes over when the old one stops (at once) or goes quiet (2 min). Stuck: stop the old deployment. Never delete the lock while two copies run |
+| Data page "Running out of room" | `/status` `warnings` | Over 25 MB or 1,50,000 rows: plan SW-046 (ADR-0003). Disk over 80%: lower `KEEP_DAYS`, delete `*.rejected-*` / `*.corrupt-*` files, or grow the volume |
 | Disk full | Railway volume usage; `du -sh /data/*` | Delete old `restore.json.rejected-*` files; grow the volume; review ADR-0003 triggers |
 | `Refusing to start: onorder.json can't be read` (or `decisions.json`) | `ls -l /data/stores/*/` for `onorder.json.corrupt-*` | The file is damaged and there is no good `.bak`. Nothing was overwritten. Restore the newest backup of that store (above: its `sideFiles` bring the marks back), or move the bad file aside (`mv /data/stores/<id>/onorder.json /data/stores/<id>/onorder.json.bad`) to start with no marks, then re-mark open POs |
 | Restore did nothing | Logs for `restore:` lines; `ls /data/stores/<id>` | File in the wrong place (must be `/data/stores/<id>/restore.json`; the top-level `/data/restore.json` is ignored) or rejected (`restore.json.rejected-*`): check it's a store export |

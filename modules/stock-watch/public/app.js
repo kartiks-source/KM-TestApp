@@ -37,8 +37,10 @@
   const moneyFull = (x) => `₹${inr.format(Math.round(+x || 0))}`;
   const n1 = (x) => (x == null ? '–' : (Math.round(x * 10) / 10).toLocaleString('en-IN'));
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const off = () => (state.settings?.tzOffsetMin ?? 330) * 60e3;
-  const local = (t) => new Date(t + off());
+  /* store time (SW-049): public/tz.js looks the offset up per moment, so daylight saving zones read right */
+  const zone = () => (window.SW_TZ ? SW_TZ.zoneOf(state.settings) : null);
+  const off = (t = Date.now()) => (window.SW_TZ ? SW_TZ.offsetAt(zone(), t) : (state.settings?.tzOffsetMin ?? 330)) * 60e3;
+  const local = (t) => new Date(t + off(t));
   const dt = (t) => { if (!t) return '–'; const d = local(t); return `${String(d.getUTCDate()).padStart(2, '0')} ${MON[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
   const dayLabel = (k) => { const [, m, d] = k.split('-'); return `${+d} ${MON[+m - 1]}`; };
   const dur = (h) => (h >= 48 ? `${n1(h / 24)} days` : `${n1(h)} h`);
@@ -72,7 +74,7 @@
   async function load() {
     if (window.SW_STORES) await SW_STORES.ready;
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
-    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
+    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {}; state.ops = set.ops || null;   // SW-055: capacity + read-only notice on Data
     state.runs = set.runs || [];   // SW-030
     state.role = set.role || 'admin'; state.changes = set.changes || []; state.lastPlanChange = set.lastPlanChange || null;   // SW-029
     header();
@@ -180,7 +182,7 @@
 
   /* ---------- view-only sign-in and the settings change log (SW-029) ---------- */
   const viewOnly = () => state.role === 'view';
-  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key',
+  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', timeZone: 'Time zone', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key',
     'digest.hour': 'Digest hour', 'digest.roles': 'Digest goes to', 'digest.paused': 'Digest paused', 'digest.webhook': 'Digest webhook' };   // digest: SW-028 settings in the same log
   const shortVal = (v) => (v == null || v === '' ? '–' : String(v).length > 40 ? String(v).slice(0, 37) + '…' : String(v));
   const changeText = (c) => `${esc(SETTING_LABEL[c.key] || c.key)}: ${esc(shortVal(c.old))} → <b>${esc(shortVal(c.new))}</b>`;
@@ -205,7 +207,7 @@
     const S = state.settings, R = state.report.settings, t = state.report.totals;
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
-        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
+        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" data-trial="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(window.SW_TRIAL?.typed(`w-${k}`) ?? R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
     return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span>' : ''}</summary>
       <div class="pbody">${fields}${trial ? `<span class="pact">${viewOnly() ? '' : '<button class="btn" id="what-save">Save as default</button>'}<button class="btn ghost" id="what-reset">Reset</button></span>` : ''}</div>${state.lastPlanChange ? `<p class="muted small plast">Last changed ${dt(state.lastPlanChange.at)} by ${esc(state.lastPlanChange.by)} · ${changeText(state.lastPlanChange)}</p>` : ''}</details>`;
   }
@@ -732,14 +734,21 @@
     const lines = [cols.map((c) => c.label), ...productRows().map((p) => cols.map((c) => (c.csv ? c.csv(p) : p[c.k])))].map((l) => l.map(q).join(','));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }));
-    a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    a.download = `products-${isoDay(Date.now())}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
 
-  const TZ = [[330, 'India (UTC+5:30)'], [345, 'Nepal (UTC+5:45)'], [240, 'UAE (UTC+4)'], [180, 'Saudi Arabia (UTC+3)'], [0, 'UK (UTC+0, no daylight saving)'], [480, 'Singapore (UTC+8)'], [-300, 'US Eastern (UTC−5, no daylight saving)'], [-480, 'US Pacific (UTC−8, no daylight saving)']];
+  /* one IANA time zone per store (SW-049): common ones first, then every zone; a fixed offset from an older store stays listed */
+  function tzSelect(s) {
+    if (!window.SW_TZ) return '';
+    const cur = SW_TZ.zoneOf(s), lab = (z, name) => `${name} (${SW_TZ.offsetLabel(z)}${SW_TZ.hasDst(z) ? ', clocks change' : ''})`;
+    const opt = (z, l) => `<option value="${esc(z)}" ${z === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    const common = SW_TZ.COMMON.map(([z]) => z);
+    const extra = common.includes(cur) || SW_TZ.all().includes(cur) ? '' : opt(cur, SW_TZ.fixedMinutes(cur) != null ? `Fixed ${SW_TZ.offsetLabel(cur)} (no daylight saving)` : cur);
+    return `<select id="f-timeZone" data-setting="timeZone">${extra}<optgroup label="Common">${SW_TZ.COMMON.map(([z, n]) => opt(z, lab(z, n))).join('')}</optgroup><optgroup label="All time zones">${SW_TZ.all().filter((z) => !common.includes(z)).map((z) => opt(z, z.replace(/_/g, ' '))).join('')}</optgroup></select>`;
+  }
   function dataView() {
     const s = state.settings, d = state.report.data, src = state.source, sh = state.shopify || {};
     const base = location.origin;
-    const tzOpts = TZ.some(([v]) => v === +s.tzOffsetMin) ? TZ : [...TZ, [+s.tzOffsetMin, `Custom (${s.tzOffsetMin} min)`]];
     const status = src.kind === 'demo' ? 'Demo data: Sammsara’s public product list, with invented stock and sales'
       : sh.source ? (sh.lastError ? `Shopify: ${esc(sh.lastError)}` : sh.lastSync ? `Connected to Shopify · last read ${dt(sh.lastSync)}` : 'Connected to Shopify · first read pending')
         : src.kind === 'live' ? 'Live data' : 'No data yet';
@@ -748,6 +757,7 @@
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
         <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
+      ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>
       <details class="panel fold"><summary><b>Google Sheet</b> <span class="muted">from the Stock Watch sheet</span></summary>
@@ -773,7 +783,7 @@
         <div class="form">
           ${field('storeName', 'Store name', s.storeName || (state.report.store && state.report.store.name) || '', 'Shown in the store picker, the tab title and digests', 'text')}
           ${window.SW_ROLES ? SW_ROLES.field() : ''}
-          <div class="field"><label for="f-tzOffsetMin">Time zone</label><select id="f-tzOffsetMin" data-setting="tzOffsetMin">${tzOpts.map(([v, l]) => `<option value="${v}" ${v === +s.tzOffsetMin ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small>Days and the sales-by-hour pattern follow this</small></div>
+          <div class="field"><label for="f-timeZone">Time zone</label>${tzSelect(s)}<small>Store days, the sales-by-hour pattern, the digest hour and backup dates follow this</small></div>
         </div>
         <details class="fold-in"><summary>Advanced: planning rules</summary>
           <div class="form">${ASSUME.map(([k, label, , , tip]) => field(k, label, s[k], tip)).join('')}</div></details>
@@ -790,7 +800,7 @@
   const manyStores = () => !!(window.SW_STORES && SW_STORES.list().length > 1);
   const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
-  const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" type="${type}" step="any" value="${esc(v)}"><small>${esc(hint)}</small></div>`;
+  const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" ${type === 'number' ? `type="text" inputmode="decimal" autocomplete="off" data-trial="${k}"` : `type="${type}"`} value="${esc(type === 'number' ? window.SW_TRIAL?.typed(`f-${k}`) ?? v : v)}"><small>${esc(hint)}</small></div>`;   // SW-057: numbers keep what you type
 
   /* ---------- product drawer ---------- */
   async function openProduct(id) {
@@ -938,7 +948,7 @@
     if (t.id === 'g-clear') { state.group = null; state.limit.products = 0; render(); return; }
     if (t.id === 'g-all') { state.allColl = !state.allColl; render(); return; }
     if (t.id === 'copy-summary') { copy(summaryText()); return; }
-    if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
+    if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; window.SW_TRIAL?.forget(el.id); setWhat(k, v); return; }
 
     if (t.matches('th[data-k]')) {
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
@@ -996,15 +1006,20 @@
       }
       if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update X-Ingest-Key in both Flow workflows'); await load(); }
       if (t.id === 'save-settings') {
-        const patch = {}; $$('[data-setting]').forEach((i) => { patch[i.dataset.setting] = i.value; });
+        const patch = {}; $$('[data-setting]').forEach((i) => { patch[i.dataset.setting] = i.dataset.trial ? i.value.trim().replace(',', '.') : i.value; });
         await api('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }); toast('Settings saved'); await load();
       }
     } catch (err) { toast(err.message); t.disabled = false; }
   });
   document.addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.what) { render._focus = e.target.id; render._caret = e.target.selectionStart; setWhat(e.target.dataset.what, e.target.value.replace(',', '.')); return; }
+    if (e.target.dataset && e.target.dataset.what) { if (window.SW_TRIAL) return; render._focus = e.target.id; render._caret = e.target.selectionStart; setWhat(e.target.dataset.what, e.target.value.replace(',', '.')); return; }   // SW-057: read on leave / Enter (sw:trial)
     const m = e.target.id && e.target.id.match(/^q-(reorder|stockouts|products)$/);
     if (m) { state.q[m[1]] = e.target.value; state.limit[m[1]] = 0; render._focus = e.target.id; render._caret = e.target.selectionStart; render(); }
+  });
+  document.addEventListener('sw:trial', (e) => {   // SW-057: a what-if typed and read (public/trial-input.js)
+    const el = e.detail.el; if (!el.dataset.what) return;
+    if (document.activeElement === el) render._focus = el.id;
+    setWhat(el.dataset.what, e.detail.value);
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'f-view') { state.lens = e.target.value; state.limit.products = 0; state.limit.groups = 0; render(); return; }

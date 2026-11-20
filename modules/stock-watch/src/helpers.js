@@ -9,6 +9,7 @@
  */
 
 const DAY = 864e5;
+const TZ = require('./tz');   // the store's time zone (SW-049): every date here is a store-time date
 const HOUR = 36e5;
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -23,14 +24,15 @@ function money(x) {
   return `₹${v}`;
 }
 
-const local = (t, offMin) => new Date(t + offMin * 60e3);
-const localDay = (t, offMin) => local(t, offMin).toISOString().slice(0, 10);
+/* zone = the store's time zone (TZ.zoneOf(settings)); numbers (minutes east of UTC) still work */
+const local = (t, zone) => TZ.local(t, zone);
+const localDay = (t, zone) => TZ.dayKey(t, zone);
 /** Midnight at the start of the store day after t (ms). */
-const nextDayStart = (t, offMin) => (Math.floor((t + offMin * 60e3) / DAY) + 1) * DAY - offMin * 60e3;
+const nextDayStart = (t, zone) => TZ.nextDayStart(t, zone);
 /** "Fri 22 Nov" in store time. */
-function dayName(t, offMin = 330) { const d = local(t, offMin); return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
+function dayName(t, zone = TZ.DEFAULT_ZONE) { const d = local(t, zone); return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
 /** "25 Nov" in store time. */
-function dateShort(t, offMin = 330) { const d = local(t, offMin); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
+function dateShort(t, zone = TZ.DEFAULT_ZONE) { const d = local(t, zone); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }
 
 /** The user-facing status label (the same three the page shows; LOGIC.md §6). */
 function statusLabel(s) {
@@ -51,7 +53,7 @@ const tabOf = (s) => (ORDER_TODAY.includes(s) ? 'today' : s === 'Order this week
  *   outLost = this open stock-out's ₹ lost; without it the sentence leaves ₹ out (the Sales lost column has the period's).
  */
 function why(p, S, now, outSince = null, outLost = null) {
-  const off = S.tzOffsetMin ?? 330, lead = +S.leadDays || 0, safety = +S.safetyDays || 0;
+  const off = TZ.zoneOf(S), lead = +S.leadDays || 0, safety = +S.safetyDays || 0;
   const res = { why: '', runsOut: null, orderBy: null, outSince: null, costPerDay: 0 };
   if (p.status === 'Inactive') { res.why = 'Archived or not tracked'; return res; }
   if (p.status === 'Ordered' && p.onOrder && p.onOrder.eta) { res.why = `Ordered · lands ${dateShort(p.onOrder.eta, off)}`; return res; }
@@ -88,7 +90,7 @@ function mktList(p, S) {
 
 /** Text for "back in stock" on the Pause list: the marked order's ETA (SW-012) when there is one. */
 function backIn(p, S, now) {
-  const off = S.tzOffsetMin ?? 330;
+  const off = TZ.zoneOf(S);
   if (p.onOrder && p.onOrder.eta) return p.onOrder.late ? `Late · was due ${dateShort(p.onOrder.eta, off)}` : `Lands ${dateShort(p.onOrder.eta, off)}`;
   if (p.status === 'Slow seller' && !(p.orderQty > 0)) return 'Slow seller · not reordered';   // not on the reorder list, so no date
   return `Not ordered · earliest ${dateShort(now + (+S.leadDays || 0) * DAY, off)}`;
@@ -212,7 +214,7 @@ const PO_HEAD = ['Vendor', 'Product', 'SKU', 'Variant ID', 'Order qty', 'Unit co
  * so each supplier's lines sit together. Unit cost is blank when unknown; Order value then uses price (LOGIC.md §6).
  */
 function poLines(r, { filter, q, vendors = {} } = {}) {
-  const off = r.settings.tzOffsetMin ?? 330;
+  const off = TZ.zoneOf(r.settings);
   const rows = reorderRows(filter === 'ordered' ? r.products : r.reorder, { filter, q });
   const vOf = (p) => (Object.hasOwn(vendors, String(p.id)) ? String(vendors[String(p.id)] || '') : '');
   const sorted = rows.map((p, i) => [p, i]).sort(([a, i], [b, j]) => {
@@ -235,7 +237,7 @@ function csvCell(x) {
 const csvText = (lines, cell = csvCell) => '﻿' + lines.map((l) => l.map(cell).join(',')).join('\n');
 
 /** File name date in the store's time zone. */
-const fileDate = (now, offMin = 330) => localDay(now, offMin);
+const fileDate = (now, zone = TZ.DEFAULT_ZONE) => localDay(now, zone);
 
 module.exports = {
   money, dayName, dateShort, statusLabel, tabOf, why, mktList, backIn, mktSort, decideKind, salesChanged, DECIDE_CHANGE, DECIDE_FLOOR, DECISIONS,

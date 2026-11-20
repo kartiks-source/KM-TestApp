@@ -57,7 +57,7 @@ A CSV or Sheet tab must start with a header row naming at least the required col
 ### Numbers and times
 
 - **Numbers:** `₹`, `Rs`, `INR`, commas and spaces are stripped (`₹1,299.50` → 1299.5). Anything else unreadable skips the row (`badNumber`).
-- **Times:** ISO with zone (`2026-11-17T10:22:31+05:30`, `Z`); ISO without zone or date only (`2026-11-17` = 00:00) is store time (`tzOffsetMin`, India 330); `dd/mm/yyyy [hh:mm[:ss]]` (US `11/15/2026` is rejected, not guessed); a Sheets serial number (store time); `Tue, 17 Nov 2026 04:52:31 GMT`. Impossible dates (31/02) are rejected.
+- **Times:** ISO with zone (`2026-11-17T10:22:31+05:30`, `Z`); ISO without zone or date only (`2026-11-17` = 00:00) is store time (`settings.timeZone`, default `Asia/Kolkata`, daylight saving followed; LOGIC.md §0a); `dd/mm/yyyy [hh:mm[:ss]]` (US `11/15/2026` is rejected, not guessed); a Sheets serial number (store time); `Tue, 17 Nov 2026 04:52:31 GMT`. Impossible dates (31/02) are rejected.
 - **Skips** (reported as `skips` on import): `badTime` (unreadable, or more than 1 day in the future), `badNumber`, `noId`, `tooOld` (older than the 120 days kept).
 - **Duplicates** are stored once. Stock key: `t|variantId|before|now`. Order key: `order|L<line>` when the row has a Shopify line ID, else `order (or t)|variantId|qty`.
 
@@ -137,6 +137,7 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | `restore.json` | a human | a `store.json` to put in place at the next start (`docs/RUNBOOK.md`) | — |
 | `.migrated-from-data-dir.json` | `src/migrate.js`, the home store only; its presence in any store folder means the move is done for good | `{ from: 'DATA_DIR', id, at, files: [{ path, sha256 }] }`: the old single-store files moved here, with their hashes (originals are deleted only while they still match) | no |
 | **top of `DATA_DIR`:** `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key, for every store | no (a new one signs everyone out) |
+| **top of `DATA_DIR`:** `instance.lock` | `src/lock.js` (SW-055) | `{ id, pid, host, startedAt, beatAt }`: the copy that writes; refreshed every 30 s, removed on a clean stop, taken over after 2 minutes without a refresh | no |
 | **top of `DATA_DIR`:** `stores.json` | `src/stores.js` (Performity only) | `{ list: [{ id, name, shop }], at }`: the last good brand list, used while the API is down | no (re-read every 10 minutes) |
 | **top of `DATA_DIR`:** `stores/.migrating-<id>/` | `src/migrate.js` | a half-done copy left by a crash during the move; thrown away and redone on the next start | no |
 
@@ -144,11 +145,13 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 
 ### `store.json` (schema 1)
 
+`settings.timeZone` (SW-049): an IANA zone name or a fixed `+05:30`; when missing, the older `tzOffsetMin` (minutes east of UTC) is read instead (330 = `Asia/Kolkata`). No schema bump: the old field still reads.
+
 ```
 {
   "schemaVersion": 1,
   "settings": {
-    "storeName": "Demo Store", "tzOffsetMin": 330,
+    "storeName": "Demo Store", "timeZone": "Asia/Kolkata", "tzOffsetMin": 330,
     "leadDays": 7, "coverDays": 30, "safetyDays": 3, "demandWindowDays": 28, "smallTopUpDays": 7, "minPerDay": 0.2,
     "ingestKey": "<32 hex>", "ingestKeyAt": 0, "sheetStockCsv": "", "sheetOrderCsv": "", "demoVersion": 0
   },

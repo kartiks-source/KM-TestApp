@@ -196,6 +196,32 @@ Goal: each role sees its one decision first, with less on screen than today. See
 
 ---
 
+## Sprint 3 · D-ops (ops, time zone, agent docs)
+
+**SW-049 · One IANA time zone per store** (S · builder)
+- Accept: one `timeZone` setting per store used by rows, engine, digest and backups; no fixed +5:30 left; LOGIC note; tests in a daylight-saving zone.
+- Status: Partial. Done: `public/tz.js` (+ `src/tz.js`) is the one helper; rows, engine, period, Mark ordered, helpers, digest, backups, demo and the page use it; Settings has a zone picker; old `tzOffsetMin` stores keep working (LOGIC §0a, `test/tz.test.js` at New York and London). Open: the Google Sheet version (`modules/stock-watch-sheets`) still uses the spreadsheet's own zone.
+
+**SW-054 · JSON logs** (S · ops)
+- Accept: one-line JSON logs (time, level, msg, store, fields); a request line per API call without query string or cookies; one boot line naming set variables, never values; tokens scrubbed in every line.
+- Status: Done. `src/log.js`; `server.js` captures `console.*`, so every module's lines are JSON and scrubbed; `test/log.test.js`. RUNBOOK and SECURITY.md updated.
+
+**SW-055 · One copy writes; KEEP_DAYS; capacity warnings** (S · ops)
+- Accept: lock file in `DATA_DIR` (stale after 2 min without heartbeat is taken over; a second copy refuses to write and says why); `KEEP_DAYS` env for backups (default 14); warnings on `/status` and Data at 25 MB, 150k rows, disk 80%.
+- Status: Done. `src/lock.js`, `src/capacity.js`, `public/ops.js`; ADR-0012 updated; LOGIC §14a; `test/ops.test.js`. Limit: the read-only copy still runs the one-time store migration and a pending restore at start (both already done by the first copy in practice).
+
+**SW-053 · Non-root container, pinned base image** (S · ops)
+- Accept: `node:22-alpine` pinned by digest; runs as `node` via an entrypoint that chowns `DATA_DIR` once and drops privileges with su-exec when started as root, else just runs; shell test with stubs; RUNBOOK verify + roll back.
+- Status: Done, not yet deployed. `FROM node:22.23.5-alpine@sha256:1314fb30…` (Docker Hub, 12 Nov 2026); `modules/stock-watch/scripts/entrypoint.sh`; `test/entrypoint.test.sh` (run by `test/entrypoint.test.js`). No docker daemon here: the image was not built locally; first deploy follows RUNBOOK "Container user" to verify.
+
+**SW-057 · Trial inputs keep the raw text** (S · builder)
+- Accept: Advanced planning rules and Reorder what-ifs keep the typed text (no reformat, no caret jump); read on blur / Enter; invalid shows a hint.
+- Status: Done. `public/trial-input.js`; LOGIC §6a; browser test `test/ui-trial.test.js` (in `npm run test:ui`); smoke presses Enter after typing.
+
+**SW-058 · Agent token savings** (S · builder)
+- Accept: doc routing table at the top of AGENTS.md; DEVLOG rotation (older than the newest 15 → `docs/devlog/2026-11.md`, linked); `npm run test:agent` (dot reporter); `.ignore`; LOGIC index; `docs/reviews/` README.
+- Status: Done. `scripts/rotate-devlog.js` (`npm run devlog:rotate`, tested in `test/devlog.test.js`). After the Sprint 3 merge DEVLOG will hold more than 15 entries again: the integrator runs `npm run devlog:rotate` once.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -211,16 +237,10 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-046 | Storage move per ADR-0003 (node:sqlite) + cached report + gzip | L | builder | architect A6, SRE-10 |
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
-| SW-049 | One IANA time zone setting used by rows, engine and Sheet | S | builder | architect A12, SRE-12 |
 | SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
-| SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |
-| SW-054 | JSON logs + request log without query strings; boot config line | S | ops | SRE-11, SRE idea |
-| SW-055 | Single-instance lock file; KEEP_DAYS env; capacity warnings | S | ops | SRE ideas |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
-| SW-057 | Trial input keeps raw text while typing | S | builder | QA F10 |
-| SW-058 | Agent token savings: doc routing table, DEVLOG rotation, `test:agent` dot reporter, `.ignore`, LOGIC index, critic reports saved to `docs/reviews/` | S | builder | tokens T2–T11, process ideas |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |
 | SW-061 | Ads link: live spend on out-of-stock SKUs (needs Performity data) | M | product | product idea |
