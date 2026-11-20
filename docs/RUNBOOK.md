@@ -6,7 +6,7 @@ What to do when something breaks, and how to get data back. For secrets and who 
 
 | What | Where |
 |---|---|
-| App | Railway project `stock-watch`, service `web`, one replica: https://web-production-6dd42b8d.up.railway.app |
+| App | Railway project `stock-watch`, service `web`, one replica: https://web-production-d8d7a911.up.railway.app |
 | Data | Railway volume at `/data`, **one folder per store** (ADR-0015): `/data/stores/<id>/` holds `store.json` (rows, settings, ingest key, Shopify cursor, catalog, change log, digest settings) plus sidecar files `onorder.json` (Mark ordered), `decisions.json` (Decide), `catalog.json` (collections cache). For every store: `/data/secret` (session key), `/data/stores.json` (last good store list). `<id>` = the Performity brand_id, the Key Vault store handle, or `sammsara-demo` / `second-demo`; `GET /api/stores` lists them. Shapes: `modules/stock-watch/FORMATS.md` |
 | App backups | `/data/stores/<id>/backups/` (below) |
 | Health | `GET /health` → `{"ok":true}`, 503 when the store can't be read or saved; `GET /status` → freshness and row counts, 503 when Shopify data is over 45 min old or saving fails (both no login) |
@@ -16,7 +16,7 @@ What to do when something breaks, and how to get data back. For secrets and who 
 
 Railway's health check only restarts a dead deploy; nobody is told. Set up one external monitor (owner, once; free tiers are enough):
 
-1. UptimeRobot (or Better Stack) → new **HTTP(s)** monitor `https://web-production-6dd42b8d.up.railway.app/health`, every 5 minutes, alert when the status is not 200 (UptimeRobot: keyword monitor for `"ok":true` also catches a wrong page). This one means "the app is down or can't save".
+1. UptimeRobot (or Better Stack) → new **HTTP(s)** monitor `https://web-production-d8d7a911.up.railway.app/health`, every 5 minutes, alert when the status is not 200 (UptimeRobot: keyword monitor for `"ok":true` also catches a wrong page). This one means "the app is down or can't save".
 2. A second monitor on `/status`, every 5 minutes, alert when not 200 for 2 checks in a row (one 15-minute pull can run late). This one means "the numbers are stale": the Shopify pull is failing or stuck. Without Shopify connected `/status` stays 200 unless saving fails.
 3. Alert contacts: the owner's phone/email and the team channel. `ALERT_WEBHOOK_URL` already posts pull failures from inside the app; the monitor covers the case where the app itself is down.
 4. Record the monitor's name and who gets alerts in `docs/DEVLOG.md`. Status: not yet set up.
@@ -89,7 +89,7 @@ An empty store and demo data are never backed up (nothing to lose; demo reloads 
 **3. Download now (any time, login needed).** `GET /api/export/backup.json?store=<id>` returns that store as a file (no `?store=`: the first store):
 
 ```bash
-curl -fsS -u "x:$ADMIN_PASSWORD" -o stock-watch-store.json "https://web-production-6dd42b8d.up.railway.app/api/export/backup.json?store=<id>"
+curl -fsS -u "x:$ADMIN_PASSWORD" -o stock-watch-store.json "https://web-production-d8d7a911.up.railway.app/api/export/backup.json?store=<id>"
 ```
 
 Every store, before a risky change: `GET /api/stores` lists the ids; download each.

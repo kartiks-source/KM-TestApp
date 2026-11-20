@@ -54,7 +54,7 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 
 ## Deploy
 
-- Deploy is manual: from a clean, pushed `main` with CI green, run `npm run stamp && railway up && rm modules/stock-watch/BUILD_SHA` at the repo root (the stamp puts the commit on `/health`, `/status` and the footer) (Railway project `stock-watch`, service `web`): https://web-production-6dd42b8d.up.railway.app. Pushing to `main` does **not** deploy (ADR-0012). Steps, rollback, backups and restore: `docs/RUNBOOK.md`. Secrets and auth: `SECURITY.md`.
+- Deploy is manual: from a clean, pushed `main` with CI green, run `npm run stamp && railway up && rm modules/stock-watch/BUILD_SHA` at the repo root (the stamp puts the commit on `/health`, `/status` and the footer) (Railway account Limitless Pixel, project `stock-watch`, service `web`, Singapore; the old project on the shivam account is obsolete): https://web-production-d8d7a911.up.railway.app. Pushing to `main` does **not** deploy (ADR-0012). Steps, rollback, backups and restore: `docs/RUNBOOK.md`. Secrets and auth: `SECURITY.md`.
 - Railway builds the root `Dockerfile`, which copies `modules/stock-watch`.
 - Variables are listed in `modules/stock-watch/AGENTS.md`.
 
