@@ -760,6 +760,7 @@ div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 6
   .sup-name { grid-column: 1 / -1; }
   .sup-row input, .sup-map input, .sup-csv select { min-height: 44px; }
   .mbar .btn.xs { min-height: 44px; }
+}
 /* sprint3 B-review */
 /* weekly review on the Overview (SW-043): numbers left, the products that changed most right; phones stack */
 .weekly .wk-b { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 34%); gap: 8px 24px; align-items: start; }

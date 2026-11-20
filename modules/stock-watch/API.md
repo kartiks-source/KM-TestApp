@@ -1,6 +1,6 @@
 # API: Stock-out Watch (web app)
 
-Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. **Use `/api/v1/…` from other tools** (§v1 below, SW-050): it is the stable contract. The bare `/api/…` paths answer the same and stay for the page, but may change between minor versions; check `CHANGELOG.md`.
+Every HTTP route `server.js` answers, version 1.1.0. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. **Use `/api/v1/…` from other tools** (§v1 below, SW-050): it is the stable contract. The bare `/api/…` paths answer the same and stay for the page, but may change between minor versions; check `CHANGELOG.md`.
 
 ## Conventions
 
@@ -68,7 +68,7 @@ Walk every page: call with no `cursor`, then pass each answer's `next` until it 
 
 | Method · path | Auth | Answer |
 |---|---|---|
-| `GET /health` | open | 200 `{"ok":true,"version":"1.0.0","sha":"abc1234"}`; 503 `{"ok":false,"error":"…","version","sha"}` while any opened store can't be read or saving fails. `version` = `package.json`; `sha` = the build's commit, 7 characters, or `null` (unstamped build; SW-056, `src/version.js`) |
+| `GET /health` | open | 200 `{"ok":true,"version":"1.1.0","sha":"abc1234"}`; 503 `{"ok":false,"error":"…","version","sha"}` while any opened store can't be read or saving fails. `version` = `package.json`; `sha` = the build's commit, 7 characters, or `null` (unstamped build; SW-056, `src/version.js`) |
 | `GET /status` | open | `{ ok, version, sha, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, stores, uptimeMin, warnings[{ code, text }], writing }`, over **every store**: `stale` / `pullFailing` = any store, `ageMin` = the oldest store's, `lastPull` = the oldest store's last good pull, sizes and counts summed, `source` = the stores' source or `mixed`, `stores` = how many; **503** when any store's last good Shopify pull is over 45 min old (or none 45 min after start), saving fails, or there is no store. Without Shopify, `stale` is always false. `warnings`: capacity (`store-size`, `rows`, `disk`; LOGIC §14a), never a 503. `writing: false` = another copy holds the data folder (SW-055). No names, ids, keys or error text |
 | `GET /login` | open | sign-in page (302 to `/` when already signed in) |
 | `POST /login` | open | form `password=…` (≤ 4 KB). Right → 303 to `/` with `set-cookie: sw_session=…; HttpOnly; SameSite=Lax; Max-Age=2592000` (`Secure` behind https). Wrong → 401 page; limited → 429 page. No `ADMIN_PASSWORD` → 303 to `/` |

@@ -2,6 +2,45 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.0 · 2026-11-20 · Sprint 3
+
+Five streams merged: money (suppliers, budget), weekly review, access and security, data import and API, ops.
+
+**Money: suppliers and budget (SW-040, SW-041)**
+- Suppliers: set each supplier's lead time, minimum order (MOQ) and case pack on Data → Suppliers, or upload them as a CSV. A product's supplier is its Shopify vendor unless you set another.
+- Order quantities now round up to the supplier's minimum order and then to whole case packs. The supplier's lead time replaces the store's for its products, and the extra ₹ from rounding up is shown.
+- Reorder → By supplier: one ready-to-send PO draft per supplier (lines, pcs, ₹ total at unit cost), each with Copy and CSV.
+- Reorder → Budget ₹: rows are ranked by profit kept per ₹ spent and a cut line marks what fits. Rows over budget are dimmed and left out of the CSV. Leave it empty and the page works as before.
+
+**Weekly review, targets, lists (SW-043, SW-042, SW-044)**
+- Overview: new 'This week vs last week' panel below the daily chart. It shows sales lost, profit lost, stock-outs, still out, overstock, to reorder and order today, each with its change and an arrow, plus the 5 products whose sales lost changed most. Built from a daily snapshot per store (snapshots.json, kept 400 days, included in backups).
+- Morning digest: Founder and Everyone get one line on sales lost and stock-outs this week vs last week.
+- Products by category / collection / tag / parent product: new 'Target this month' column. Admin sets a monthly ₹ target per group. Each row shows sales so far against the target, the month-end forecast at the current pace, how much of the shortfall is stock-outs, and a green / amber (within 10%) / red light.
+- Products: paste a list of SKUs, names or variant IDs into the search box to filter to them. Shows 'N of M found' and names the entries not found. Admin can save the list by name for the team; everyone can pick it from 'Saved lists'.
+
+**Access and security (SW-051, SW-052, SW-062)**
+- Read-only guard: Shopify queries are now checked by a small GraphQL reader, not a pattern match. Our own Shopify apps that also allow writes are refused with a plain message. For Performity's token, Data says 'Token also allows writes; this app only reads'.
+- Google Sheet sync follows at most 3 redirects, and only to Google. Files over 20 MB are refused, and it gives up after 20 seconds.
+- Data → People (owner only): give someone their own password for one or more stores, as Admin or Viewer. The password is shown once. New password or Remove signs them out at once. They see only their stores, and the change log shows their name. The main passwords still open every store.
+
+**Data import and API (SW-045, SW-050)**
+- Upload a CSV now shows a preview before importing: the file kind, which of your columns feeds each of ours (change any of them with a select), and the first 5 rows as they will be read. Upload is blocked until every needed column is chosen.
+- Shopify admin Products and Orders exports import as they are. Variant ID comes from the SKU, or the ID already used for that SKU. Left out: image-only rows, untracked, draft and archived variants, and cancelled, voided and refunded orders. Price paid is the line price minus the line discount.
+- The column mapping is remembered per store and per set of headers, in mappings.json. New POST /api/import/preview (admin, writes nothing) and ?map= on /api/import.
+- Stock rows keep Vendor from CSV and Shopify exports, for the purchase order CSV.
+- /api/v1 is the stable API for other tools: every /api/<x> also answers at /api/v1/<x> with the same login and checks, and the old paths stay (ADR-0017).
+- New GET /api/v1/summary (headline ₹ and counts only) and GET /api/v1/rows?view=reorder|stockouts|products (pages in a fixed order, cursor, max 500).
+- API: GET /api/review; GET/POST /api/targets; GET/POST /api/lists; GET/PUT /api/suppliers, POST /api/suppliers/map and /api/suppliers/import. Writes are admin only; view-only and cross-site requests get 403.
+
+**Ops (SW-049, SW-053, SW-054, SW-055, SW-057, SW-058)**
+- Time zone: each store picks one time zone (for example Europe/London), and daylight saving is followed. Days, the sales-by-hour pattern, This month and Yesterday, order dates, the digest hour and backup names all use it, and so do the weekly snapshots, monthly targets, import preview and supplier ETAs. Older stores keep their saved offset until a zone is picked.
+- Plan settings and Advanced planning rules keep exactly what you type. The value is read when you press Enter or leave the box, and an invalid number shows a hint instead of changing anything.
+- Data page and /status warn early when a store's data file passes 25 MB, a store passes 1,50,000 rows, or the disk is over 80% full.
+- Only one running copy of the app writes to the data folder. A second copy shows the data, refuses writes and says why, then takes over when the first one stops. It also takes no weekly snapshot and stamps no sign-in time.
+- KEEP_DAYS sets how many backups are kept (default 14).
+- Logs: one JSON line each, with tokens hidden, one line per API call and a startup line naming which settings are set.
+- Container: base image pinned by digest; the app runs as a normal user, not root.
+
 ## 1.0.0 · 2026-11-20 · first production release
 
 1.0.0-rc.1 plus two rounds of six final critics (logic, UI, cross-module, simplicity, security + QA, mobile), and the live Performity connection:

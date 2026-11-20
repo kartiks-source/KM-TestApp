@@ -1,6 +1,6 @@
 # Formats: Stock-out Watch (web app)
 
-Every row format the app reads and every file it writes, version 1.0.0. Parsing: `src/rows.js`. Storage: `src/store.js` and the sidecar modules. Routes: `API.md`. Rules on what the numbers mean: `LOGIC.md` (§1a for parsing and skips).
+Every row format the app reads and every file it writes, version 1.1.0. Parsing: `src/rows.js`. Storage: `src/store.js` and the sidecar modules. Routes: `API.md`. Rules on what the numbers mean: `LOGIC.md` (§1a for parsing and skips).
 
 **schemaVersion (SW-047):** `store.json` carries `"schemaVersion": 1`, written on every save (since 1.0.0-rc.1). Schema 1 is the shape on disk since Sprint 1 (SW-002 catalog, SW-006 `src`); a file without the key is read as schema 0 (the same shape) and saved as 1. `src/store.js`: `SCHEMA_VERSION`, `MIGRATIONS[n]` turns schema n into n + 1, run in order on load. A file with a **higher** schemaVersion (written by a newer app, e.g. after a rollback) is **refused, never rewritten**: the server doesn't start and says to deploy the newer version; a `restore.json` with a higher schemaVersion is rejected. To change a stored shape: bump `SCHEMA_VERSION`, add the migration and its test (`test/store.test.js`), and keep new keys optional where you can. The side files (`onorder.json`, `decisions.json`, `catalog.json`) carry no version; they are plain maps whose entries only gain optional keys.
 
