@@ -20,9 +20,40 @@ export default defineRailway(() => {
     volumeMounts: { "/data": data },
     healthcheck: "/health",
     healthcheckTimeout: 60,
+    /* Every variable the app reads (SECURITY.md, modules/stock-watch/.env.example) is preserve(): this file is
+       omit=delete, so a variable set in the dashboard but missing here would be deleted by `railway config apply`
+       (final critic r2 X1: the live Performity key and URL, and the webhooks). Add a new variable here before
+       setting it in the dashboard. PORT, NODE_ENV and DATA_DIR come from the Dockerfile. */
     env: {
       ADMIN_PASSWORD: preserve(),
+      VIEW_PASSWORD: preserve(),
       RAILWAY_RUN_UID: preserve(),
+      PERFORMITY_POC_API_URL: preserve(),
+      PERFORMITY_POC_API_KEY: preserve(),
+      PERFORMITY_BRAND_ID: preserve(),
+      PERFORMITY_ORIGIN: preserve(),
+      TOKEN_API_URL: preserve(),
+      TOKEN_API_KEY: preserve(),
+      SHOPIFY_STORE: preserve(),
+      SHOPIFY_API_VERSION: preserve(),
+      SHOPIFY_CLIENT_ID: preserve(),
+      SHOPIFY_CLIENT_SECRET: preserve(),
+      SHOPIFY_ACCESS_TOKEN: preserve(),
+      AZURE_KEY_VAULT_URL: preserve(),
+      AZURE_TENANT_ID: preserve(),
+      AZURE_CLIENT_ID: preserve(),
+      AZURE_CLIENT_SECRET: preserve(),
+      ALERT_WEBHOOK_URL: preserve(),
+      DIGEST_WEBHOOK_URL: preserve(),
+      DIGEST_WEBHOOK_URL_CEO: preserve(),
+      DIGEST_WEBHOOK_URL_FOUNDER: preserve(),
+      DIGEST_WEBHOOK_URL_OPS: preserve(),
+      DIGEST_WEBHOOK_URL_BUYER: preserve(),
+      DIGEST_WEBHOOK_URL_MARKETING: preserve(),
+      DIGEST_WEBHOOK_URL_FINANCE: preserve(),
+      DIGEST_WEBHOOK_URL_WAREHOUSE: preserve(),
+      PUBLIC_URL: preserve(),
+      STOP_WAIT_MS: preserve(),
     },
   });
   return project("stock-watch", { resources: [web, data] });

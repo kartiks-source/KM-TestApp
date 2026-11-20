@@ -33,13 +33,14 @@ Both routes are open by design and return no names, keys or error details (`SECU
 
 ## Railway configuration (infrastructure as code)
 
-`.railway/railway.ts` defines the project: service `web` in **Singapore** (`asia-southeast1-eqsg3a`, closest to India and Performity; static outbound IPs are per region, so don't move it after Performity allow-lists our IP), exactly 1 replica, health check `/health`, volume `web-volume` at `/data`. Secrets stay in the Railway dashboard (`preserve()`), never in the file.
+`.railway/railway.ts` defines the project: service `web` in **Singapore** (`asia-southeast1-eqsg3a`, closest to India and Performity; static outbound IPs are per region, so don't move it after Performity allow-lists our IP), exactly 1 replica, health check `/health`, volume `web-volume` at `/data`. Secrets stay in the Railway dashboard (`preserve()`), never in the file. The file is **omit=delete**: a variable set in the dashboard but not listed in `env` is deleted on apply (the Performity key and URL, the webhooks: pulls and digests stop). Every variable in SECURITY.md and `.env.example` is listed as `preserve()`; add a new one to the file before you set it in the dashboard.
 
 ```bash
 npm install --no-save railway   # the IaC SDK, only needed to plan/apply
-railway config plan             # safe preview
-railway config apply            # asks before changing anything
+railway config plan             # safe preview: read it for any variable it would delete
+railway config apply            # asks before changing anything; stop if the plan deletes a variable
 ```
+If the plan deletes a variable, add it to `.railway/railway.ts` as `preserve()` (or compare with `railway config pull --omit-preserved-variables`) and plan again.
 Run `railway` directly (not through `timeout` or another wrapper: the SDK checks the version of the command that launched it).
 
 **Static outbound IP (Pro plan):** Railway → service `web` → Settings → Networking → Enable Static IPs (or `railway outbound-network static-ip enable --service web`), redeploy, send the IPv4 address(es) to Performity for `EXTERNAL_POC_ALLOWED_IPS`.

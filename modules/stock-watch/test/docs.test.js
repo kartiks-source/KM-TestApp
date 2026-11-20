@@ -70,3 +70,16 @@ test('CHANGELOG.md top heading = package.json version', () => {
   assert.ok(top, 'CHANGELOG has a "## <version> · <date>" heading');
   assert.equal(top[1], v);
 });
+
+test('.railway/railway.ts preserves every variable the app reads (omit=delete would wipe it on apply; final r2 X1)', () => {
+  const iac = fs.readFileSync(path.join(ROOT, '.railway', 'railway.ts'), 'utf8');
+  const kept = new Set([...iac.matchAll(/^\s*([A-Z][A-Z0-9_]+):\s*preserve\(\)/gm)].map((m) => m[1]));
+  const fromDockerfile = new Set(['PORT', 'NODE_ENV', 'DATA_DIR', 'BUILD_SHA']);
+  const envVars = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8').split(/\r?\n/)
+    .map((l) => (l.match(/^([A-Z][A-Z0-9_]+)=/) || [])[1]).filter(Boolean);
+  const security = [...fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8').matchAll(/`((?:ADMIN|VIEW|PERFORMITY|TOKEN|SHOPIFY|AZURE|ALERT|DIGEST)_[A-Z0-9_]+)`/g)]
+    .map((m) => m[1]).filter((v) => !v.endsWith('_'));
+  const missing = [...new Set([...envVars, ...security])].filter((v) => !fromDockerfile.has(v) && !kept.has(v));
+  assert.deepEqual(missing, []);
+  assert.ok(kept.has('RAILWAY_RUN_UID'));
+});
