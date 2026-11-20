@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · finish sprints · W4-ci
+stock-watch, branch `finish/W4-ci` (ede2ef7, 5ceb950, bbebac2; not pushed, not deployed). Closes SW-014 (browser tests never ran in CI) and the CI half of SW-023 (360×740, screenshots kept).
+- Root `package.json`: devDependency `playwright` pinned to 1.65.1 + `package-lock.json` (dev tooling only; the Dockerfile copies `modules/stock-watch`, so the deployed app stays dependency-free). Scripts `test:ui` (fails instead of silently skipping when Playwright is missing) and `test:smoke` (smoke + roles smoke).
+- `.github/workflows/test.yml`: job `test` unchanged (npm test, Node 20 + 22). New job `ui` (Node 22): `npm ci`, Chromium cached by lockfile hash (`playwright install --with-deps chromium`, or `install-deps` on a cache hit), then the 6 browser tests, `smoke.js` and `roles-smoke.js`; screenshots uploaded as artifact `screenshots` (14 days), also on failure.
+- `test/smoke/smoke.js`: 360×740 next to 390×844 (viewports `desktop`, `phone390`, `phone360`); `SMOKE_OUT` created if missing. `roles-smoke.js`: 360×740 added (44 px period-button check runs there too), refuses a busy port, fails if the app never starts.
+- Local (Playwright 1.65.1 from npx cache, `PLAYWRIGHT_CHANNEL=chrome` for test:ui): npm test 199 pass / 6 skip; test:ui 6/6; smoke 30/30; roles smoke all passed at 5 widths.
+- Open: CI run itself not seen (never pushed). Docs that still say "CI has no browser" (`modules/stock-watch/AGENTS.md` test rows, RUNBOOK/ORCA if any) belong to the docs owner. Shared dev log page row not added from this worktree.
+
 
 
 ## 2026-11-20 · finish sprints · W1-docs
