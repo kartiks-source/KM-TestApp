@@ -38,7 +38,7 @@ All need the admin login except `/ingest/*` (a `VIEW_PASSWORD` session gets 403 
 
 | Endpoint | Effect | Undo |
 |---|---|---|
-| `POST /api/clear` | deletes every stock change and order line | restore the `…-before-clear.json` backup |
+| `POST /api/clear` | deletes every stock change and order line, every Mark-ordered record and every slow-seller decision | restore the `…-before-clear.json` backup: it carries `onorder.json` and `decisions.json` too (`sideFiles`, RUNBOOK → Restore) |
 | `POST /api/demo` | replaces all data with demo data (refused while Shopify is connected, and 409 while the store holds real data: Clear first; the page asks to confirm) | restore the `…-before-demo.json` backup |
 | `POST /api/import?replaceDemo=1` | removes demo data, then adds the CSV rows | restore if it wasn't demo |
 | `POST /api/import` | adds CSV rows (duplicates skipped) | restore a backup from before the import |

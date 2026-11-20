@@ -35,7 +35,8 @@ Google Sheet CSV / upload ───┘
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
 | `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
-| `src/backup.js` | backups of `store.json` in `/data/backups` (daily + before every replace/clear, 14 each), restore from `/data/restore.json` on start, `GET /api/export/backup.json`. Restore steps: `docs/RUNBOOK.md` |
+| `src/backup.js` | backups of `store.json` + `sideFiles` (`onorder.json`, `decisions.json`) in `/data/backups` (daily + before every replace/clear, 14 each), restore from `/data/restore.json` on start (side files too), `GET /api/export/backup.json`. Restore steps: `docs/RUNBOOK.md` |
+| `src/sidefile.js` | `onorder.json` / `decisions.json` kept like `store.json`: a bad file is copied to `.corrupt-<time>` and never overwritten; `.bak` used instead; none → refuse to start (critic r2 X1) |
 | `src/onorder.js` | "Mark ordered" records (`DATA_DIR/onorder.json`, one per variant: qty, eta, at, by) + `GET/POST /api/onorder`; the engine counts them (LOGIC.md §6b) |
 | `src/access.js` | roles: admin / view password, role in the signed cookie, the 403 gate for view sessions (SW-029) |
 | `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |

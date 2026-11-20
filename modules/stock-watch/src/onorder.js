@@ -1,34 +1,21 @@
 'use strict';
 /*
  * "Mark ordered": purchase orders already placed, one record per variant (LOGIC.md §6b).
- * Kept in its own file, DATA_DIR/onorder.json, so it never touches store.json.
+ * Kept in its own file, DATA_DIR/onorder.json, so it never touches store.json; as safely as store.json (src/sidefile.js:
+ * a bad file is quarantined, never overwritten or read as empty) and carried in every backup (critic r2 X1).
  *   { [variantId]: { qty, eta, at, by } }   qty = units ordered, eta = expected landing (ms), at = when marked (ms)
  * The engine works out what's still to come (stock increases after `at` count as received).
  */
-const fs = require('node:fs');
-const path = require('node:path');
+const { sideFile } = require('./sidefile');
 
 const DAY = 864e5;
 const MAX_ITEMS = 500;
-const dir = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const file = () => path.join(dir(), 'onorder.json');
+const box = sideFile('onorder.json');
+const has = (o, k) => Object.hasOwn(o, k);   // product IDs are data: never Object.prototype keys
 
-let data = null;
-
-function all() {
-  if (data) return data;
-  try { data = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.warn('onorder.json unreadable, starting empty:', e.message); data = {}; }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
-  return data;
-}
-
-function save() {
-  fs.mkdirSync(dir(), { recursive: true });
-  const tmp = file() + '.tmp';
-  const fd = fs.openSync(tmp, 'w');
-  try { fs.writeSync(fd, JSON.stringify(data)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, file());
-}
+/** Every record. Throws when onorder.json is unreadable and there's no good .bak (never "starting empty"). */
+const all = () => box.read();
+const save = () => box.write();
 
 /** ETA from "YYYY-MM-DD" (end of that day, store time) or ms. Must be within −1 … +365 days of now. */
 function parseEta(v, now, offMin = 330) {
@@ -49,7 +36,7 @@ function mark(items, { by = null, now = Date.now(), offMin = 330 } = {}) {
   const d = all(), next = {};
   for (const it of items) {
     const id = ['string', 'number'].includes(typeof it?.id) ? String(it.id).trim().slice(0, 100) : '';
-    if (!id) return { ok: false, error: 'Each item needs a product id' };
+    if (!id || id === '__proto__') return { ok: false, error: 'Each item needs a product id' };
     if (it.clear === true || +it.qty === 0) { next[id] = null; continue; }
     const qty = Math.round(+it.qty);
     if (!Number.isFinite(qty) || qty < 1 || qty > 1e6) return { ok: false, error: 'Quantity must be a whole number from 1 to 1,000,000' };
@@ -59,7 +46,7 @@ function mark(items, { by = null, now = Date.now(), offMin = 330 } = {}) {
   }
   let saved = 0, removed = 0;
   for (const [id, rec] of Object.entries(next)) {
-    if (rec) { d[id] = rec; saved++; } else if (d[id]) { delete d[id]; removed++; }
+    if (rec) { d[id] = rec; saved++; } else if (has(d, id)) { delete d[id]; removed++; }
   }
   /* old records go: anything due more than 60 days ago */
   for (const [id, rec] of Object.entries(d)) if (rec.eta < now - 60 * DAY) delete d[id];
@@ -67,7 +54,7 @@ function mark(items, { by = null, now = Date.now(), offMin = 330 } = {}) {
   return { ok: true, saved, removed };
 }
 
-function clear() { data = {}; save(); }
+function clear() { box.write({}); }
 
 /** HTTP: GET /api/onorder, POST /api/onorder { items, by }. Returns { code, body } or null when the path isn't ours. */
 async function handle(req, p, readBody, offMin) {
@@ -80,4 +67,4 @@ async function handle(req, p, readBody, offMin) {
   return r.ok ? { code: 200, body: r } : { code: 400, body: r };
 }
 
-module.exports = { all, mark, clear, handle, parseEta };
+module.exports = { all, mark, clear, handle, parseEta, reset: box.reset, FILE_NAME: box.name };

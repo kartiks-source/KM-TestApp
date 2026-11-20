@@ -238,7 +238,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 
 ## 6b. Already ordered ("Mark ordered")
 
-**Rule:** when someone places a purchase order they tick the row on Reorder (one or many) and press **Mark N ordered** in the bar that appears, or use **Mark ordered** in the product drawer and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`).
+**Rule:** when someone places a purchase order they tick the row on Reorder (one or many) and press **Mark N ordered** in the bar that appears, or use **Mark ordered** in the product drawer and give the quantity and the expected date it lands (defaults: the suggested order quantity, today + lead time). The app stores one record per variant: `{ qty, eta, at, by }` (`DATA_DIR/onorder.json`, kept as safely as `store.json` and carried in every backup, export and restore: a damaged file is never read as "nothing on order", which would put ordered lines back in Order today; critic r2 X1, RUNBOOK → Backups).
 
 > received = sum of stock increases recorded after the order was marked, each measured from *Stock before*, or from the previous row's stock when that's blank (section 2), so a row with a blank *Stock before* isn't read as an increase from 0
 > still to come = ordered qty − received; once 90% has arrived the order is treated as complete and dropped
@@ -554,7 +554,7 @@ Products → More… → *Slow sellers to decide*: every **Slow seller** (sectio
 | slow + out of stock | "Don't reorder? ₹X lost" (just "Don't reorder?" when ₹X is 0) | ₹ lost in the period |
 | slow + has stock | "Clear ₹X at cost" | stock × unit cost (price when no cost) |
 
-One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop) in `DATA_DIR/decisions.json` with the product's sales per day at that moment (`base`, taken from the server's report, not the page). The item is hidden until **|rate now − base| > 50% × max(base, 0.1/day)**; then it comes back showing the earlier decision. The 0.1/day floor stops one stray sale on a product that sold nothing from bringing it back (it needs about 2 sales in 4 weeks). Decided items are listed under the table with **Undo**. Decisions don't change any number or status; Clear all data, loading demo data and replacing demo data with an import wipe them (they belong to the data they were made on).
+One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop) in `DATA_DIR/decisions.json` with the product's sales per day at that moment (`base`, taken from the server's report, not the page). The item is hidden until **|rate now − base| > 50% × max(base, 0.1/day)**; then it comes back showing the earlier decision. The 0.1/day floor stops one stray sale on a product that sold nothing from bringing it back (it needs about 2 sales in 4 weeks). Decided items are listed under the table with **Undo**. `decisions.json` is kept and backed up like `onorder.json` (§6b). Decisions don't change any number or status; Clear all data, loading demo data and replacing demo data with an import wipe them (they belong to the data they were made on).
 
 **Saved settings only:** the base and the hide check both use the sales rate on the **saved** settings. Trial values (the what-if fields, e.g. a different *Sales history to use* window) change the report but never hide or bring back a decided item.
 

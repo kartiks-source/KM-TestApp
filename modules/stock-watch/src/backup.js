@@ -1,6 +1,8 @@
 'use strict';
 /*
  * Backups of the store (SW-005). store.json holds stock-out history that Shopify can't resend, so:
+ * (every backup, the export and restore also carry onorder.json and decisions.json as `sideFiles`, critic r2 X1:
+ *  lost PO marks put ordered lines back in Order today, the duplicate PO SW-012 exists to stop)
  *
  *   DATA_DIR/backups/store-YYYYMMDD.json              one a day (store's local date), checked hourly
  *   DATA_DIR/backups/store-YYYYMMDD-HHMMSS-<why>.json  before every replaceAll (Clear, demo → live,
@@ -17,6 +19,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const store = require('./store');
+const onorder = require('./onorder');
+const decide = require('./decide');
+const { parse, writeAtomic: writeSide } = require('./sidefile');
+
+/* the side files a backup carries, by file name (DATA_DIR/<name>) */
+const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const DIR = path.join(DATA_DIR, 'backups');
@@ -26,10 +34,19 @@ const KEEP = 14;
 const DAILY = /^store-\d{8}\.json$/;
 const EVENT = /^store-\d{8}-\d{6}-[a-z0-9-]+\.json$/;
 
-/** The store as JSON, without the in-memory dedupe indexes (top-level keys starting with "_"). */
+/** The store as JSON, without the in-memory dedupe indexes (top-level keys starting with "_"), plus
+ *  sideFiles: { 'onorder.json': {…}, 'decisions.json': {…} }. Throws if a side file can't be read (never backs up a blank). */
 function text() {
   const d = store.load();
-  return JSON.stringify(d, function (k, v) { return this === d && k.startsWith('_') ? undefined : v; });
+  const sideFiles = Object.fromEntries(Object.entries(SIDES).map(([n, m]) => [n, m.all()]));
+  const plain = Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('_')));
+  return JSON.stringify({ ...plain, sideFiles });
+}
+/** The side files as they are on disk now (for the before-restore copy, which runs before anything is loaded). */
+function sidesOnDisk() {
+  const out = {};
+  for (const n of Object.keys(SIDES)) { try { const j = parse(path.join(DATA_DIR, n)); if (j) out[n] = j; } catch { /* unreadable: left out, the file stays */ } }
+  return out;
 }
 const worthKeeping = (d) => d.source !== 'demo' && (d.stock.length || d.orders.length);
 
@@ -105,12 +122,25 @@ function restorePending(now = Date.now()) {
     const s = stamp(now, off);
     kept = path.join(DIR, `store-${s.day}-${s.time}-before-restore.json`);
     fs.mkdirSync(DIR, { recursive: true });
-    fs.copyFileSync(FILE, kept);
+    try { const cur = JSON.parse(fs.readFileSync(FILE, 'utf8')); writeAtomic(kept, JSON.stringify({ ...cur, sideFiles: sidesOnDisk() })); }
+    catch { fs.copyFileSync(FILE, kept); }   // an unreadable store is kept byte for byte
   }
-  fs.renameSync(RESTORE, FILE);
+  /* side files: written from the backup when it has them (each current file kept as <name>.bak); an older backup
+     without sideFiles leaves the current Mark-ordered and decision files as they are */
+  const r = JSON.parse(fs.readFileSync(RESTORE, 'utf8'));
+  const sides = r.sideFiles && typeof r.sideFiles === 'object' ? r.sideFiles : null;
+  const restoredSides = [];
+  if (sides) {
+    for (const [n, m] of Object.entries(SIDES)) {
+      const v = sides[n];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { writeSide(path.join(DATA_DIR, n), JSON.stringify(v)); m.reset(); restoredSides.push(n); }
+    }
+    delete r.sideFiles;
+    writeAtomic(FILE, JSON.stringify(r)); fs.rmSync(RESTORE);
+  } else fs.renameSync(RESTORE, FILE);
   rotate();
-  console.log(`restore: store.json replaced from restore.json${kept ? `; previous store kept as backups/${path.basename(kept)}` : ''}`);
-  return { restored: true, kept };
+  console.log(`restore: store.json replaced from restore.json${restoredSides.length ? ` (with ${restoredSides.join(', ')})` : ''}${kept ? `; previous store kept as backups/${path.basename(kept)}` : ''}`);
+  return { restored: true, kept, sideFiles: restoredSides };
 }
 
 let started = false;
@@ -138,4 +168,4 @@ function route(req, res, url) {
   return true;
 }
 
-module.exports = { start, route, snapshot, daily, rotate, restorePending, text, DIR, KEEP };
+module.exports = { start, route, snapshot, daily, rotate, restorePending, text, DIR, KEEP, SIDES };

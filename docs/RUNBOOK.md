@@ -42,7 +42,7 @@ Roll back: Railway dashboard → Deployments → the previous deployment → Red
 | `backups/store-YYYYMMDD-HHMMSS-before-demo.json` | just before demo data replaces real data | newest 14 |
 | `backups/store-YYYYMMDD-HHMMSS-before-restore.json` | just before a restore (below) | newest 14 |
 
-An empty store and demo data are never backed up (nothing to lose; demo reloads would push real snapshots out). Each file is a full copy of `store.json`, so 28 files × the store's size must fit on the volume: at 50 MB (ADR-0003's move trigger) that is 1.4 GB.
+An empty store and demo data are never backed up (nothing to lose; demo reloads would push real snapshots out). Each file is a full copy of `store.json` **plus `sideFiles`: the Mark-ordered records (`onorder.json`) and slow-seller decisions (`decisions.json`)**, which live next to it on the volume (critic r2 X1: lost PO marks put ordered lines back in Order today, the duplicate PO SW-012 exists to stop). The export below carries them too. So 28 files × the store's size must fit on the volume: at 50 MB (ADR-0003's move trigger) that is 1.4 GB.
 
 **2. Railway volume backups (whole volume, owner sets up once).** Railway dashboard → project `stock-watch` → service `web` → the `/data` volume → Backups → schedule **Daily**, keep **at least 7**. These survive a deleted or corrupted volume, which app backups (on the same volume) don't. Status: not yet confirmed on (see DEVLOG).
 
@@ -56,7 +56,7 @@ Do this before anything risky (a big import, connecting Shopify for the first ti
 
 ## Restore
 
-The app restores on start: if `/data/restore.json` exists and looks like a store (has `stock`, `orders`, `settings`), it keeps the current `store.json` as `backups/…-before-restore.json`, puts `restore.json` in its place, and logs `restore: store.json replaced …`. A file that isn't a store is renamed `restore.json.rejected-<time>` and the current store stays (log line `restore: … is not a Stock-out Watch store`).
+The app restores on start: if `/data/restore.json` exists and looks like a store (has `stock`, `orders`, `settings`), it keeps the current `store.json` (with the current side files) as `backups/…-before-restore.json`, puts `restore.json` in its place, writes `onorder.json` and `decisions.json` from its `sideFiles` (each current file kept as `<name>.bak`), and logs `restore: store.json replaced from restore.json (with onorder.json, decisions.json) …`. A backup from before 20 Nov 2026 has no `sideFiles`: the current Mark-ordered and decision files are left as they are. A file that isn't a store is renamed `restore.json.rejected-<time>` and the current store stays (log line `restore: … is not a Stock-out Watch store`).
 
 **From an app backup (Railway):**
 
@@ -82,4 +82,5 @@ The app restores on start: if `/data/restore.json` exists and looks like a store
 | Shopify data stale | Data page: last pull, last error; logs `shopify pull failed:` | Key expired or scopes missing: see SECURITY.md (rotate Shopify key). Press Sync now on the Data page |
 | Flow rows not arriving | Flow run history in Shopify; Data page last row time | Ingest key rotated → update the `X-Ingest-Key` header in both Flows |
 | Disk full | Railway volume usage; `du -sh /data/*` | Delete old `restore.json.rejected-*` files; grow the volume; review ADR-0003 triggers |
+| `Refusing to start: onorder.json can't be read` (or `decisions.json`) | `ls -l /data` for `onorder.json.corrupt-*` | The file is damaged and there is no good `.bak`. Nothing was overwritten. Restore the newest backup (above: its `sideFiles` bring the marks back), or move the bad file aside (`mv /data/onorder.json /data/onorder.json.bad`) to start with no marks, then re-mark open POs |
 | Restore did nothing | Logs for `restore:` lines; `ls /data` | File named wrong (must be `/data/restore.json`) or rejected (`restore.json.rejected-*`): check it's a store export |

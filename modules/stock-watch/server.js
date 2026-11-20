@@ -511,7 +511,7 @@ if (require.main === module) {
   const accessProblem = access.configProblem(PASSWORDS);
   if (accessProblem) { console.error('Refusing to start: ' + accessProblem); process.exit(1); }
   let d;
-  try { d = store.load(); } catch (e) {
+  try { d = store.load(); onorder.all(); decide.all(); } catch (e) {   // a bad onorder.json / decisions.json with no good .bak also stops here (critic r2 X1)
     console.error(`Refusing to start: ${e.message}`);
     process.exit(1);
   }

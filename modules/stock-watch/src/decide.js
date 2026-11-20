@@ -1,49 +1,35 @@
 'use strict';
 /*
  * Slow-seller decisions (SW-032, LOGIC.md §15d). Kept in its own file, DATA_DIR/decisions.json, so it never
- * touches store.json.   { [variantId]: { d: 'keep' | 'drop' | 'clear', base, at } }
+ * touches store.json; as safely as store.json (src/sidefile.js) and carried in every backup (critic r2 X1).   { [variantId]: { d: 'keep' | 'drop' | 'clear', base, at } }
  *   base = the product's sales per day when decided; the item stays hidden until that moves more than 50%.
  */
-const fs = require('node:fs');
-const path = require('node:path');
 const { DECISIONS } = require('./helpers');
+const { sideFile } = require('./sidefile');
 
 const MAX_ITEMS = 5000;
-const dir = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const file = () => path.join(dir(), 'decisions.json');
+const box = sideFile('decisions.json');
+const has = (o, k) => Object.hasOwn(o, k);
 
-let data = null;
-
-function all() {
-  if (data) return data;
-  try { data = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.warn('decisions.json unreadable, starting empty:', e.message); data = {}; }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
-  return data;
-}
-
-function save() {
-  fs.mkdirSync(dir(), { recursive: true });
-  const tmp = file() + '.tmp';
-  const fd = fs.openSync(tmp, 'w');
-  try { fs.writeSync(fd, JSON.stringify(data)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, file());
-}
+/** Every decision. Throws when decisions.json is unreadable and there's no good .bak (never "starting empty"). */
+const all = () => box.read();
+const save = () => box.write();
 
 /** Store one decision. decision null (or '') removes it. base = sales per day now. Returns { ok } or { ok: false, error }. */
 function set(id, decision, base, now = Date.now()) {
   const key = ['string', 'number'].includes(typeof id) ? String(id).trim().slice(0, 100) : '';
-  if (!key) return { ok: false, error: 'Needs a product id' };
+  if (!key || key === '__proto__') return { ok: false, error: 'Needs a product id' };
   const d = all();
-  if (decision == null || decision === '') { const had = !!d[key]; delete d[key]; save(); return { ok: true, removed: had }; }
+  if (decision == null || decision === '') { const had = has(d, key); delete d[key]; save(); return { ok: true, removed: had }; }
   if (!DECISIONS.includes(decision)) return { ok: false, error: `Decision must be one of ${DECISIONS.join(', ')}` };
-  if (!d[key] && Object.keys(d).length >= MAX_ITEMS) return { ok: false, error: `At most ${MAX_ITEMS} decisions` };
+  if (!has(d, key) && Object.keys(d).length >= MAX_ITEMS) return { ok: false, error: `At most ${MAX_ITEMS} decisions` };
   d[key] = { d: decision, base: Number.isFinite(+base) ? +base : 0, at: now };
   save();
   return { ok: true };
 }
 
 /** Forget every decision. Writes only when there was something to forget (start-up demo load on a read-only volume must not throw). */
-function clear() { const had = Object.keys(all()).length > 0; data = {}; if (had) save(); }
+function clear() { const had = Object.keys(all()).length > 0; if (had) box.write({}); }
 
 /**
  * HTTP: GET /api/decide, POST /api/decide { id, decision }. rateOf(id) gives the product's sales per day now
@@ -62,4 +48,4 @@ async function handle(req, p, readBody, rateOf) {
   return r.ok ? { code: 200, body: r } : { code: 400, body: r };
 }
 
-module.exports = { all, set, clear, handle };
+module.exports = { all, set, clear, handle, reset: box.reset, FILE_NAME: box.name };
