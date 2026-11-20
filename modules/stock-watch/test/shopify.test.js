@@ -52,6 +52,20 @@ test('orders: what counts as a sale — not cancelled, not test, units net of re
   assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-19T00:00:00Z' }, [line(1, 2, 315)]), []);
 });
 
+/* F2 (validation 20 Nov 2026): Sammsara's prices include GST (taxesIncluded on every order), so ₹ sold equalled
+ * Shopify's Total sales, 5.7–7.3% over Net sales. Yesterday's lines, tax taken off, gave ₹1,60,252 = Net sales exactly. */
+test('orders: price is ex tax when the order’s prices include tax (GST), per unit of the ordered quantity', () => {
+  const o = { name: '#2001', createdAt: '2026-11-19T10:00:00Z', test: false, cancelledAt: null, taxesIncluded: true };
+  const line = (qty, cur, paid, taxes) => ({ id: 'gid://shopify/LineItem/7', quantity: qty, currentQuantity: cur, sku: 'A', variant: { id: 'gid://shopify/ProductVariant/9' },
+    discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: String(paid) } }, taxLines: taxes.map((a) => ({ priceSet: { shopMoney: { amount: String(a) } } })) });
+  assert.equal(S.orderRows(o, [line(1, 1, 2100, [100])])[0].price, 2000);                  // 5% GST inside ₹2,100
+  assert.equal(S.orderRows(o, [line(2, 2, 1120, [120, 120])])[0].price, 1000);               // CGST + SGST lines for 2 units (₹240): ₹120 per unit
+  assert.equal(S.orderRows(o, [line(3, 1, 1050, [150])])[0].price, 1000);                  // 2 of 3 refunded: tax per ordered unit
+  assert.equal(S.orderRows({ ...o, taxesIncluded: false }, [line(1, 1, 2000, [100])])[0].price, 2000, 'tax added on top: price already ex tax');
+  assert.equal(S.orderRows(o, [line(1, 1, 500, [])])[0].price, 500, 'no tax lines: unchanged');
+  assert.match(S.PRICE_BASIS, /^exTax$/);
+});
+
 test('orders: first run loads 60 days by creation; later runs re-read changed orders; pages and extra lines all read', async () => {
   const now = Date.parse('2026-11-19T00:00:00Z');
   const line = (v) => ({ id: `gid://shopify/LineItem/${v}`, currentQuantity: 1, sku: v, variant: { id: `gid://shopify/ProductVariant/${v}` }, discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: '10' } } });

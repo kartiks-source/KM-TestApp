@@ -49,3 +49,19 @@ test('pull loop: stores one after the other, never two at once; a manual pull qu
   assert.equal(ql.filter((x) => x[0] === 'beta').length, ql.filter((x) => x[0] === 'alpha').length, 'beta pulled twice, rebuilt once');
   assert.ok(ql.every((x) => x[1] === '2025-10'));
 });
+
+/* 1.1.1 (F2): order prices became ex GST. A store whose orders were read before (no priceBasis) re-reads the 60-day
+ * backfill once (cursor cleared), then goes back to reading changed orders only. */
+test('pull: orders read before 1.1.1 are read again once from the backfill, then incrementally', async () => {
+  const store = require('../src/store');
+  const sinces = [];
+  const prev = S.pullOrders;
+  S.pullOrders = async (since, opts) => { sinces.push(since); return prev(since, opts); };
+  scope.run('alpha', () => store.setShopify({ priceBasis: undefined, ordersCursor: 12345 }));
+  await syncShopify('alpha');
+  await syncShopify('alpha');
+  S.pullOrders = prev;
+  assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
+  assert.ok(sinces[1] > 12345, 'next pull: from the new cursor');
+  assert.equal(scope.run('alpha', () => store.load().shopify.priceBasis), 'exTax');
+});

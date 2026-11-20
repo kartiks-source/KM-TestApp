@@ -10,7 +10,8 @@
  *   pullOrders  orders changed since the last pull (first run: created in the last 60 days). Each order's
  *               lines are replaced whole, so later cancellations, refunds and edits are picked up.
  *               What counts as a sale: not cancelled, not a test order, units net of refunds and
- *               removals (currentQuantity), price after line AND order-level discounts.
+ *               removals (currentQuantity), price after line AND order-level discounts, without the tax
+ *               (GST) inside it when the store's prices include tax (= Shopify's Net sales, LOGIC.md §5).
  *
  * Paced by Shopify's own cost budget: waits whenever less than half of it is left,
  * so the store's other apps are never starved.
@@ -71,12 +72,14 @@ const STOCK_Q = `query Stock($after: String) {
   }
 }`;
 
-const LINE_FIELDS = 'id currentQuantity sku variant { id } discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } }';
+const LINE_FIELDS = 'id quantity currentQuantity sku variant { id } discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } } taxLines { priceSet { shopMoney { amount } } }';
+/** Stored order prices are ex tax since 1.1.1. A store whose orders were read before (tax-inclusive) re-reads them once. */
+const PRICE_BASIS = 'exTax';
 const ORDERS_Q = `query Orders($after: String, $q: String) {
   orders(first: 40, after: $after, query: $q, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id name createdAt updatedAt cancelledAt test
+      id name createdAt updatedAt cancelledAt test taxesIncluded
       lineItems(first: 20) {
         pageInfo { hasNextPage endCursor }
         nodes { ${LINE_FIELDS} }
@@ -127,13 +130,23 @@ function diffStock(variants, lastQty, t) {
   return { rows, lastQty: next, catalog, excluded };
 }
 
+/** Unit price paid after every discount, without tax: when the order's prices include tax (taxesIncluded, e.g. GST
+ *  in India), the line's tax ÷ its ordered quantity comes off. Prices without tax inside them are left as they are. */
+function netUnitPrice(order, l) {
+  const paid = Number(l.discountedUnitPriceAfterAllDiscountsSet?.shopMoney?.amount) || 0;
+  if (!order.taxesIncluded) return paid;
+  const tax = (l.taxLines || []).reduce((s, x) => s + (Number(x?.priceSet?.shopMoney?.amount) || 0), 0);
+  const q = Number(l.quantity) || Number(l.currentQuantity) || 1;
+  return Math.max(0, Math.round((paid - tax / q) * 100) / 100);
+}
+
 /** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */
 function orderRows(order, lines) {
   if (order.test || order.cancelledAt) return [];
   const t = Date.parse(order.createdAt);
   return lines.filter((l) => l.variant?.id && l.currentQuantity > 0).map((l) => ({
     t, order: order.name, line: String(l.id || '').replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '',
-    qty: l.currentQuantity, price: Number(l.discountedUnitPriceAfterAllDiscountsSet?.shopMoney?.amount) || 0,
+    qty: l.currentQuantity, price: netUnitPrice(order, l),
   }));
 }
 
@@ -179,4 +192,4 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
   return { total, cursor };
 }
 
-module.exports = { gql, assertReadOnly, diffStock, orderRows, pullStock, pullOrders, API_VERSION, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };
+module.exports = { gql, assertReadOnly, diffStock, orderRows, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };

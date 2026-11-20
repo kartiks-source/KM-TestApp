@@ -285,7 +285,7 @@ function shopifyStatus(id = scope.id()) {
   const k = keys.status(id); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
     lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: pulls.has(id), progress: runs.progress(progress.get(id) || null),
-    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION, writeScopes: st.writeScopes || [], history: st.history || null };
+    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION, writeScopes: st.writeScopes || [], history: st.history || null, priceBasis: st.priceBasis || null };
 }
 /** Pull one store from Shopify (default: the current store). Queued behind any other store's pull. */
 function syncShopify(id = scope.id()) {
@@ -314,6 +314,8 @@ async function pullOne(id) {
     Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
     store.setShopify({ lastQty: s.lastQty });
     let orders = 0;
+    /* 1.1.1: order prices became ex tax (LOGIC §5); orders read before are read again once, from the 60-day backfill */
+    if (store.load().shopify.priceBasis !== shopify.PRICE_BASIS) store.setShopify({ ordersCursor: null, priceBasis: shopify.PRICE_BASIS });
     await shopify.pullOrders(store.load().shopify.ordersCursor, {
       onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
     });
