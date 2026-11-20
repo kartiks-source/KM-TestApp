@@ -54,12 +54,17 @@
 
   /* ---------- the bar under the Reorder toolbar ---------- */
   const lens = () => (get('sw-polens') === 'supplier' ? 'supplier' : 'list');
+  /* Phones: the bar folds behind a "Budget" button in the chips row, so the first order card stays near the top
+     (ui-helpers M8). It is open while a budget or By supplier is on, or after a tap. */
+  let phoneOpen = false;
+  const barOpen = () => phoneOpen || budget() != null || lens() === 'supplier';
+  const toggle = () => `<button class="btn ghost mbar-tg" id="mbar-tg" aria-expanded="${barOpen()}" aria-controls="mbar">₹ Budget</button>`;
   function bar(list) {
     const B = budget(), r = A.state.report, extra = r.totals.packExtraValue || 0, { money, esc, inr } = A;
     const sum = B == null
       ? (extra ? `<span class="muted" title="Order quantities rounded up to suppliers’ minimum order and whole case packs (LOGIC §6c)">${money(extra)} of the orders is minimum-order / case-pack round-up</span>` : '')
       : `<span><b>${inr.format(last ? last.fit.size : 0)}</b> fit · ${money(last ? last.spent : 0)} keeps <b class="okv">${money(last ? last.protect : 0)}</b> profit${last && last.over ? ` · <span class="lost">${inr.format(last.over)} over budget (${money(last.overValue)})</span>` : ''}</span>`;
-    return `<div class="mbar">
+    return `<div class="mbar${barOpen() ? ' open' : ''}" id="mbar">
       <label class="bud" title="Cash you can spend on this order. Rows are ranked by profit kept per ₹; the ones that fit stay, the rest are dimmed and left out of the CSV. Remembered for this store in this browser.">
         <span>Budget ₹</span><input id="budget-in" inputmode="numeric" autocomplete="off" placeholder="No limit" value="${B == null ? '' : esc(inr.format(B))}" aria-label="Budget in rupees"></label>
       ${B != null ? '<button class="btn ghost xs" id="budget-clear" aria-label="Clear budget">Clear</button>' : ''}
@@ -174,7 +179,8 @@
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('button'); if (!t || !A) return;
     if (t.dataset.polens) { put('sw-polens', t.dataset.polens === 'supplier' ? 'supplier' : ''); A.render(); return; }
-    if (t.id === 'budget-clear') { put(`sw-budget:${store()}`, ''); A.render(); return; }
+    if (t.id === 'mbar-tg') { phoneOpen = !barOpen(); A.render(); if (phoneOpen) document.getElementById('budget-in')?.focus(); return; }
+    if (t.id === 'budget-clear') { phoneOpen = true; put(`sw-budget:${store()}`, ''); A.render(); return; }
     if (t.dataset.pocopy != null) { e.preventDefault(); const g = poGroups(rows(currentRows()))[+t.dataset.pocopy]; if (g) A.copy(poText(g)); return; }
     try {
       if (t.id === 'sup-add') { terms.suppliers = [...readRows().map((s, i) => ({ ...terms.suppliers[i], ...s })), { name: '', isNew: true, products: 0 }]; fillPanel(); document.querySelector('#sup-body .sup-row:last-child input')?.focus(); return; }
@@ -202,7 +208,7 @@
 
   window.SW_MONEY = {
     init(ctx) { A = ctx; },
-    rows, cols, bar, qs, after, panel,
+    rows, cols, bar, toggle, qs, after, panel,
     bySupplier: () => lens() === 'supplier',
     poView,
   };

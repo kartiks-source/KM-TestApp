@@ -812,3 +812,10 @@ div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 6
   .hfind:has(.ls-pick) { flex-wrap: wrap; }
   .hfind .search.ls-pick { flex: 1 1 100%; max-width: none; }
 }
+/* sprint3 integration: Reorder money bar folds on phones behind "₹ Budget" in the chips row (ui-helpers M8) */
+.mbar-tg { display: none; }
+@media (max-width: 760px) {
+  .wrap > .toolbar .mbar-tg { display: inline-flex; flex: none; min-height: 44px; padding: 0 10px; white-space: nowrap; }
+  .wrap > .toolbar .mbar-tg[aria-expanded="true"] { background: var(--brand-wash); color: var(--brand); }
+  .mbar:not(.open) { display: none; }
+}

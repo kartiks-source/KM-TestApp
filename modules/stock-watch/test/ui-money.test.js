@@ -39,7 +39,11 @@ const sideways = (pg) => pg.evaluate(() => document.documentElement.scrollWidth 
 
 for (const [w, h] of [[1440, 900], [390, 844]]) {
   test(`${w}: budget draws one cut line, dims the rest, CSV link carries it; Clear = as before; By supplier = PO drafts`, opts, async () => {
-    const pg = await open(w, h, '/?store=sammsara-demo#reorder', '.mbar #budget-in');
+    const pg = await open(w, h, '/?store=sammsara-demo#reorder', w > 760 ? '.mbar #budget-in' : '#mbar-tg');
+    if (w <= 760) {   // phones: the bar is folded behind "₹ Budget" so the first card stays near the top (ui-helpers M8)
+      assert.equal(await pg.isVisible('.mbar'), false, 'folded by default on a phone');
+      await pg.click('#mbar-tg'); await pg.waitForSelector('.mbar #budget-in');
+    }
     const before = await pg.$$eval('#view tr[data-id]', (r) => r.map((x) => x.dataset.id));
     assert.equal(await pg.$('.cutline'), null, 'no budget: no line');
     await pg.fill('#budget-in', '3,00,000'); await pg.press('#budget-in', 'Enter');
