@@ -41,6 +41,7 @@ const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
 const weekly = require('./src/weekly');     // sprint 3 B-review: daily snapshots, this week vs last week (SW-043)
 const targets = require('./src/targets');   // sprint 3 B-review: monthly targets on groups (SW-042)
+const lists = require('./src/lists');       // sprint 3 B-review: saved product lists (SW-044)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -469,10 +470,10 @@ async function storeApi(req, res, url, role, id) {
   const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
-  /* sprint 3 B-review: weekly review (SW-043), targets on groups (SW-042); month-to-date groups on the saved settings */
+  /* sprint 3 B-review: weekly review (SW-043), targets on groups (SW-042), saved lists (SW-044); month-to-date groups on the saved settings */
   const now = Date.now(), from = period.monthStart(now, d.settings.tzOffsetMin);
   const monthGroups = (lens) => groups.build(engine.report(d.stock, d.orders, d.settings, { from, now, catalog: d.catalog, onOrder: onorder.all() }).products, catalog.current(d.source, d.catalog), lens);
-  for (const h of [weekly, targets]) { const x = await h.handle(req, url, readBody, { role, by: whoOf(req, role), monthGroups, from, now, offMin: d.settings.tzOffsetMin }); if (x) return send(res, x.code, x.body); }
+  for (const h of [weekly, targets, lists]) { const x = await h.handle(req, url, readBody, { role, by: whoOf(req, role), monthGroups, from, now, offMin: d.settings.tzOffsetMin }); if (x) return send(res, x.code, x.body); }
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });

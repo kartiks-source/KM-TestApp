@@ -455,6 +455,14 @@ Products → View: Categories / Collections / Tags / Parent products shows a **T
 - A target stays when its group has no sales this month (₹0 so far, red). Clear and a demo load keep targets (they are settings, not data).
 - When it can be wrong: a straight-line pace ignores weekends, festivals and payday peaks; early in the month one big day swings the forecast.
 
+## 9d. Paste a list, saved lists (SW-044, `public/lists.js`, `src/lists.js`)
+
+- **Paste a list** into the Products search box: SKUs, product names or variant IDs, one per line, or separated by commas, tabs or semicolons (a spreadsheet column pastes as is; line breaks become ", " in the box). Any of those separators turns the box from a search into a list.
+- **Matching**, per entry, any case: SKU, variant ID or full product name (`Product · Variant`) exactly; when nothing matches exactly and the entry has 3 characters or more, every product whose name or SKU contains it. Repeats and blanks are dropped.
+- The table shows the products found (the tabs, group filter and columns still apply; totals, CSV and the headline follow the list). A bar says `List: N of M found` and names each entry not found (first 6, all in the tooltip).
+- **Saved lists**: admin names and saves the list for the whole team (same name, any case, replaces it); everyone picks it from **Saved lists** beside the search box; admin can delete. Per store, at most 100 lists of 2,000 entries.
+- Why: buyers and marketing work from lists (a supplier's SKUs, a campaign's products, the Diwali range) kept in sheets; pasting them answers "how are these doing" in one step.
+
 ---
 
 ## 10. Demo data (not real)

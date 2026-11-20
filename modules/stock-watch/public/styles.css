@@ -716,3 +716,16 @@ table.fixed td:first-child { max-width: none; }
   .tg-m .tg { white-space: normal; }
 }
 .tg .linkbtn, .tg-set { display: inline-flex; padding: 2px 4px; color: var(--brand); }
+/* paste-a-list on Products (SW-044): found / not found, save for the team */
+.lsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 10px; padding: 8px 12px; background: var(--brand-wash2); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.ls-nf { color: var(--lost); min-width: 0; overflow-wrap: anywhere; }
+.ls-save { display: inline-flex; align-items: center; gap: 6px; }
+.ls-save input { width: 160px; height: 30px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; font: inherit; font-size: 13px; }
+.lsbar .linkbtn { display: inline-flex; padding: 4px 6px; color: var(--brand); }
+.ls-pick { max-width: 200px; }
+@media (max-width: 760px) {
+  .lsbar .btn, .lsbar .linkbtn { min-height: 44px; min-width: 44px; }
+  .ls-save input { height: 44px; font-size: 16px; width: 150px; }
+  .hfind:has(.ls-pick) { flex-wrap: wrap; }
+  .hfind .search.ls-pick { flex: 1 1 100%; max-width: none; }
+}

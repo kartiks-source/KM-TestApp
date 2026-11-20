@@ -86,3 +86,22 @@ test('targets (SW-042): admin sets a monthly target per group; viewer reads, nev
   assert.equal((await s.call('PUT', '/api/targets', { pass: ADMIN, body: {} })).status, 405);
   assert.equal((await s.call('POST', '/api/targets', { pass: ADMIN, body: { lens: 'type', key: g.key, amount: 0 } })).body.removed, true);
 });
+
+test('saved lists (SW-044): admin saves and deletes, viewer reads only; cross-site refused', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: ADMIN, VIEW_PASSWORD: VIEW }); t.after(s.stop);
+  assert.equal((await s.call('GET', '/api/lists')).status, 401);
+  assert.deepEqual((await s.call('GET', '/api/lists', { pass: VIEW })).body, { ok: true, lists: [] });
+  const body = { name: 'Diwali', items: ['A1', 'B2'] };
+  assert.equal((await s.call('POST', '/api/lists', { pass: VIEW, body })).status, 403, 'viewer can never write');
+  assert.equal((await s.call('POST', '/api/lists', { pass: ADMIN, headers: { 'sec-fetch-site': 'cross-site' }, body })).status, 403, 'CSRF');
+  assert.equal((await s.call('POST', '/api/lists', { pass: ADMIN, body: { name: '', items: ['A'] } })).status, 400);
+  const ok = await s.call('POST', '/api/lists', { pass: ADMIN, body });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.id, 'diwali');
+  const seen = (await s.call('GET', '/api/lists', { pass: VIEW })).body.lists;
+  assert.deepEqual(seen.map((l) => [l.name, l.items, l.by]), [['Diwali', ['A1', 'B2'], 'admin (script)']]);
+  assert.equal((await s.call('POST', '/api/lists', { pass: VIEW, body: { id: 'diwali', delete: true } })).status, 403);
+  assert.equal((await s.call('POST', '/api/lists', { pass: ADMIN, body: { id: 'nope', delete: true } })).status, 404);
+  assert.deepEqual((await s.call('POST', '/api/lists', { pass: ADMIN, body: { id: 'diwali', delete: true } })).body.lists, []);
+  assert.equal((await s.call('DELETE', '/api/lists', { pass: ADMIN })).status, 405);
+});
