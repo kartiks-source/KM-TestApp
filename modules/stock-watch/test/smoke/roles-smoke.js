@@ -5,15 +5,17 @@
  *   node modules/stock-watch/test/smoke/roles-smoke.js
  *
  * Starts the app (demo data, temp DATA_DIR) on SMOKE_PORT (4805). For every role in public/roles.js, at
- * 1280, 1440, 1920 and 390×844 it opens /?role=<role> and the digest link /?role=<role>#<home>, checks both
+ * 1280, 1440, 1920, 390×844 and 360×740 (SW-023) it opens /?role=<role> and the digest link /?role=<role>#<home>, checks both
  * land on the role's home page AND tab (e.g. marketing → Products → Order today), counts the visible UI pieces
  * there (rail items, tiles, panels, chips, headers, buttons; not data rows) and checks the count is LOWER than
  * the default view of the same page on the same tab (like for like; ADR-0006: roles only remove). Also: no
  * sideways scroll, no console errors, period buttons ≥ 44 px tall on phones (SW-023), ?role=all brings the
- * default back. Screenshots to SMOKE_OUT. Exit 1 on failure.
+ * default back. Screenshots to SMOKE_OUT (CI sets it and uploads the folder). Exit 1 on failure; refuses a
+ * port already in use, so it never drives someone else's app.
  *
  * Playwright: PLAYWRIGHT_PATH, a normal require, or the npx cache. Browser: CHROMIUM_PATH, else Playwright's
- * own, else the system Chrome (channel "chrome"). Not in `npm test`: CI has no browser and the module has no deps.
+ * own, else the system Chrome (channel "chrome"). Not in `npm test` (the module has no deps); CI runs it in the
+ * ui job with the root devDependency (`npm run test:smoke`).
  */
 if (process.env.NODE_TEST_CONTEXT) process.exit(0);   // never run by node --test
 
@@ -36,18 +38,28 @@ const APP = path.join(__dirname, '..', '..');
 const PORT = Number(process.env.SMOKE_PORT) || 4805;
 const BASE = `http://localhost:${PORT}`;
 const OUT = process.env.SMOKE_OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'sw-roles-'));
-const VIEWPORTS = [[1280, 900], [1440, 900], [1920, 1080], [390, 844]];
+fs.mkdirSync(OUT, { recursive: true });
+const VIEWPORTS = [[1280, 900], [1440, 900], [1920, 1080], [390, 844], [360, 740]];
 const PIECES = '#tabs a, .top .range button, #view .tile, #view .panel, #view .chip, #view th, #view .plan, #view .headline > *, #view .toolbar > *, #view .btn';
 
 const count = (page) => page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility()).length, PIECES);
 const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+const portTaken = (port) => new Promise((res) => {
+  const sock = require('node:net').connect(port, '127.0.0.1');
+  sock.once('connect', () => { sock.destroy(); res(true); });
+  sock.once('error', () => res(false));
+});
+
 (async () => {
+  if (await portTaken(PORT)) throw new Error(`port ${PORT} is already in use: set SMOKE_PORT to a free port`);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-roles-data-'));
   const app = spawn(process.execPath, ['server.js'], { cwd: APP, env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, ADMIN_PASSWORD: '' }, stdio: 'ignore' });
   const fails = [];
   try {
-    for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 200)); }
+    let up = false;
+    for (let i = 0; i < 50 && !up; i++) { try { up = (await fetch(BASE + '/health')).ok; } catch { /* starting */ } if (!up) await new Promise((r) => setTimeout(r, 200)); }
+    if (!up) throw new Error(`app did not start on ${BASE}`);
     /* one product marked ordered, so Reorder → Ordered (warehouse home, SW-012) has a row on every view */
     const rep = await (await fetch(BASE + '/api/report')).json();
     const pick = rep.reorder.find((p) => p.orderQty > 0);

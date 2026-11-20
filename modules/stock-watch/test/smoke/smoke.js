@@ -5,9 +5,9 @@
  *   node modules/stock-watch/test/smoke/smoke.js
  *
  * Starts the app on a temp DATA_DIR (demo data, password on) at SMOKE_PORT (4804; refuses a port already in use), or uses BASE_URL +
- * SMOKE_PASSWORD for a running app. At 1440×900 and 390×844 it checks: no console errors, no sideways
+ * SMOKE_PASSWORD for a running app. At 1440×900, 390×844 and 360×740 (SW-023) it checks: no console errors, no sideways
  * scroll on any page, Plan settings Reset and Save as default, the product drawer, and CSV import.
- * Screenshots go to SMOKE_OUT (default: a temp folder, printed at the end). Exit code 1 on any failure.
+ * Screenshots go to SMOKE_OUT (default: a temp folder, printed at the end; CI sets it and uploads the folder). Exit code 1 on any failure.
  *
  * Finds Playwright via PLAYWRIGHT_PATH, a normal require, or the npx cache
  * (`npx playwright install chromium` once if the browser is missing).
@@ -32,7 +32,8 @@ const APP = path.join(__dirname, '..', '..');
 const PORT = Number(process.env.SMOKE_PORT) || 4804;
 const PASSWORD = process.env.SMOKE_PASSWORD || 'smoke-password-123';
 const OUT = process.env.SMOKE_OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'sw-smoke-'));
-const VIEWPORTS = [{ name: 'desktop', width: 1440, height: 900 }, { name: 'phone', width: 390, height: 844 }];
+fs.mkdirSync(OUT, { recursive: true });
+const VIEWPORTS = [{ name: 'desktop', width: 1440, height: 900 }, { name: 'phone390', width: 390, height: 844 }, { name: 'phone360', width: 360, height: 740 }];
 const PAGES = ['overview', 'reorder', 'stockouts', 'products', 'data'];
 const IGNORE = /fonts\.(googleapis|gstatic)\.com/;   // offline runs can't fetch the web font; not an app error
 
@@ -186,7 +187,7 @@ async function run(browser, base, vp, own) {
   finally { await browser.close(); await app.stop(); }
   if (!results.length) { console.error('No checks ran.'); process.exit(1); }
   const w = Math.max(...results.map((r) => r.name.length));
-  for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.vp.padEnd(7)} ${r.name.padEnd(w)}  ${r.detail}`);
+  for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.vp.padEnd(8)} ${r.name.padEnd(w)}  ${r.detail}`);
   const bad = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - bad}/${results.length} passed · screenshots: ${OUT}`);
   process.exit(bad ? 1 : 0);
