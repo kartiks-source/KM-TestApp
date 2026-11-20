@@ -677,3 +677,27 @@ table.fixed td:first-child { max-width: none; }
   .panel-head a { min-width: 44px; text-align: center; display: inline-block; }
   .wrap > .toolbar .colpick > summary.btn { min-width: 44px; justify-content: center; }
 }
+
+/* sprint3 B-review */
+/* weekly review on the Overview (SW-043): numbers left, the products that changed most right; phones stack */
+.weekly .wk-b { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 34%); gap: 8px 24px; align-items: start; }
+.wk-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+@media (min-width: 1101px) { .wk-g { grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr)); } }
+@media (min-width: 761px) and (max-width: 1599px) { .wk-p { display: none; } }
+.wk-c { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.wk-c > span { font-size: 12px; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-c > b { font-size: 16px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wk-d { font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wk-d.good { color: var(--ok); } .wk-d.bad { color: var(--lost); } .wk-d.n { color: var(--soft); }
+.wk-mv { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wk-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(84px, auto); gap: 10px; align-items: center; cursor: pointer; }
+.wk-row .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--brand); }
+.wk-row .num { text-align: right; color: var(--ink-2); }
+.wk-row .wk-d { text-align: right; }
+.wk-row:hover .name, .wk-row:focus-visible .name { text-decoration: underline; }
+@media (max-width: 1100px) { .weekly .wk-b { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .wk-g { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wk-c:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .wk-row { min-height: 44px; }
+}

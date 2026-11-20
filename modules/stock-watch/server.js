@@ -39,6 +39,7 @@ const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
+const weekly = require('./src/weekly');     // sprint 3 B-review: daily snapshots, this week vs last week (SW-043)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -244,6 +245,7 @@ function loadDemo() {
   const g = demo.generate({ now: Date.now(), ...own.opts });
   store.replaceAll(g.stock, g.orders, 'demo');
   decide.clear();   // SW-032: decisions belong to the data they were made on
+  weekly.clear();   // SW-043: so are the daily snapshots
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(isDemoName(s.storeName) ? { storeName: own.name } : {}) });
   return g;
@@ -294,6 +296,7 @@ async function pullOne(id) {
     await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
     console.log(`shopify (${storeName(id)}): ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
     alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
+    weekly.catchUp();   // SW-043: the day's snapshot once the pull reaches past store-midnight (in the background; never throws)
     return { stock, orders };
   } catch (e) {
     runs.finish(store.load(), run, e.message);
@@ -389,9 +392,10 @@ const digestCtx = {
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
   },
-  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(scope.id()); },
+  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(scope.id()); await weekly.catchUp(); },
   storeName: () => storeName(),
   storeId: () => scope.id(),
+  review: () => { try { return weekly.digestLine(weekly.current()); } catch { return null; } },   // SW-043: one line, this week vs last week
 };
 
 /* ---------- API ---------- */
@@ -464,10 +468,12 @@ async function storeApi(req, res, url, role, id) {
   const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
+  for (const h of [weekly]) { const x = await h.handle(req, url, readBody, { role, by: whoOf(req, role) }); if (x) return send(res, x.code, x.body); }   // sprint 3 B-review
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
     r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts());   // SW-027
+    setImmediate(() => weekly.catchUp());   // SW-043: the first report after store-midnight takes the day's snapshot
     return send(res, 200, { ok: true, ...r, store: here, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness(), app: version.current() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
@@ -521,7 +527,7 @@ async function storeApi(req, res, url, role, id) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { if (pulls.has(id)) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (pulls.has(id)) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); weekly.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));

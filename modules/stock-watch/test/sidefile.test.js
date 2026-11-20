@@ -93,7 +93,7 @@ test('Clear, then restore the before-clear backup: Mark-ordered records and deci
   fs.copyFileSync(path.join(backup.dir(), snap), F('restore.json'));
   const r = backup.restorePending();
   assert.equal(r.restored, true);
-  assert.deepEqual(r.sideFiles.sort(), ['decisions.json', 'onorder.json']);
+  for (const n of ['decisions.json', 'onorder.json']) assert.ok(r.sideFiles.includes(n), n);   // plus any newer side file (snapshots.json, SW-043)
   assert.equal(OO.all()['123'].qty, 40, 'the PO mark is back');
   assert.equal(OO.all()['123'].by, 'Asha');
   assert.equal(DC.all()['123'].d, 'keep', 'the decision is back');

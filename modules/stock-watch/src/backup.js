@@ -27,6 +27,7 @@ const scope = require('./scope');
 
 /* the side files a backup carries, by file name (<store folder>/<name>) */
 const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
+for (const m of [require('./weekly')]) SIDES[m.FILE_NAME] = m;   // sprint 3 B-review: snapshots.json (SW-043)
 
 /* the current store's folder (src/scope.js) */
 const dir = () => path.join(scope.dir(), 'backups');

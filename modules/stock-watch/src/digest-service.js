@@ -106,7 +106,7 @@ function make(role, ctx, now = Date.now()) {
   const weekly = R.valid(role) && R.ROLES[role].digest === 'monday';   // CEO, finance: "last 7 days", vs the 7 before
   const week = weekly ? ctx.report({ days: 7, now }) : null;
   const prev = weekly ? ctx.report({ days: 7, now: now - 7 * DAY }) : null;
-  return digest.build({ report: r, yesterday: r.yesterday, week, prev, role, storeName: nameOf(ctx), storeId: ctx.storeId ? ctx.storeId() : '', base: baseUrl(), now });
+  return digest.build({ report: r, yesterday: r.yesterday, week, prev, role, storeName: nameOf(ctx), storeId: ctx.storeId ? ctx.storeId() : '', base: baseUrl(), now, review: ctx.review ? ctx.review() : null });
 }
 
 function logSend(entry) {

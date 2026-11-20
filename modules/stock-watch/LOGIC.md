@@ -203,6 +203,18 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 - Considered: a "Yesterday" button in the picker (a one-day period). Rejected: one line answers the question without changing every other number on the screen.
 - When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
 
+### 5b. This week vs last week (SW-043, `src/weekly.js`, `public/weekly.js`)
+
+- **Daily snapshot**: once a day per store, the headline numbers are saved in `snapshots.json` (FORMATS.md), so the comparison shows what the page said then, not today's maths re-run on old rows. One rule for every snapshot: the report as of the store-midnight that ends the day (rows recorded by then, Mark-ordered records made by then, inactive flags as they stood then, today's unit costs), period = that one store day.
+  - Flows of that day: *sales lost* (§4), *profit lost* (§7b), *stock-outs* = stock-outs that started that day.
+  - State at its end: *still out* (§5), *overstock* = cash stuck in overstock (§7c), *to reorder* = Order today + This week rows (§6), *order today* = order cost of the Out now / Critical / Order now rows.
+  - `lostBy`: ₹ lost per product that day, top 100 (for the movers).
+- **When it is taken**: on the first report or pull after store-midnight, once the data reaches past the day's end (Shopify: the last good pull is after midnight; Sheet / CSV / Flow / demo: now). Missing days of the last 14 are filled in (first run, downtime), from the first day with any row. Kept 400 days. Demo and real data never mix: a switch demo → live starts the snapshots again; Clear and a demo load forget them.
+- **The panel** (Overview, under the headline tiles): *this week* = the newest saved day up to yesterday and the 6 days before; *last week* = the 7 days before those. Flows are added up over the week; states are the newest day's. Each number shows its change (▲▼ and ₹ or count; % on wide screens and in the tooltip): green = better (less lost, fewer out, less overstock), rose = worse; *to reorder* and *order today* are grey (neither good nor bad). A week with fewer than 7 saved days says so ("5 of 7 days").
+- **Movers**: the 5 products whose ₹ lost changed most between the two weeks (absolute change, ties by ₹ lost this week); a click opens the product.
+- **Digest**: Founder and Everyone get one line, `This week: ₹X lost to stock-outs, up/down from ₹Y last week · N stock-outs (M the week before).` The CEO digest already compares weeks (§17), so it doesn't.
+- When it can be wrong: a backfilled day uses today's in-stock rate and today's unit costs, like every ₹ lost figure (§4); a day taken late (no report or pull that day) still has its correct day window, but *still out* and *order today* reflect the rows known by its midnight.
+
 ---
 
 ## 6. Reorder status and quantity
@@ -596,7 +608,7 @@ A few plain-language lines per role and per store, with a link that opens that s
 | Role | When | Lines |
 |---|---|---|
 | CEO | Mondays | sales lost last 7 days (₹, % of demand) **vs the 7 days before**; profit lost; cash in overstock; best sellers at risk |
-| Founder / COO (and "Everyone") | daily | order today ₹ and products; still out + cost per day; yesterday; overstock |
+| Founder / COO (and "Everyone") | daily | order today ₹ and products; still out + cost per day; yesterday; overstock; this week vs last week (§5b, when 2 weeks of snapshots exist) |
 | Ops / inventory | daily | order today lines + ₹; top 3 lines (qty, days left); yesterday ran out / back |
 | Marketing | daily | pause promotion count + top 3; push (overstock ₹) + top 3 |
 | Finance | Mondays | cash to order today + more due this week; overstock; sales lost last 7 days |
