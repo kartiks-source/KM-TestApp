@@ -22,6 +22,8 @@ Every HTTP route `server.js` answers, version 0.9.0. Source of truth: `server.js
 | 429 | too many wrong passwords (10 per IP / 15 min; or a wrong one while 100 across all IPs failed); `retry-after: 900` |
 | 500 | a bug: `Something went wrong on the server` (logged) |
 
+**Which store** (ADR-0015): every `/api/*` route except `/api/stores`, and `/ingest/*`, takes `?store=<id>`. Without it: the `sw_store` cookie when it names a listed store (the page sets it), else the first store (Flow ingest: always the first store unless `?store=` is given). An id that isn't listed, or isn't a uuid / `^[a-z0-9][a-z0-9-]{0,60}$`, → **404** `Unknown store`, before anything is read. No store at all yet (Performity's brand list never loaded) → **503** `No store yet: …`. Every route then reads and writes only that store's data.
+
 **Report query values** (`/api/report`, `/api/product/:id`, `/api/groups`, `/api/export/reorder.csv`)
 
 | Param | Meaning |
@@ -33,8 +35,8 @@ Every HTTP route `server.js` answers, version 0.9.0. Source of truth: `server.js
 
 | Method · path | Auth | Answer |
 |---|---|---|
-| `GET /health` | open | 200 `{"ok":true}`; 503 `{"ok":false,"error":"…"}` while the store can't be read or saving fails |
-| `GET /status` | open | `{ ok, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, uptimeMin }`; **503** when the last good Shopify pull is over 45 min old (or none 45 min after start) or saving fails. Without Shopify, `stale` is always false. No names, keys or error text |
+| `GET /health` | open | 200 `{"ok":true}`; 503 `{"ok":false,"error":"…"}` while any opened store can't be read or saving fails |
+| `GET /status` | open | `{ ok, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, stores, uptimeMin }`, over **every store**: `stale` / `pullFailing` = any store, `ageMin` = the oldest store's, `lastPull` = the oldest store's last good pull, sizes and counts summed, `source` = the stores' source or `mixed`, `stores` = how many; **503** when any store's last good Shopify pull is over 45 min old (or none 45 min after start), saving fails, or there is no store. Without Shopify, `stale` is always false. No names, ids, keys or error text |
 | `GET /login` | open | sign-in page (302 to `/` when already signed in) |
 | `POST /login` | open | form `password=…` (≤ 4 KB). Right → 303 to `/` with `set-cookie: sw_session=…; HttpOnly; SameSite=Lax; Max-Age=2592000` (`Secure` behind https). Wrong → 401 page; limited → 429 page. No `ADMIN_PASSWORD` → 303 to `/` |
 | `POST /logout` | open | 303 to `/login`, cookie cleared. `GET /logout` → 303 to `/` (does nothing) |
@@ -47,20 +49,21 @@ Every HTTP route `server.js` answers, version 0.9.0. Source of truth: `server.js
 | ⚠ `POST /ingest/stock` | key | one stock row: JSON object, JSON array (≤ 500), or a comma-separated line; ≤ 2 MB. `FORMATS.md` §Flow | `{ ok, received, added }` (duplicates not added) |
 | ⚠ `POST /ingest/order` | key | one order line, same forms | same |
 
-Key: header `X-Ingest-Key: <key>`. `?key=` still works but is deprecated (logged, at most hourly, without the key). Errors: **401** wrong or missing key; **409** Shopify is connected (one source per store, ADR-0009); **413** more than 500 rows.
+Store: `?store=<id>` (each store has its own key; without it, the first store). Key: header `X-Ingest-Key: <key>`. `?key=` still works but is deprecated (logged, at most hourly, without the key). Errors: **401** wrong or missing key; **409** Shopify is connected (one source per store, ADR-0009); **413** more than 500 rows.
 
 ## Report and lookups (view)
 
 | Method · path | Params | Answer |
 |---|---|---|
-| `GET /api/report` | report query values | `{ ok, generatedAt, days, from, period: 'days'\|'month', settings, totals, daily[], reorder[], stockouts[], products[], data, decide[], decided[], yesterday, source, lastSync, lastSyncError, shopify, freshness }`. `products[]` rows: `id, name, sku, stock, perDay, price, daysLeft, status, orderQty, orderValue, lost, sold, cost, lostProfit, excessValue, overstock, abc, trendPct, trendCall, why, orderBy, onOrder, …` (LOGIC.md names each rule). `reorder[]` = rows to order, `decide[]` = slow sellers to decide, `yesterday` = `{ day, sold, lost, ranOut, back }`, `freshness` = `{ shopify, lastPull, ageMin, stale, staleAfterMin, running?, pullFailing? }` |
+| `GET /api/stores` | none | `{ ok, stores: [{ id, name, demo, shop, status: { lastSync, lastError, stale, running, source, state: 'ok'\|'stale'\|'error' } }], current, registry: { mode, lastError, refreshedAt } }`: every store, in order (the first is the default); `current` = the store this request would get without `?store=`. `name` = the store name set on Data & settings, else the brand name / handle / demo label |
+| `GET /api/report` | report query values | `{ ok, store: { id, name }, generatedAt, days, from, period: 'days'\|'month', settings, totals, daily[], reorder[], stockouts[], products[], data, decide[], decided[], yesterday, source, lastSync, lastSyncError, shopify, freshness }`. `products[]` rows: `id, name, sku, stock, perDay, price, daysLeft, status, orderQty, orderValue, lost, sold, cost, lostProfit, excessValue, overstock, abc, trendPct, trendCall, why, orderBy, onOrder, …` (LOGIC.md names each rule). `reorder[]` = rows to order, `decide[]` = slow sellers to decide, `yesterday` = `{ day, sold, lost, ranOut, back }`, `freshness` = `{ shopify, lastPull, ageMin, stale, staleAfterMin, running?, pullFailing? }` |
 | `GET /api/product/:id` | report query values; `:id` = variant ID, URL-encoded | `{ ok, id, product, timeline[{t, stock}], dailyUnits[{day, units}], stockouts[] }`; `product` is null for an ID with no rows (still 200). Bad `%` encoding → 400 `Bad product ID in the address` |
 | `GET /api/groups` | none | `{ ok, lenses[], catalog }`: which lenses this catalog can offer |
 | `GET /api/groups?lens=` | `lens` = `product`, `type`, `collection`, `tag`; `all=1` shows catch-all collections; report query values | `{ ok, lens, overlap, groups[{ key, label, n, needOrder, sold, lost, lostProfit, orderValue, excessValue, ids[], trendPct, trendCall }], total, store, hidden[], storeTrendPct, catalog }`. `total` is null for `collection` / `tag` (a product can be in many). Unknown lens → 400 `Unknown group` |
-| `GET /api/settings` | none | `{ ok, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify }`. View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion }` (never a secret) |
+| `GET /api/settings` | none | `{ ok, store: { id, name }, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify }`. View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion }` (never a secret) |
 | `GET /api/onorder` | none | `{ ok, onOrder: { variantId: { qty, eta, at, by } } }` |
 | `GET /api/decide` | none | `{ ok, decisions: { variantId: { d, base, at } } }` |
-| `GET /api/export/reorder.csv` | `filter` = `all` (default), `today`, `week`, `ordered`; `q` = search on name/SKU; report query values | CSV download `reorder-YYYY-MM-DD.csv` (UTF-8 BOM). Columns in `FORMATS.md` §PO CSV |
+| `GET /api/export/reorder.csv` | `filter` = `all` (default), `today`, `week`, `ordered`; `q` = search on name/SKU; report query values | CSV download `reorder-<store-name>-YYYY-MM-DD.csv` (UTF-8 BOM; the store name in lower case, dashes for anything else). Columns in `FORMATS.md` §PO CSV |
 | `GET /api/export/backup.json` | none | **admin only** (view → 403). The whole `store.json` plus `sideFiles` (`onorder.json`, `decisions.json`) as a download `stock-watch-store-YYYYMMDD-HHMMSS.json`. Holds the ingest key: treat as a secret |
 
 ## Writes (admin)
@@ -86,4 +89,4 @@ Key: header `X-Ingest-Key: <key>`. `?key=` still works but is deprecated (logged
 | `PUT /api/digest/settings` | admin | JSON ≤ 64 KB `{ hour?: 0–23, roles?: [...], paused?: bool }`; roles without a scheduled digest (buyer, warehouse, unknown) dropped | same as GET | 400 bad hour, not JSON, or any `webhookUrl` (env only) |
 | ⚠ `POST /api/digest/send` | admin | `role` (none = every ticked role) | 200 `{ ok, sent[{ at, role, trigger, ok, status, error }] }`; 502 with `error` when any send failed | 400 no roles ticked; 400 no webhook (`DIGEST_WEBHOOK_URL` / `_<ROLE>`) |
 
-Webhook payload (POST JSON to the env URL): `{ app: 'stock-watch', kind: 'digest', at, store, role, roleName, title, lines, link, text, note? }`. The alert webhook (`ALERT_WEBHOOK_URL`) gets `{ text }`.
+Each store has its own digest settings, send log and schedule; the title names the store and the link opens it (`/?store=<id>&role=…#page`). Webhook payload (POST JSON to the env URL): `{ app: 'stock-watch', kind: 'digest', at, store, storeId, role, roleName, title, lines, link, text, note? }` (`store` = its name). The alert webhook (`ALERT_WEBHOOK_URL`) gets `{ text }`.

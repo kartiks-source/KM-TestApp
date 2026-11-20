@@ -217,6 +217,7 @@ test('store: replacing an order removes its old lines (cancellation / refund pic
   const os = require('node:os'), fs = require('node:fs'), path = require('node:path');
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-'));
   delete require.cache[require.resolve('../src/store')];
+  require('../src/scope').useDir(process.env.DATA_DIR);   // the module on its own: one store folder
   const store = require('../src/store');
   store.replaceAll([], [], 'empty');
   store.replaceOrders(['#1', '#2'], [{ t: Date.now(), order: '#1', line: 'a', variantId: 'v', qty: 2, price: 10 }, { t: Date.now(), order: '#2', line: 'b', variantId: 'v', qty: 1, price: 10 }]);

@@ -9,8 +9,12 @@
  * Hour, roles, pause and the send log live in the store under `digest`. PUBLIC_URL or
  * RAILWAY_PUBLIC_DOMAIN gives the address for links in scheduled digests.
  *
- * server.js passes ctx = { report({ days, now }) → report with .yesterday, pull() → fresh data }.
+ * server.js passes ctx = { report({ days, now }) → report with .yesterday, pull() → fresh data,
+ *   storeName() → the store's name, storeId() → its id (for the link) }.
+ * Per store (ADR-0015): settings and the send log live in each store's store.json; the scheduler runs each
+ * store's tick inside scope.run (server.js), one store at a time; every digest names its store.
  */
+const scope = require('./scope');
 const store = require('./store');
 const R = require('../public/roles');
 const digest = require('./digest');
@@ -71,13 +75,14 @@ function applyPatch(b) {
 let lastBase = '';
 const baseUrl = () => (process.env.PUBLIC_URL || '').replace(/\/+$/, '') || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '') || lastBase;
 
+const nameOf = (ctx) => (ctx.storeName ? ctx.storeName() : store.load().settings.storeName);
 /** The digest for one role ('' = everyone) as of `now`. */
 function make(role, ctx, now = Date.now()) {
   const r = ctx.report({ days: 30, now });
   const weekly = R.valid(role) && R.ROLES[role].digest === 'monday';   // CEO, finance: "last 7 days", vs the 7 before
   const week = weekly ? ctx.report({ days: 7, now }) : null;
   const prev = weekly ? ctx.report({ days: 7, now: now - 7 * DAY }) : null;
-  return digest.build({ report: r, yesterday: r.yesterday, week, prev, role, storeName: store.load().settings.storeName, base: baseUrl(), now });
+  return digest.build({ report: r, yesterday: r.yesterday, week, prev, role, storeName: nameOf(ctx), storeId: ctx.storeId ? ctx.storeId() : '', base: baseUrl(), now });
 }
 
 function logSend(entry) {
@@ -85,7 +90,7 @@ function logSend(entry) {
   c.log.push(entry);
   if (c.log.length > LOG_KEEP) c.log.splice(0, c.log.length - LOG_KEEP);
   store.save();
-  console.log(`digest: ${entry.role || 'everyone'} ${entry.trigger} → ${entry.ok ? `sent (${entry.status})` : `failed: ${entry.error}`}`);
+  console.log(`digest${scope.current() ? ` (store ${scope.current()})` : ''}: ${entry.role || 'everyone'} ${entry.trigger} → ${entry.ok ? `sent (${entry.status})` : `failed: ${entry.error}`}`);
 }
 
 /** POST one role's digest to the webhook. Always logged. Never throws. */
@@ -99,7 +104,7 @@ async function send(role, ctx, trigger, now = Date.now(), note = '') {
     const res = await fetch(url, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
       headers: { 'content-type': 'application/json', 'user-agent': 'stock-watch-digest' },
-      body: JSON.stringify({ app: 'stock-watch', kind: 'digest', at: new Date(now).toISOString(), store: store.load().settings.storeName, role: d.role, roleName: d.roleName, title: d.title, lines: d.lines, link: d.link, text: d.text, ...(note ? { note } : {}) }),
+      body: JSON.stringify({ app: 'stock-watch', kind: 'digest', at: new Date(now).toISOString(), store: nameOf(ctx), storeId: ctx.storeId ? ctx.storeId() : null, role: d.role, roleName: d.roleName, title: d.title, lines: d.lines, link: d.link, text: d.text, ...(note ? { note } : {}) }),
     });
     entry.status = res.status; entry.ok = res.ok;
     if (!res.ok) entry.error = `HTTP ${res.status}`;
@@ -124,13 +129,14 @@ function due(now = Date.now()) {
     .map((r) => ({ role: r, day }));
 }
 
-let running = null;
-/** One scheduler step: if anything is due, pull fresh data first, then send each due role once. */
+const running = new Map();   // store id → its tick in progress
+/** One scheduler step for the current store: if anything is due, pull fresh data first, then send each due role once. */
 function tick(ctx, now = Date.now()) {
-  if (running) return running;
+  const key = scope.current() || '';
+  if (running.has(key)) return running.get(key);
   const list = due(now);
   if (!list.length) return Promise.resolve([]);
-  running = (async () => {
+  const p = (async () => {
     const c = conf();
     for (const { role, day } of list) c.lastSent[role] = day;   // one try per role per day, even if it fails (see the log)
     store.save(true);
@@ -139,12 +145,14 @@ function tick(ctx, now = Date.now()) {
     const out = [];
     for (const { role } of list) out.push(await send(role, ctx, 'schedule', Date.now(), note));
     return out;
-  })().finally(() => { running = null; });
-  return running;
+  })().finally(() => { running.delete(key); });
+  running.set(key, p);
+  return p;
 }
 
-function schedule(ctx) {
-  const t = setInterval(() => tick(ctx).catch((e) => console.warn('digest:', e.message)), 60e3);
+/** Every minute: each(fn) runs fn for every store, one after the other, inside scope.run (server.js). */
+function schedule(ctx, each = (fn) => fn()) {
+  const t = setInterval(() => Promise.resolve(each(() => tick(ctx))).catch((e) => console.warn('digest:', e.message)), 60e3);
   t.unref();
   return t;
 }

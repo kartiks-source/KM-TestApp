@@ -2,6 +2,10 @@
 
 Newest first. Each one: date, decision, who decided, why.
 
+## 2026-11-20: Several stores in one app (ADR-0015)
+- **Decided (owner, spec 19–20 Nov):** every Performity brand our key may use is a store in one app, switched from the store pill. Data per store in `DATA_DIR/stores/<id>/` (the old single-store files, unchanged); passwords for every store; pulls one store at a time. No key → two labelled demo stores.
+- Why a folder per store and not a store id on every row: a missed filter would mix brands; a folder can't. Old single-store data moves into the first store on the first start (copy, check, then delete).
+
 ## 2026-11-19: Shopify credentials are client ID + secret
 - Shopify apps from the Dev Dashboard give a **client ID + client secret**, not a permanent `shpat_` token. We swap them for a 24-hour token (client credentials grant: POST `https://{store}.myshopify.com/admin/oauth/access_token`, `grant_type=client_credentials`) and request a new one before expiry; there's no refresh token. Source: Shopify docs, "Client credentials grant".
 - **Constraint:** the grant only works when the app and the store are in the same Shopify organisation. For a brand's store, the brand creates the app in its Dev Dashboard, installs it with read scopes only, and shares the ID + secret (via Key Vault: `shopify-<store>-client-id`, `shopify-<store>-client-secret`). Our own org's app can't reach a client store this way (`shop_not_permitted`).

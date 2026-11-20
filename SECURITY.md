@@ -37,11 +37,12 @@ Never put any of these in code, Markdown, logs, commit messages, chat or a Googl
 - **Shopify is read-only in code:** `src/shopify.js` `assertReadOnly()` lets only GraphQL query documents through (no `mutation`, no `subscription`) and the app asks only for read scopes, because a shared key may carry write scopes. No webhooks are registered.
 - **The Google Sheet** never talks to Shopify and holds no key: Shopify Flow writes rows into it with the brand's own Google connection.
 - **View-only password** (`VIEW_PASSWORD`, SW-029, LOGIC.md §13): one gate right after sign-in refuses every write to `/api` with 403 before any route runs (Mark ordered, decisions, settings, import, clear, demo, pulls, digest settings and send-now included). `GET /api/export/backup.json` is admin-only. Same wrong-password limiter as admin.
-- Next: named users / Performity SSO (SW-060).
+- **Several stores** (ADR-0015): the passwords and roles are for every store (anyone signed in can open any listed store; view-only is read-only on all of them). A store id comes only from `?store=` or the `sw_store` cookie and must be a uuid or `^[a-z0-9][a-z0-9-]{0,60}$` **and** in the store list, else 404 before any file is touched; it is the whole folder name under `DATA_DIR/stores/`, so no path can leave it. Each store has its own Flow ingest key (`/ingest/*?store=<id>`); one store's key never writes to another. `/status` stays free of store names and ids.
+- Next: named users / Performity SSO (SW-060), and per-store access if a brand's people must not see another brand.
 
 ## Endpoints that change or wipe data
 
-All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 on every one. Each wipe of `store.json` is backed up first (`docs/RUNBOOK.md`); backups, the export and restore carry `onorder.json` and `decisions.json` as `sideFiles` (SW-005). Full request and response shapes: `modules/stock-watch/API.md`.
+All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 on every one. Each acts on one store only: the one named by `?store=<id>` (else the `sw_store` cookie, else the first store). Each wipe of `store.json` is backed up first (`docs/RUNBOOK.md`); backups, the export and restore carry `onorder.json` and `decisions.json` as `sideFiles` (SW-005). Full request and response shapes: `modules/stock-watch/API.md`.
 
 | Endpoint | Effect | Undo |
 |---|---|---|

@@ -17,9 +17,12 @@ const backup = require('../src/backup');
 const OO = require('../src/onorder');
 const DC = require('../src/decide');
 const { server } = require('../server');
+const SD = path.join(DATA, 'stores', 'sammsara-demo');   // the server's first store: module calls and requests share it
+require('../src/scope').useDir(SD);
+fs.mkdirSync(SD, { recursive: true });
 
 const MOD = path.join(__dirname, '..');
-const F = (n) => path.join(DATA, n);
+const F = (n) => path.join(SD, n);
 const AUTH = { authorization: 'Basic ' + Buffer.from('x:side-file-test-password').toString('base64') };
 const eta = () => new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10);
 const runToExit = (dir) => new Promise((resolve) => {
@@ -28,7 +31,7 @@ const runToExit = (dir) => new Promise((resolve) => {
   const t = setTimeout(() => child.kill('SIGTERM'), 8000);
   child.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
 });
-const corrupt = (n) => fs.readdirSync(DATA).filter((x) => x.startsWith(n + '.corrupt-'));
+const corrupt = (n) => fs.readdirSync(SD).filter((x) => x.startsWith(n + '.corrupt-'));
 
 test('a corrupt onorder.json with no .bak: read refuses, the file is never overwritten, a .corrupt copy is kept', () => {
   OO.reset(); fs.writeFileSync(F('onorder.json'), '{"123": {"qty": 5');
@@ -53,15 +56,25 @@ test('a corrupt decisions.json with a good .bak: the .bak is used; the next save
 
 test('server: a corrupt onorder.json and no .bak → refuses to start, file untouched', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-side-boot-'));
+  fs.mkdirSync(path.join(dir, 'stores', 'second-demo'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'stores', 'second-demo', 'onorder.json'), 'not json');
+  const r = await runToExit(dir);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Refusing to start: onorder\.json can't be read/);
+  assert.equal(fs.readFileSync(path.join(dir, 'stores', 'second-demo', 'onorder.json'), 'utf8'), 'not json');
+});
+
+test('server: an old single-store DATA_DIR with a corrupt onorder.json → moved byte for byte into the first store, then refuses to start', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-side-boot-'));
   fs.writeFileSync(path.join(dir, 'onorder.json'), 'not json');
   const r = await runToExit(dir);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Refusing to start: onorder\.json can't be read/);
-  assert.equal(fs.readFileSync(path.join(dir, 'onorder.json'), 'utf8'), 'not json');
+  assert.equal(fs.readFileSync(path.join(dir, 'stores', 'sammsara-demo', 'onorder.json'), 'utf8'), 'not json');
 });
 
 test('Clear, then restore the before-clear backup: Mark-ordered records and decisions come back; export carries them', async () => {
-  backup.start({ everyMs: 864e5 });
+  backup.start({ everyMs: 864e5, each: (fn) => fn() });
   const now = Date.now();
   store.replaceAll([{ t: now - 864e5, variantId: '123', sku: 'S', product: 'P', variant: '', before: 2, now: 0, price: 100 }], [{ t: now - 2 * 864e5, order: '#1', variantId: '123', sku: 'S', qty: 1, price: 100 }], 'live');
   assert.equal(OO.mark([{ id: '123', qty: 40, eta: eta() }], { by: 'Asha' }).ok, true);
@@ -75,9 +88,9 @@ test('Clear, then restore the before-clear backup: Mark-ordered records and deci
     assert.equal((await fetch(`${base}/api/clear`, { method: 'POST', headers: AUTH })).status, 200);
   } finally { await new Promise((r) => server.close(r)); }
   assert.deepEqual(OO.all(), {}); assert.deepEqual(DC.all(), {});
-  const snap = fs.readdirSync(backup.DIR).filter((n) => n.endsWith('-before-clear.json')).sort().pop();
+  const snap = fs.readdirSync(backup.dir()).filter((n) => n.endsWith('-before-clear.json')).sort().pop();
   assert.ok(snap, 'Clear took a backup first');
-  fs.copyFileSync(path.join(backup.DIR, snap), F('restore.json'));
+  fs.copyFileSync(path.join(backup.dir(), snap), F('restore.json'));
   const r = backup.restorePending();
   assert.equal(r.restored, true);
   assert.deepEqual(r.sideFiles.sort(), ['decisions.json', 'onorder.json']);

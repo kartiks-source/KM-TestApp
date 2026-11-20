@@ -10,9 +10,11 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const scope = require('./scope');
 
 class SideFileError extends Error {}
-const dataDir = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+/** The current store's folder (DATA_DIR/stores/<id>, ADR-0015). */
+const dataDir = () => scope.dir();
 
 /** A side file's content: a plain JSON object, or null when the file doesn't exist. Anything else throws. */
 function parse(file) {
@@ -35,13 +37,17 @@ function writeAtomic(file, text, keepBak = true) {
   fs.renameSync(tmp, file);
 }
 
-/** One side file, DATA_DIR/<name>. read() → the object (cached); write() saves it; reset() forgets the cache (tests, restore). */
+/** One side file per store, <store folder>/<name>. read() → the object (cached per store); write() saves it;
+ *  reset() forgets the current store's cache (tests, restore); resetAll() every store's. */
 function sideFile(name) {
-  let data = null, error = null, mainBad = false;
+  const states = new Map();   // store folder → { data, error, mainBad }
   const file = () => path.join(dataDir(), name);
+  const S = () => { const f = file(); let st = states.get(f); if (!st) { st = { data: null, error: null, mainBad: false }; states.set(f, st); } return st; };
   function read() {
-    if (data) return data;
-    if (error) throw error;
+    const st = S();
+    if (st.data) return st.data;
+    if (st.error) throw st.error;
+    let data;
     const f = file();
     try { data = parse(f) || {}; } catch (e) {
       const aside = `${f}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
@@ -49,22 +55,25 @@ function sideFile(name) {
       let bak = null;
       try { bak = parse(f + '.bak'); } catch { /* the backup is bad too */ }
       if (!bak) {
-        error = new SideFileError(`${name} can't be read (${e.message}) and there is no good ${name}.bak; copied to ${path.basename(aside)}. Not starting, so nothing is overwritten.`);
-        throw error;
+        st.error = new SideFileError(`${name} can't be read (${e.message}) and there is no good ${name}.bak; copied to ${path.basename(aside)}. Not starting, so nothing is overwritten.`);
+        throw st.error;
       }
       console.error(`${name} can't be read (${e.message}); copied to ${path.basename(aside)} and loaded ${name}.bak instead.`);
-      data = bak; mainBad = true;
+      data = bak; st.mainBad = true;
     }
+    st.data = data;
     return data;
   }
   function write(next) {
-    if (next !== undefined) data = next;
-    if (!data) data = {};
-    writeAtomic(file(), JSON.stringify(data), !mainBad);   // never make the bad file the .bak
-    mainBad = false;
+    const st = S();
+    if (next !== undefined) st.data = next;
+    if (!st.data) st.data = {};
+    writeAtomic(file(), JSON.stringify(st.data), !st.mainBad);   // never make the bad file the .bak
+    st.mainBad = false;
   }
-  const reset = () => { data = null; error = null; mainBad = false; };
-  return { name, file, read, write, reset };
+  const reset = () => { states.delete(file()); };
+  const resetAll = () => { states.clear(); };
+  return { name, file, read, write, reset, resetAll };
 }
 
 module.exports = { sideFile, parse, writeAtomic, SideFileError, dataDir };

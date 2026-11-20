@@ -11,8 +11,8 @@ function withEnv(vars, fn) {
     const keep = { ...process.env }, realFetch = global.fetch;
     try {
       for (const k of Object.keys(process.env)) if (/^(AZURE_|SHOPIFY_|TOKEN_API|ALERT_|PERFORMITY_)/.test(k)) delete process.env[k];
-      Object.assign(process.env, vars); K.clear(); K._resetPoc(); await fn();
-    } finally { process.env = keep; global.fetch = realFetch; K.clear(); K._resetPoc(); }
+      Object.assign(process.env, vars); K.clear(); K._resetPoc(); K._pace(0, 0); await fn();
+    } finally { process.env = keep; global.fetch = realFetch; K.clear(); K._resetPoc(); K._pace(2100, 6100); }
   };
 }
 const json = (code, body) => new Response(JSON.stringify(body), { status: code });
@@ -40,7 +40,7 @@ test('status: URL + key are enough; https only (localhost allowed for the stand-
 
 test('one allowed brand: X-Api-Key sent, brand picked, POST fresh-token with brand_id, shop from shop_domain', withEnv(ENV, async () => {
   const calls = fakeApi();
-  const a = await K.access();
+  const a = await K.access(BRAND);
   assert.deepEqual([a.shop, a.token, a.brand], ['sammsara', 'tok-2', BRAND]);
   assert.equal(calls[0].url, 'https://poc.example.com/catalys/shopify/service/external/brands');
   assert.equal(calls[1].method, 'POST'); assert.deepEqual(JSON.parse(calls[1].body), { brand_id: BRAND });
@@ -49,11 +49,11 @@ test('one allowed brand: X-Api-Key sent, brand picked, POST fresh-token with bra
 
 test('token asked right before each pull, reused within the pull, re-asked on a Shopify 401', withEnv(ENV, async () => {
   const calls = fakeApi();
-  K.beginPull(); await K.access(); await K.access();
+  K.beginPull(BRAND); await K.access(BRAND); await K.access(BRAND);
   assert.equal(calls.filter((c) => c.url.endsWith('fresh-token')).length, 1);      // one per pull
-  K.beginPull(); await K.access();
+  K.beginPull(BRAND); await K.access(BRAND);
   assert.equal(calls.filter((c) => c.url.endsWith('fresh-token')).length, 2);      // next pull asks again
-  K.clear(); await K.access();
+  K.clear(); await K.access(BRAND);
   assert.equal(calls.filter((c) => c.url.endsWith('fresh-token')).length, 3);      // Shopify 401 → ask once more
 }));
 
@@ -61,55 +61,78 @@ test('expires_at is UTC without a zone (not local time); null = never expires; n
   assert.equal(K._utc('2026-11-19T10:15:00'), Date.parse('2026-11-19T10:15:00Z'));
   assert.equal(K._utc(null), null);
   fakeApi({ token: () => ({ access_token: 't', shop_domain: 'sammsara.myshopify.com', expires_at: null }) });
-  assert.equal((await K.access()).token, 't');
+  assert.equal((await K.access(BRAND)).token, 't');
   K.clear();
   fakeApi({ token: () => ({ access_token: 't', shop_domain: 'sammsara.myshopify.com', expires_at: inMin(0.5) }) });
-  await assert.rejects(K.access(), /about to expire/);
+  await assert.rejects(K.access(BRAND), /about to expire/);
 }));
 
-test('several brands need PERFORMITY_BRAND_ID; none allowed says so; unknown brand refused', withEnv(ENV, async () => {
-  fakeApi({ brands: [{ brand_id: BRAND, brand_name: 'Sammsara' }, { brand_id: '11111111-2222-3333-4444-555555555555', brand_name: 'Dawbu' }] });
-  await assert.rejects(K.access(), /allows 2 brands.*PERFORMITY_BRAND_ID.*Dawbu/);
-  process.env.PERFORMITY_BRAND_ID = '11111111-2222-3333-4444-555555555555'; K._resetPoc();
-  assert.equal((await K.access()).brand, '11111111-2222-3333-4444-555555555555');
-  process.env.PERFORMITY_BRAND_ID = '99999999-2222-3333-4444-555555555555'; K.clear(); K._resetPoc();
-  await assert.rejects(K.access(), /isn’t in our allowed list/);
+test('several brands: each is its own store (own token, own brand_id); PERFORMITY_BRAND_ID limits to one; unknown brand refused', withEnv(ENV, async () => {
+  const OTHER = '11111111-2222-3333-4444-555555555555';
+  const calls = fakeApi({ brands: [{ brand_id: BRAND, brand_name: 'Sammsara' }, { brand_id: OTHER, brand_name: 'Dawbu' }],
+    token: (n) => ({ access_token: `tok-${n}`, shop_domain: 'shop.myshopify.com', expires_at: inMin(60) }) });
+  const a = await K.access(BRAND), b = await K.access(OTHER);
+  assert.deepEqual([a.brand, b.brand], [BRAND, OTHER]);
+  assert.notEqual(a.token, b.token);
+  assert.deepEqual(calls.filter((c) => c.url.endsWith('fresh-token')).map((c) => JSON.parse(c.body).brand_id), [BRAND, OTHER]);
+  K.beginPull(OTHER); await K.access(BRAND);                                         // one store's pull never drops another's token
+  assert.equal(calls.filter((c) => c.url.endsWith('fresh-token')).length, 2);
+  process.env.PERFORMITY_BRAND_ID = OTHER; K.clear(); K._resetPoc();
+  await assert.rejects(K.access(BRAND), /PERFORMITY_BRAND_ID limits this app/);
+  assert.equal((await K.access(OTHER)).brand, OTHER);
   delete process.env.PERFORMITY_BRAND_ID; K.clear(); K._resetPoc();
-  fakeApi({ brands: [] });
-  await assert.rejects(K.access(), /No brand is allowed/);
+  await assert.rejects(K.access('99999999-2222-3333-4444-555555555555'), /isn’t in our allowed list/);
+  K._resetPoc(); fakeApi({ brands: [] });
+  await assert.rejects(K.access(BRAND), /isn’t in our allowed list/);
+}));
+
+test('pacing: calls queue at least the call gap apart; token calls for one brand at least the token gap apart (Performity limits)', withEnv(ENV, async () => {
+  const OTHER = '11111111-2222-3333-4444-555555555555';
+  const at = [];
+  fakeApi({ brands: [{ brand_id: BRAND, brand_name: 'S' }, { brand_id: OTHER, brand_name: 'D' }], token: (n) => { at.push(Date.now()); return { access_token: `t${n}`, shop_domain: 's.myshopify.com', expires_at: inMin(60) }; } });
+  K._pace(40, 250);
+  await K.brands();
+  await Promise.all([K.access(BRAND), K.access(OTHER)]);              // two brands at once: queued, call gap only
+  assert.ok(at[1] - at[0] >= 35 && at[1] - at[0] < 240, `two brands ${at[1] - at[0]} ms apart`);
+  K.beginPull(BRAND); await K.access(BRAND);                          // same brand again: token gap
+  assert.ok(at[2] - at[0] >= 245, `same brand ${at[2] - at[0]} ms apart`);
 }));
 
 test('token for a non-myshopify domain is refused (never send it elsewhere)', withEnv(ENV, async () => {
   fakeApi({ token: () => ({ access_token: 't', shop_domain: 'evil.example.com', expires_at: inMin(60) }) });
-  await assert.rejects(K.access(), /myshopify/);
+  await assert.rejects(K.access(BRAND), /myshopify/);
 }));
 
 test('guide error handling: 401 pauses 15 min without retrying; 403 IP / brand, 404, 409 explained; 500 retried once', withEnv(ENV, async () => {
   let n = 0;
   global.fetch = async () => { n++; return json(401, { error: 'Invalid API key' }); };
-  await assert.rejects(K.access(), /401.*Paused 15 minutes/);
-  await assert.rejects(K.access(), /Paused 15 minutes/);
+  await assert.rejects(K.access(BRAND), /401.*Paused 15 minutes/);
+  await assert.rejects(K.access(BRAND), /Paused 15 minutes/);
   assert.equal(n, 1);                                                   // second attempt never reached the API
   for (const [code, err, re] of [[403, 'IP not allowed', /static outbound IP/], [403, 'Brand not allowed', /brand not allowed/], [404, 'No connected Shopify store for this brand.', /no connected Shopify store/], [409, 'Shopify store must be reconnected in Performity.', /reconnect/]]) {
     K._resetPoc(); K.clear();
     fakeApi({ token: json(code, { error: err }) });
-    await assert.rejects(K.access(), re);
+    await assert.rejects(K.access(BRAND), re);
   }
   K._resetPoc(); K.clear(); let tries = 0;
   global.fetch = async (url) => { if (url.endsWith('/brands')) return json(200, [{ brand_id: BRAND, brand_name: 'S' }]); tries++; return tries === 1 ? json(500, { error: 'Internal error' }) : json(200, { access_token: 'ok', shop_domain: 'sammsara.myshopify.com', expires_at: inMin(60) }); };
-  assert.equal((await K.access()).token, 'ok'); assert.equal(tries, 2);
+  assert.equal((await K.access(BRAND)).token, 'ok'); assert.equal(tries, 2);
 }));
 
 test('alerts: one message on failure, reminder after 6 h, one on recovery, tokens scrubbed', withEnv({ ALERT_WEBHOOK_URL: 'https://hooks.example.com/x' }, async () => {
   A._reset(); const sent = [];
   const fetchImpl = async (u, opt) => { sent.push(JSON.parse(opt.body).text); return json(200, {}); };
   const t0 = Date.parse('2026-11-20T00:00:00Z');
-  await A.syncResult(false, 'Shopify rejected Bearer shpat_abc123', { now: t0, store: 'brand', fetchImpl });
-  await A.syncResult(false, 'again', { now: t0 + 3600e3, fetchImpl });
-  await A.syncResult(false, 'again', { now: t0 + 6 * 3600e3, fetchImpl });
-  await A.syncResult(true, '', { now: t0 + 7 * 3600e3, fetchImpl });
-  await A.syncResult(true, '', { now: t0 + 8 * 3600e3, fetchImpl });
-  assert.equal(sent.length, 3);
+  const one = { store: 'Brand One', key: 'brand-one', fetchImpl };
+  await A.syncResult(false, 'Shopify rejected Bearer shpat_abc123', { now: t0, ...one });
+  await A.syncResult(false, 'again', { now: t0 + 3600e3, ...one });
+  await A.syncResult(false, 'other store down', { now: t0 + 3600e3, store: 'Brand Two', key: 'brand-two', fetchImpl });   // its own first alert
+  await A.syncResult(false, 'again', { now: t0 + 6 * 3600e3, ...one });
+  await A.syncResult(true, '', { now: t0 + 7 * 3600e3, ...one });
+  await A.syncResult(true, '', { now: t0 + 8 * 3600e3, ...one });
+  assert.equal(sent.length, 4);
   assert.doesNotMatch(sent[0], /shpat_abc123/);
-  assert.match(sent[1], /still failing for 6 h/); assert.match(sent[2], /work again/);
+  assert.match(sent[0], /Stock-out Watch \(Brand One\)/, 'names the store');
+  assert.match(sent[1], /\(Brand Two\).*other store down/);
+  assert.match(sent[2], /Brand One.*still failing for 6 h/); assert.match(sent[3], /Brand One.*work again/);
 }));

@@ -8,6 +8,10 @@
  *   VIEW_PASSWORD=...    → optional second password: sees everything, changes nothing (src/access.js, SW-029)
  *   PORT, DATA_DIR       → optional
  *   Shopify (read-only) → see src/keys.js: client ID + secret from Azure Key Vault, or SHOPIFY_STORE + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
+ *
+ * Several stores (ADR-0015): src/stores.js lists them; every /api route and /ingest takes ?store=<id> (default: the
+ * sw_store cookie, else the first store) and runs inside scope.run(id), so each store reads and writes only its own
+ * folder, DATA_DIR/stores/<id>/. Passwords and sign-in are for every store; pulls run one store at a time.
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -31,6 +35,9 @@ const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Pus
 const decide = require('./src/decide');
 const period = require('./src/period');
 const digests = require('./src/digest-service');
+const scope = require('./src/scope');
+const stores = require('./src/stores');
+const migrate = require('./src/migrate');
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -41,6 +48,7 @@ const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
 const PASSWORDS = { admin: PASSWORD, view: VIEW_PASSWORD };
 const PUBLIC = path.join(__dirname, 'public');
 const SYNC_EVERY = 15 * 60e3;
+const STORE_COOKIE = 'sw_store';   // the store last chosen in the picker (public/stores.js); ?store= wins
 const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
@@ -169,6 +177,37 @@ function settingsFor(url, saved) {
 const ONE_SOURCE = 'Shopify is connected, so it is this store’s only data source. Flow, Sheet and CSV data are turned off so no sale is counted twice.';
 const PULL_RUNNING = 'A Shopify pull is running. Try again in a minute.';
 
+/* ---------- stores (ADR-0015): open each one once, then run its work inside scope.run ---------- */
+const opened = new Map();   // store id → null (open) or the Error it failed with
+/** Open a store once: the first store takes the old single-store files (src/migrate.js), a pending restore.json is
+ *  applied (src/backup.js), then store.json and the side files load. Throws (and keeps throwing) when they can't. */
+function openStore(id) {
+  if (opened.has(id)) { const e = opened.get(id); if (e) throw e; return; }
+  try {
+    scope.run(id, () => {
+      if (stores.first()?.id === id) migrate.run(scope.root(), id);
+      backup.prepare();
+      store.load(); onorder.all(); decide.all();
+    });
+    opened.set(id, null);
+  } catch (e) { opened.set(id, e); throw e; }
+}
+/** fn() for one store, inside its scope. */
+function inStore(id, fn) { openStore(id); return scope.run(id, fn); }
+/** fn() for every store, one after the other (Performity's and Shopify's limits are per IP / per app). Never throws. */
+async function eachStore(fn) {
+  for (const s of stores.list()) {
+    try { await inStore(s.id, fn); } catch (e) { console.warn(`store ${s.id}:`, e.message); }
+  }
+}
+const isDemoName = (n) => !n || n === 'Demo Store' || /\(demo\)$/.test(n);
+/** What people call the current store: the name set on Data & settings, else the registry's (brand name, handle, demo label). */
+function storeName(id = scope.id()) {
+  const nm = store.load().settings.storeName, e = stores.get(id);
+  if (e && e.demo) return nm && !isDemoName(nm) ? nm : e.name;
+  return nm && !isDemoName(nm) ? nm : (e ? e.name : id);
+}
+
 /* ---------- Google Sheet sync (published CSV links of the Stock log / Order log tabs) ---------- */
 async function syncSheet() {
   const s = store.load().settings;
@@ -197,79 +236,142 @@ async function syncSheet() {
   }
 }
 
-/* ---------- demo data (Sammsara's public catalog, invented stock and sales) ---------- */
+/* ---------- demo data (Sammsara's public catalog, invented stock and sales); each demo store has its own mix ---------- */
 function loadDemo() {
-  const g = demo.generate({ now: Date.now() });
+  const own = demo.STORES.find((x) => x.id === scope.id()) || demo.STORES[0];
+  const g = demo.generate({ now: Date.now(), ...own.opts });
   store.replaceAll(g.stock, g.orders, 'demo');
   decide.clear();   // SW-032: decisions belong to the data they were made on
   const s = store.load().settings;
-  store.setSettings({ demoVersion: demo.VERSION, ...(['Demo Store', '', null, undefined].includes(s.storeName) || /\(demo\)$/.test(s.storeName) ? { storeName: demo.STORE_NAME } : {}) });
+  store.setSettings({ demoVersion: demo.VERSION, ...(isDemoName(s.storeName) ? { storeName: own.name } : {}) });
   return g;
 }
 
-/* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ---------- */
-let shopifyRun = null;
-let shopifyProgress = null;   // live counts of the running pull (SW-030)
-function shopifyStatus() {
-  const k = keys.status(); const st = store.load().shopify;
+/* ---------- Shopify, read-only pull (stock every 15 minutes, new orders since the last pull) ----------
+ * One pull at a time across all stores (one queue): Performity allows 30 calls/min per IP and the Shopify app's
+ * rate limit is shared. A store already queued or pulling returns the same promise. */
+const pulls = new Map();      // store id → its queued or running pull
+const progress = new Map();   // store id → live counts of its running pull (SW-030)
+let pullQueue = Promise.resolve();
+function shopifyStatus(id = scope.id()) {
+  const k = keys.status(id); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
-    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: !!shopifyRun, progress: runs.progress(shopifyProgress),
+    lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: pulls.has(id), progress: runs.progress(progress.get(id) || null),
     backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION };
 }
-function syncShopify() {
+/** Pull one store from Shopify (default: the current store). Queued behind any other store's pull. */
+function syncShopify(id = scope.id()) {
   if (!keys.status().source) return Promise.resolve({ skipped: true });
-  if (shopifyRun) return shopifyRun;
-  shopifyRun = (async () => {
-    keys.beginPull();                                   // Performity POC API: fresh token before each pull
-    const started = Date.now();
-    const run = shopifyProgress = runs.begin('shopify', started);
-    try {
-      if (store.load().source === 'demo') { store.replaceAll([], [], 'empty'); decide.clear(); }   // never mix demo with live data
-      const nm = store.load().settings.storeName;
-      if (!nm || nm === 'Demo Store' || /\(demo\)$/.test(nm)) store.setSettings({ storeName: keys.status().store });
-      const s = await shopify.pullStock(store.load().shopify.lastQty);
-      const stock = store.add('stock', s.rows, 'shopify');
-      store.setCatalog(s.catalog, started);   // current stock + attributes, replaced whole (SW-002)
-      Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
-      store.setShopify({ lastQty: s.lastQty });
-      let orders = 0;
-      await shopify.pullOrders(store.load().shopify.ordersCursor, {
-        onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
-      });
-      runs.finish(store.load(), run);
-      store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
-      await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
-      console.log(`shopify: ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
-      alert.syncResult(true, '', { store: keys.status().store }).catch(() => {});
-      return { stock, orders };
-    } catch (e) {
-      runs.finish(store.load(), run, e.message);
-      store.setShopify({ lastTry: started, lastError: e.message });
-      alert.syncResult(false, e.message, { store: keys.status().store }).catch(() => {});
-      throw e;
-    } finally { shopifyRun = null; shopifyProgress = null; }
-  })();
-  return shopifyRun;
+  if (pulls.has(id)) return pulls.get(id);
+  const p = pullQueue.then(() => inStore(id, () => pullOne(id)));
+  pullQueue = p.catch(() => {});
+  const tracked = p.finally(() => { pulls.delete(id); });
+  pulls.set(id, tracked);
+  return tracked;
+}
+async function pullOne(id) {
+  keys.beginPull(id);                                 // Performity POC API: fresh token before each pull
+  const started = Date.now();
+  const run = runs.begin('shopify', started);
+  progress.set(id, run);
+  try {
+    if (store.load().source === 'demo') { store.replaceAll([], [], 'empty'); decide.clear(); }   // never mix demo with live data
+    if (store.load().settings.storeName && isDemoName(store.load().settings.storeName)) store.setSettings({ storeName: '' });   // the registry's name shows instead
+    const s = await shopify.pullStock(store.load().shopify.lastQty);
+    stores.noteShop(id, keys.status(id).store);
+    const stock = store.add('stock', s.rows, 'shopify');
+    store.setCatalog(s.catalog, started);   // current stock + attributes, replaced whole (SW-002)
+    Object.assign(run, { stock, phase: 'orders', notes: runs.stockNotes(s.excluded) });
+    store.setShopify({ lastQty: s.lastQty });
+    let orders = 0;
+    await shopify.pullOrders(store.load().shopify.ordersCursor, {
+      onPage: (names, rows, cursor) => { const n = store.replaceOrders(names, rows, 'shopify').added; orders += n; run.orders += names.length; run.lines += n; if (cursor) store.setShopify({ ordersCursor: cursor }); },
+    });
+    runs.finish(store.load(), run);
+    store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
+    await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
+    console.log(`shopify (${storeName(id)}): ${stock} stock changes, ${orders} order lines (${Math.round((Date.now() - started) / 1000)} s)`);
+    alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
+    return { stock, orders };
+  } catch (e) {
+    runs.finish(store.load(), run, e.message);
+    store.setShopify({ lastTry: started, lastError: e.message });
+    alert.syncResult(false, e.message, { store: storeName(id), key: id }).catch(() => {});
+    throw e;
+  } finally { progress.delete(id); }
+}
+
+/** The 15-minute loop: brand list, then each store's sheet sync and Shopify pull, one store at a time. */
+let pullingAll = null;
+function pullAll() {
+  if (pullingAll) return pullingAll;
+  pullingAll = (async () => {
+    await stores.refresh();
+    for (const s of stores.list()) {
+      try { await inStore(s.id, () => syncSheet()); } catch (e) { console.warn(`sheet sync (${s.id}):`, e.message); }
+      if (keys.status().source) { try { await syncShopify(s.id); } catch (e) { console.warn(`shopify pull failed (${s.id}):`, e.message); } }
+    }
+  })().finally(() => { pullingAll = null; });
+  return pullingAll;
 }
 
 /* ---------- freshness (SW-019): is the Shopify data recent? ---------- */
 const STALE_MIN = 45;          // three missed 15-minute pulls
 const BOOT_AT = Date.now();
 /** Age of the last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
+/** The current store's: age of its last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
 function freshness(now = Date.now()) {
   if (!keys.status().source) return { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: STALE_MIN };
   const st = store.load().shopify; const ref = st.lastSync || BOOT_AT;
   return { shopify: true, lastPull: st.lastSync, ageMin: st.lastSync ? Math.floor((now - st.lastSync) / 60e3) : null,
-    stale: now - ref > STALE_MIN * 60e3, staleAfterMin: STALE_MIN, running: !!shopifyRun, pullFailing: !!st.lastError };
+    stale: now - ref > STALE_MIN * 60e3, staleAfterMin: STALE_MIN, running: pulls.has(scope.id()), pullFailing: !!st.lastError };
 }
-/** Unauthenticated /status for uptime monitors: 503 when data is stale or saving fails. No names, keys or error text. */
+/** The current store's state for the picker dot: 'error' (last pull or sync failed), 'stale' (data too old), else 'ok'. */
+function storeState() {
+  const d = store.load(), f = freshness(), err = d.shopify.lastError || d.lastSyncError || null;
+  return { lastSync: d.shopify.lastSync || d.lastSync || null, lastError: err, stale: f.stale, running: pulls.has(scope.id()), source: d.source, state: err ? 'error' : f.stale ? 'stale' : 'ok' };
+}
+/** GET /api/stores: every store with its name and status (a store that can't be opened shows as an error). */
+function storeList() {
+  return stores.list().map((s) => {
+    let status;
+    try { status = inStore(s.id, storeState); } catch (e) { status = { lastSync: null, lastError: e.message, stale: false, running: false, source: null, state: 'error' }; }
+    let name = s.name; try { name = inStore(s.id, () => storeName(s.id)); } catch { /* keep the registry's */ }
+    return { id: s.id, name, demo: !!s.demo, shop: s.shop || null, status };
+  });
+}
+/** Unauthenticated /status for uptime monitors: 503 when any store's data is stale or saving fails. Totals over every
+ *  store; no names, ids, keys or error text. */
 function statusBody() {
-  const h = store.health(); const f = freshness(); const d = h.loaded ? store.load() : null;
-  let bytes = null; try { bytes = fs.statSync(store.FILE).size; } catch { /* not written yet */ }
-  const ok = h.ok && !f.stale;
-  return { code: ok ? 200 : 503, body: { ok, stale: f.stale, ageMin: f.ageMin, lastPull: f.lastPull, shopify: f.shopify, running: !!shopifyRun, pullFailing: !!f.pullFailing,
-    saveOk: h.ok, source: d ? d.source : null, storeBytes: bytes, stockRows: d ? d.stock.length : null, orderRows: d ? d.orders.length : null,
-    variants: d ? Object.keys(d.catalog || {}).length : null, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) } };
+  const out = { ok: true, stale: false, ageMin: null, lastPull: null, shopify: !!keys.status().source, running: pulls.size > 0, pullFailing: false,
+    saveOk: true, source: null, storeBytes: 0, stockRows: 0, orderRows: 0, variants: 0, stores: 0, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) };
+  const sources = new Set();
+  for (const s of stores.list()) {
+    out.stores++;
+    try {
+      inStore(s.id, () => {
+        const h = store.health(), f = freshness(), d = store.load();
+        if (!h.ok) out.saveOk = false;
+        if (f.stale) out.stale = true;
+        if (f.pullFailing) out.pullFailing = true;
+        if (f.ageMin != null) out.ageMin = Math.max(out.ageMin ?? 0, f.ageMin);
+        if (f.lastPull) out.lastPull = out.lastPull == null ? f.lastPull : Math.min(out.lastPull, f.lastPull);   // the oldest store's
+        try { out.storeBytes += fs.statSync(store.file()).size; } catch { /* not written yet */ }
+        out.stockRows += d.stock.length; out.orderRows += d.orders.length; out.variants += Object.keys(d.catalog || {}).length;
+        sources.add(d.source);
+      });
+    } catch { out.saveOk = false; }
+  }
+  out.source = sources.size === 1 ? [...sources][0] : sources.size ? 'mixed' : null;
+  out.ok = out.saveOk && !out.stale && out.stores > 0;
+  return { code: out.ok ? 200 : 503, body: out };
+}
+/** /health: every store opened so far loaded, and its last save worked. */
+function healthBody() {
+  const h = store.healthAll();
+  const problems = [...h.problems];
+  for (const [id, e] of opened) if (e && !problems.includes(e.message)) problems.push(`store ${id}: ${e.message}`);
+  return problems.length ? { code: 503, body: { ok: false, error: problems.join('; ') } } : { code: 200, body: { ok: true } };
 }
 
 /* ---------- morning digest (SW-028): the report as of `now`, with yesterday; a fresh pull before sending ---------- */
@@ -284,7 +386,9 @@ const digestCtx = {
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
   },
-  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(); },
+  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(scope.id()); },
+  storeName: () => storeName(),
+  storeId: () => scope.id(),
 };
 
 /* ---------- API ---------- */
@@ -293,32 +397,55 @@ const MAX_INGEST_ROWS = 500;   // Flow sends one change per request; a leaked ke
 let keyInUrlWarned = 0;
 async function api(req, res, url) {
   const p = url.pathname;
-  const d = store.load();
-  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), d.settings.tzOffsetMin);   // { days } or { from } ("This month")
+  const asked = url.searchParams.get('store');
 
-  /* Shopify Flow → "Send HTTP request" (no login; protected by the X-Ingest-Key header) */
+  /* Shopify Flow → "Send HTTP request" (no login; protected by the store's X-Ingest-Key header). Flow sends no cookie:
+     the store is ?store=<id>, else the first store. */
   const ingest = p.match(/^\/ingest\/(stock|order)$/);
   if (ingest && req.method === 'POST') {
-    let key = req.headers['x-ingest-key'];
-    if (!key && url.searchParams.has('key')) {   // old URLs: still accepted, but the key ends up in proxy and Flow logs
-      key = url.searchParams.get('key');
-      if (Date.now() - keyInUrlWarned > 3600e3) { keyInUrlWarned = Date.now(); console.warn('ingest: key in the URL (?key=) is deprecated, send the X-Ingest-Key header instead'); }
-    }
-    if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
-    if (keys.status().source) return fail(res, 409, ONE_SOURCE);
-    const raw = await readBody(req, 2e6);
-    let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
-    if (Array.isArray(body) && body.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
-    const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, ingest[1], { tzOffsetMin: d.settings.tzOffsetMin }));
-    if (list.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
-    const n = store.add(ingest[1] === 'stock' ? 'stock' : 'orders', list, 'flow');
-    return send(res, 200, { ok: true, received: list.length, added: n });
+    const pk = stores.pick(asked, '');
+    if (pk.error) return fail(res, pk.error, pk.message);
+    return inStore(pk.id, () => ingestRoute(req, res, url, ingest[1]));
   }
 
   const a = auth(req);
   if (a === 'limited') return send(res, 429, { ok: false, error: TOO_MANY }, undefined, { 'retry-after': '900' });
   if (!signedIn(a)) return send(res, 401, { ok: false, error: 'Login needed' });
   const role = a;
+  if (stores.mode() === 'tokenapi' && !stores.list().length) await stores.refresh();   // first request before the first brand list
+  if (p === '/api/stores' && req.method === 'GET') {
+    const pk = stores.pick(asked, cookieOf(req, STORE_COOKIE));
+    return send(res, 200, { ok: true, stores: storeList(), current: pk.id || null, registry: stores.info() });
+  }
+  const pk = stores.pick(asked, cookieOf(req, STORE_COOKIE));
+  if (pk.error) return fail(res, pk.error, pk.message);
+  return inStore(pk.id, () => storeApi(req, res, url, role, pk.id));
+}
+
+async function ingestRoute(req, res, url, kind) {
+  const d = store.load();
+  let key = req.headers['x-ingest-key'];
+  if (!key && url.searchParams.has('key')) {   // old URLs: still accepted, but the key ends up in proxy and Flow logs
+    key = url.searchParams.get('key');
+    if (Date.now() - keyInUrlWarned > 3600e3) { keyInUrlWarned = Date.now(); console.warn('ingest: key in the URL (?key=) is deprecated, send the X-Ingest-Key header instead'); }
+  }
+  if (!key || !safeEqual(key, d.settings.ingestKey)) return fail(res, 401, 'Wrong or missing ingest key');
+  if (keys.status().source) return fail(res, 409, ONE_SOURCE);
+  const raw = await readBody(req, 2e6);
+  let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
+  if (Array.isArray(body) && body.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
+  const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, kind, { tzOffsetMin: d.settings.tzOffsetMin }));
+  if (list.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
+  const n = store.add(kind === 'stock' ? 'stock' : 'orders', list, 'flow');
+  return send(res, 200, { ok: true, received: list.length, added: n });
+}
+
+/** Every logged-in /api route, for one store (the current scope). */
+async function storeApi(req, res, url, role, id) {
+  const p = url.pathname;
+  const d = store.load();
+  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), d.settings.tzOffsetMin);   // { days } or { from } ("This month")
+  const here = { id, name: storeName(id) };
   /* view-only (SW-029): one gate before every route, Sprint 1's included (Mark ordered, settings, import, backup) */
   if (access.refused(role, req.method, p)) return fail(res, 403, access.READ_ONLY);
   if (role !== access.ADMIN && p === '/api/export/backup.json') return fail(res, 403, access.READ_ONLY);   // the whole store: ingest key, change log
@@ -338,7 +465,7 @@ async function api(req, res, url) {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
     r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts());   // SW-027
-    return send(res, 200, { ok: true, ...r, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
+    return send(res, 200, { ok: true, ...r, store: here, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
@@ -354,10 +481,10 @@ async function api(req, res, url) {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts());
     return send(res, 200, { ok: true, ...groups.build(r.products, cat, lens, { showAll: url.searchParams.get('all') === '1' }), catalog: catalog.info(cat) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, store: here, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
-    const run = syncShopify();
+    const run = syncShopify(id);
     const done = await Promise.race([run.then((x) => x, (e) => ({ error: e.message })), new Promise((r) => setTimeout(() => r(null), 25000))]);
     if (!done) return send(res, 202, { ok: true, running: true });
     return done.error ? fail(res, 502, done.error) : send(res, 200, { ok: true, ...done });
@@ -373,7 +500,7 @@ async function api(req, res, url) {
   }
   if (p === '/api/import' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
-    if (shopifyRun) return fail(res, 409, PULL_RUNNING);
+    if (pulls.has(id)) return fail(res, 409, PULL_RUNNING);
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself (SW-007).
     const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
@@ -392,15 +519,18 @@ async function api(req, res, url) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { if (shopifyRun) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (pulls.has(id)) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));
     const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
-    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
+    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
   return fail(res, 404, 'Not found');
 }
+
+/** A store name for a file name: "sammsara-demo-" (letters, digits, dashes; '' when nothing is left). */
+const fileSlug = (n) => { const x = String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); return x ? `${x}-` : ''; };
 
 /* ---------- static ---------- */
 function serveStatic(req, res, url) {
@@ -446,7 +576,7 @@ const server = http.createServer(async (req, res) => {
       return fail(res, 403, 'Cross-site request refused');
     }
     if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
-    if (url.pathname === '/health') { const h = store.health(); return send(res, h.ok ? 200 : 503, { ok: h.ok, ...(h.ok ? {} : { error: h.loadError || `Saving data fails: ${h.lastSaveError?.message}` }) }); }
+    if (url.pathname === '/health') { const h = healthBody(); return send(res, h.code, h.body); }
     if (url.pathname === '/login' && req.method === 'GET') {
       if (signedIn(auth(req))) return send(res, 302, '', 'text/plain', { location: '/' });
       return send(res, 200, loginPage(), 'text/html; charset=utf-8');
@@ -489,48 +619,56 @@ async function shutdown(signal) {
   if (stopping) return; stopping = true;
   console.log(`${signal}: stopping`);
   timers.forEach((t) => clearInterval(t));
-  if (shopifyRun) await Promise.race([shopifyRun.catch(() => {}), new Promise((r) => setTimeout(r, Number(process.env.STOP_WAIT_MS) || 25000))]);
-  const saved = store.save(true);
-  if (!saved) console.error('Stopped without saving the latest changes:', store.health().lastSaveError?.message);
+  if (pulls.size) await Promise.race([Promise.allSettled([...pulls.values()]), new Promise((r) => setTimeout(r, Number(process.env.STOP_WAIT_MS) || 25000))]);
+  const saved = store.saveAll();
+  if (!saved) console.error('Stopped without saving the latest changes:', store.healthAll().problems.join('; '));
   const code = saved ? 0 : 1;
   server.close(() => process.exit(code));
   server.closeIdleConnections?.();
   setTimeout(() => process.exit(code), 3000).unref();
 }
 
-if (require.main === module) {
+async function main() {
   if (PROD && PASSWORD.length < MIN_PASSWORD) {
     console.error(`Refusing to start: NODE_ENV=production needs ADMIN_PASSWORD set, at least ${MIN_PASSWORD} characters.`);
     process.exit(1);
   }
-  backup.start();   // before the store loads: applies a pending restore, then daily + before-replace backups
   if (keys.status().source && !PASSWORD) {
     console.error('Refusing to start: Shopify is connected, so set ADMIN_PASSWORD first.');
     process.exit(1);
   }
   const accessProblem = access.configProblem(PASSWORDS);
   if (accessProblem) { console.error('Refusing to start: ' + accessProblem); process.exit(1); }
-  let d;
-  try { d = store.load(); onorder.all(); decide.all(); } catch (e) {   // a bad onorder.json / decisions.json with no good .bak also stops here (critic r2 X1)
-    console.error(`Refusing to start: ${e.message}`);
-    process.exit(1);
+  await stores.refresh();   // Performity: the brand list (the last good one when the API is down)
+  const list = stores.list();
+  if (!list.length) console.warn(`No store yet (${stores.info().lastError || 'empty brand list'}); retried every 15 minutes.`);
+  /* every store opens now: the first one takes the old single-store files (src/migrate.js), pending restores apply;
+     a store that can't be read stops the start, so nothing is overwritten (SW-004, critic r2 X1) */
+  for (const s of list) {
+    try { openStore(s.id); } catch (e) { console.error(`Refusing to start: ${e.message}`); process.exit(1); }
   }
-  const stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
+  if (fs.existsSync(path.join(DATA_DIR, 'restore.json'))) console.warn('DATA_DIR/restore.json is not read: put it in DATA_DIR/stores/<id>/restore.json (docs/RUNBOOK.md).');
+  backup.start({ each: (fn) => eachStore(fn) });   // before-replace snapshots; daily backups, every store, hourly
   /* demo only on a store that has never held real data (SW-007) */
-  if (!keys.status().source && !d.everLive && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
-    loadDemo();
-    console.log('Loaded demo data (replace it from Data & settings).');
+  if (!keys.status().source) {
+    for (const s of list) {
+      inStore(s.id, () => {
+        const d = store.load(), stale = d.source === 'demo' && d.settings.demoVersion !== demo.VERSION;
+        if (!d.everLive && (stale || (d.source === 'empty' && !d.stock.length && !d.orders.length))) {
+          loadDemo();
+          console.log(`Loaded demo data into ${s.name} (replace it from Data & settings).`);
+        }
+      });
+    }
   }
-  timers.push(setInterval(() => syncSheet().catch((e) => console.warn('sheet sync:', e.message)), SYNC_EVERY));
-  if (keys.status().source) {
-    const pull = () => syncShopify().catch((e) => console.warn('shopify pull failed:', e.message));
-    timers.push(setTimeout(pull, 5000));
-    timers.push(setInterval(pull, SYNC_EVERY));
-  }
-  timers.push(digests.schedule(digestCtx));   // SW-028: every minute; sends at the set hour
+  const loop = () => pullAll().catch((e) => console.warn('pull loop:', e.message));
+  timers.push(setInterval(loop, SYNC_EVERY));
+  if (keys.status().source) timers.push(setTimeout(loop, 5000));
+  timers.push(digests.schedule(digestCtx, (fn) => eachStore(fn)));   // SW-028: every minute, each store; sends at its set hour
   timers.forEach((t) => t.unref());
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
-  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''}`));
+  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''} · ${list.length} store${list.length === 1 ? '' : 's'}`));
 }
+if (require.main === module) main().catch((e) => { console.error(`Refusing to start: ${e.message}`); process.exit(1); });
 
-module.exports = { server, syncShopify, digestCtx };
+module.exports = { server, syncShopify, pullAll, digestCtx, inStore, openStore };

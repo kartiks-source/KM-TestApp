@@ -57,7 +57,7 @@ test('runs: a Shopify pull shows live order counts, then lands in the history (a
     await onPage(['#3'], [{ t: now, order: '#3', line: 'l3', variantId: '1', sku: 'A', qty: 1, price: 100 }], now);
     return { total: 3, cursor: now };
   };
-  await syncShopify();
+  await syncShopify('test-store');
   assert.equal(mid.shopify.running, true);
   assert.deepEqual({ ...mid.shopify.progress, start: 0 }, { kind: 'shopify', start: 0, phase: 'orders', stock: 1, orders: 2, lines: 2 });
   const after = await (await fetch(base + '/api/settings')).json();
@@ -68,10 +68,10 @@ test('runs: a Shopify pull shows live order counts, then lands in the history (a
   assert.ok(r.ms >= 0 && Math.abs(r.start - now) < 60e3);
 
   S.pullOrders = async () => { throw new Error('Shopify: throttled'); };
-  await assert.rejects(syncShopify(), /throttled/);
+  await assert.rejects(syncShopify('test-store'), /throttled/);
   const runs = (await (await fetch(base + '/api/settings')).json()).runs;
   assert.equal(runs.length, 2);
   assert.deepEqual([runs[0].error, runs[0].stock], ['Shopify: throttled', 0]);
-  store.save(true);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8')).syncRuns.length, 2, 'history is saved');
+  store.saveAll();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'stores', 'test-store', 'store.json'), 'utf8')).syncRuns.length, 2, 'history is saved');
 });

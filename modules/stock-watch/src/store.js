@@ -1,7 +1,9 @@
 'use strict';
 /*
- * Storage: one JSON file per store (DATA_DIR/store.json). Fine for a demo and for one
- * store with a few months of data; when to move is in docs/adr/0003.
+ * Storage: one JSON file per store (DATA_DIR/stores/<id>/store.json, ADR-0015). Fine for a demo and for a
+ * few stores with a few months of data; when to move is in docs/adr/0003.
+ * Which store: src/scope.js (the server runs every request and pull inside scope.run(id)); each store's
+ * folder has its own state below (loaded data, save timer, last error), so two stores never share one.
  *
  * Safety (SW-004): only a missing file starts blank; a file that can't be read is quarantined and
  * never overwritten; writes are fsynced before the rename; the previous good file is kept as
@@ -12,19 +14,24 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { stockKey, orderKey } = require('./rows');
 const { DEFAULT_SETTINGS } = require('./engine');
+const scope = require('./scope');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const FILE = path.join(DATA_DIR, 'store.json');
-const BAK = FILE + '.bak';
 const KEEP_DAYS = 120;
 const RETRY_MS = [5e3, 30e3, 120e3];   // a failed save is tried again after 5 s, 30 s, then every 2 min
 
-let db = null;
-let saveTimer = null;
-let loadError = null;
-let saveTries = 0;
-let lastSaveError = null;
-let lastSaveAt = null;
+/* one state per store folder: { dir, file, bak, db, saveTimer, loadError, saveTries, lastSaveError, lastSaveAt, lastPrune } */
+const states = new Map();
+function S() {
+  const dir = scope.dir();
+  let st = states.get(dir);
+  if (!st) { st = { dir, file: path.join(dir, 'store.json'), bak: path.join(dir, 'store.json.bak'), db: null, saveTimer: null, loadError: null, saveTries: 0, lastSaveError: null, lastSaveAt: null, lastPrune: 0 }; states.set(dir, st); }
+  return st;
+}
+/** The current store's file and its last good copy. */
+const file = () => S().file;
+const bakFile = () => S().bak;
+/** Tests: forget every loaded store (as after a restart). Never touches the files. */
+function _forget() { for (const st of states.values()) clearTimeout(st.saveTimer); states.clear(); }
 
 const blankShopify = () => ({ lastQty: {}, ordersCursor: null, lastSync: null, lastError: null, lastTry: null });
 
@@ -51,8 +58,10 @@ function readJson(file) {
  * instead. With no good backup, load() throws StoreLoadError and nothing is ever written.
  */
 function load() {
-  if (db) return db;
-  if (loadError) throw loadError;
+  const st = S();
+  if (st.db) return st.db;
+  if (st.loadError) throw st.loadError;
+  const FILE = st.file, BAK = st.bak, where = scope.current() ? ` (store ${scope.current()})` : '';
   let data;
   try { data = readJson(FILE) || blank(); } catch (e) {
     const aside = `${FILE}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
@@ -60,13 +69,13 @@ function load() {
     let bak = null;
     try { bak = readJson(BAK); } catch { /* the backup is bad too */ }
     if (!bak) {
-      loadError = new StoreLoadError(`store.json can't be read (${e.message}) and there is no good store.json.bak; copied to ${path.basename(aside)}. Not starting, so nothing is overwritten.`);
-      throw loadError;
+      st.loadError = new StoreLoadError(`store.json${where} can't be read (${e.message}) and there is no good store.json.bak; copied to ${path.basename(aside)}. Not starting, so nothing is overwritten.`);
+      throw st.loadError;
     }
-    console.error(`store: store.json can't be read (${e.message}); copied to ${path.basename(aside)} and loaded store.json.bak instead.`);
+    console.error(`store: store.json${where} can't be read (${e.message}); copied to ${path.basename(aside)} and loaded store.json.bak instead.`);
     data = bak;
   }
-  db = data;
+  const db = st.db = data;
   db.settings = { ...blank().settings, ...db.settings };
   db.shopify = { ...blankShopify(), ...db.shopify };
   if (!db.catalog || typeof db.catalog !== 'object') db.catalog = {};
@@ -92,9 +101,10 @@ function goLive(d, rows) {
 }
 
 /* ---------- saving: temp file, fsync, rename; the file it replaces stays as store.json.bak ---------- */
-function writeNow() {
+function writeNow(st) {
+  const { dir: DATA_DIR, file: FILE, bak: BAK } = st;
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const { _stockKeys, _orderKeys, ...plain } = db;
+  const { _stockKeys, _orderKeys, ...plain } = st.db;
   const tmp = FILE + '.tmp';
   const fd = fs.openSync(tmp, 'w');
   try { fs.writeSync(fd, JSON.stringify(plain)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -107,33 +117,49 @@ function writeNow() {
 
 /** Write the store (now, or batched after 500 ms). Never throws: a failed write is kept in health().lastSaveError and retried. */
 function save(now = false) {
-  clearTimeout(saveTimer); saveTimer = null;
-  if (!db) return true;
+  return saveState(S(), now);
+}
+/* the state is captured here, so a retry 2 minutes later still writes the same store's file */
+function saveState(st, now) {
+  clearTimeout(st.saveTimer); st.saveTimer = null;
+  if (!st.db) return true;
   const attempt = () => {
-    saveTimer = null;
+    st.saveTimer = null;
     try {
-      writeNow();
-      if (lastSaveError) console.log('store: saved again after an earlier failure');
-      lastSaveError = null; saveTries = 0; lastSaveAt = Date.now();
+      writeNow(st);
+      if (st.lastSaveError) console.log('store: saved again after an earlier failure');
+      st.lastSaveError = null; st.saveTries = 0; st.lastSaveAt = Date.now();
       return true;
     } catch (e) {
-      if (!lastSaveError || lastSaveError.message !== e.message) console.error('store: save failed:', e.message);
-      lastSaveError = { message: e.message, at: Date.now() };
-      saveTimer = setTimeout(attempt, RETRY_MS[Math.min(saveTries++, RETRY_MS.length - 1)]);
-      saveTimer.unref?.();
+      if (!st.lastSaveError || st.lastSaveError.message !== e.message) console.error('store: save failed:', e.message);
+      st.lastSaveError = { message: e.message, at: Date.now() };
+      st.saveTimer = setTimeout(attempt, RETRY_MS[Math.min(st.saveTries++, RETRY_MS.length - 1)]);
+      st.saveTimer.unref?.();
       return false;
     }
   };
   if (now) return attempt();
-  saveTimer = setTimeout(attempt, 500);
-  saveTimer.unref?.();
+  st.saveTimer = setTimeout(attempt, 500);
+  st.saveTimer.unref?.();
   return true;
 }
+/** Shutdown: write every loaded store now. true when all of them saved. */
+function saveAll() { let ok = true; for (const st of states.values()) if (!saveState(st, true)) ok = false; return ok; }
 
 /** For /health and /status: ok = the store loaded and the last write worked. */
 function health() {
-  return { ok: !loadError && !!db && !lastSaveError, loaded: !!db, loadError: loadError ? loadError.message : null,
-    lastSaveError, lastSaveAt, pendingSave: !!saveTimer };
+  const st = S();
+  return { ok: !st.loadError && !!st.db && !st.lastSaveError, loaded: !!st.db, loadError: st.loadError ? st.loadError.message : null,
+    lastSaveError: st.lastSaveError, lastSaveAt: st.lastSaveAt, pendingSave: !!st.saveTimer };
+}
+/** Every store loaded so far (by folder): { ok, problems: [message] } for /health. */
+function healthAll() {
+  const problems = [];
+  for (const st of states.values()) {
+    if (st.loadError) problems.push(st.loadError.message);
+    else if (st.lastSaveError) problems.push(`Saving data fails (${path.basename(st.dir)}): ${st.lastSaveError.message}`);
+  }
+  return { ok: !problems.length, problems };
 }
 
 /** Where a row came from (SW-006): shopify, flow, sheet, csv or demo. Stored on every row as `src`. */
@@ -176,11 +202,11 @@ function pruneStock(rows, cut, catalog = {}) {
   return rows.filter((r) => r.t >= cut || keep.has(r));
 }
 
-let lastPrune = 0;
-/** Runs at most once an hour (it walks every row), or now with force. */
+/** Runs at most once an hour per store (it walks every row), or now with force. */
 function prune(force = false, now = Date.now()) {
-  if (!force && now - lastPrune < 3600e3) return;
-  lastPrune = now;
+  const st = S();
+  if (!force && now - st.lastPrune < 3600e3) return;
+  st.lastPrune = now;
   const cut = now - KEEP_DAYS * 864e5;
   const d = load();
   const stock = pruneStock(d.stock, cut, d.catalog);
@@ -244,4 +270,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { SOURCES, load, add, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, health, StoreLoadError, FILE, BAK, DATA_DIR, KEEP_DAYS };
+module.exports = { SOURCES, load, add, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };

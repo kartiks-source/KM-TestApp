@@ -17,6 +17,11 @@ const CATALOG = require('./demo-catalog.json').items;
 
 const VERSION = 'sammsara-6';           // bump to make running servers rebuild their demo data
 const STORE_NAME = 'Sammsara (demo)';
+/* the demo stores shown when no Shopify key is set (multi-store, ADR-0015): id, name, generate() options */
+const STORES = [
+  { id: 'sammsara-demo', name: STORE_NAME, opts: { seed: 11 } },
+  { id: 'second-demo', name: 'Second store (demo)', opts: { seed: 29, priceMix: 0.6, every: 3 } },
+];
 
 const variantId = (i) => String(4710000000 + i * 97);   // demo variant IDs, shared with catalog()
 
@@ -45,14 +50,19 @@ function season(type, t) {
 const STYLES = [['good', 0.42], ['trickle', 0.26], ['late', 0.18], ['heavy', 0.1], ['abandoned', 0.04]];
 function pickStyle(r) { let x = r(); for (const [s, p] of STYLES) { if ((x -= p) < 0) return s; } return 'good'; }
 
-function generate({ now = Date.now(), days = 60, seed = 11 } = {}) {
+/*
+ * A second demo store (multi-store, ADR-0015): same public catalog, every `every`-th product left out, prices
+ * × priceMix, its own seed, so its numbers clearly differ from the first. Defaults give the first demo, unchanged.
+ */
+function generate({ now = Date.now(), days = 60, seed = 11, priceMix = 1, every = 0 } = {}) {
   const r = rng(seed);
   const start = Math.floor((now - days * DAY) / HOUR) * HOUR;
   const stock = [], orders = [];
-  let orderNo = 58200;
+  let orderNo = seed === 11 ? 58200 : 10000 + (seed % 89) * 1000;
+  const list = CATALOG.map((c, i) => ({ c: priceMix === 1 ? c : { ...c, price: Math.max(99, Math.round(c.price * priceMix)) }, i })).filter(({ i }) => !every || i % every !== 0);
 
   /* demand by popularity rank (Zipf), nudged by price: cheaper décor sells more */
-  const order = CATALOG.map((c, i) => ({ c, i, k: r() })).sort((a, b) => a.k - b.k);
+  const order = list.map(({ c, i }) => ({ c, i, k: r() })).sort((a, b) => a.k - b.k);
   const items = order.map(({ c, i }, rank) => {
     const priceFactor = Math.min(1.6, Math.max(0.35, 3500 / c.price) ** 0.5);
     const perDay = Math.max(0.04, (9 / (rank + 1) ** 0.9) * priceFactor);
@@ -165,4 +175,4 @@ function catalog() {
   return demoCatalog;
 }
 
-module.exports = { generate, catalog, VERSION, STORE_NAME };
+module.exports = { generate, catalog, VERSION, STORE_NAME, STORES };

@@ -113,13 +113,13 @@ test('keys: client ID + secret are swapped for a 24-hour token, reused until nea
       return new Response(JSON.stringify({ access_token: 'tok1', scope: 'read_products,read_inventory,read_orders', expires_in: 86399 }), { status: 200 });
     };
     K.clear();
-    const a = await K.access();
+    const a = await K.access('brand');
     assert.deepEqual([a.shop, a.token], ['brand', 'tok1']);
     assert.match(body, /grant_type=client_credentials/); assert.match(body, /client_id=cid/);
-    await K.access(); assert.equal(calls, 1);                                   // cached
+    await K.access('brand'); assert.equal(calls, 1);                                   // cached
     assert.match(K.grantedScopes(), /read_inventory/);
     global.fetch = async () => new Response(JSON.stringify({ error: 'shop_not_permitted' }), { status: 400 });
     K.clear();
-    await assert.rejects(K.access(), /same Shopify organisation/);
+    await assert.rejects(K.access('brand'), /same Shopify organisation/);
   } finally { process.env = keep; global.fetch = realFetch; K.clear(); }
 });

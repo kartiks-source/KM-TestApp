@@ -1,7 +1,8 @@
 'use strict';
 /*
- * Where the Shopify key comes from. The sync never knows; it calls access() and gets
+ * Where the Shopify key comes from. The sync never knows; it calls access(storeId) and gets
  * { shop, token, source }. Swapping the source is a Railway variable change, not a code change.
+ * Several stores (ADR-0015): every cache below is per store id; src/stores.js lists the stores.
  *
  * Shopify credentials are normally an app's CLIENT ID + CLIENT SECRET (apps made in Shopify's Dev
  * Dashboard). We swap them for a 24-hour access token (client credentials grant) and get a new one
@@ -12,7 +13,7 @@
  *   0. Performity POC API (DECIDED 19 Nov 2026, option A; contract: "Performity POC API: calling guide")
  *        PERFORMITY_POC_API_URL  base address Performity sends with the key   (alias TOKEN_API_URL)
  *        PERFORMITY_POC_API_KEY  our key, sent as X-Api-Key on every call    (alias TOKEN_API_KEY)
- *        PERFORMITY_BRAND_ID     optional: which allowed brand to use (needed when several are allowed)
+ *        PERFORMITY_BRAND_ID     optional: limits the app to this one allowed brand (else every allowed brand is a store)
  *      GET  {base}/catalys/shopify/service/external/brands        → [{ brand_id, brand_name }]
  *      POST {base}/catalys/shopify/service/external/fresh-token   {brand_id}
  *                                                                  → { access_token, shop_domain, expires_at }
@@ -20,13 +21,14 @@
  *      Rules we follow: ask for the token right before each pull (beginPull) and never keep it for
  *      later; on a Shopify 401 ask once more; never refresh it ourselves, never pass it on; read only.
  *      A wrong key is not retried (5 wrong keys in 15 min block our IP): we pause 15 min; on 429 we
- *      wait as told; on 500 we retry once after a short wait.
+ *      wait as told; on 500 we retry once after a short wait. Limits (30 calls/min per IP, 10 token calls/min
+ *      per brand): calls are spaced at least 2.1 s apart, token calls for one brand at least 6.1 s apart.
  *
  *   1. Azure Key Vault
  *        AZURE_KEY_VAULT_URL   https://<name>.vault.azure.net
  *        AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET   our own Azure login,
  *                              "Key Vault Secrets User" on that vault only
- *        SHOPIFY_STORE         <store>
+ *        SHOPIFY_STORE         <store>      (or STORES=<store>,<store>,… for several stores)
  *      Reads either two secrets, shopify-<store>-client-id and shopify-<store>-client-secret,
  *      or one secret shopify-<store> holding JSON {"clientId":"…","clientSecret":"…"}
  *      (or a legacy shpat_… token).
@@ -38,37 +40,48 @@
  * clear() forgets them, so a token Shopify rejects is read again straight away.
  */
 
+const scope = require('./scope');
 const TTL = 30 * 60e3;
 const API_SKEW = 5 * 60e3;            // stop using a token-API token 5 minutes before it expires
 const KV_API = '7.5';
 const VAULT_RE = /^https:\/\/[a-z][a-z0-9-]{1,22}[a-z0-9]\.vault\.azure\.net\/?$/i;
 const STORE_RE = /^[a-z0-9][a-z0-9-]{0,60}$/i;
 
-let cache = null;                   // { value, exp }
+const caches = new Map();            // store id → { value, exp }
 let aad = null;                     // { token, exp }
-let shopToken = null;               // { token, exp } from a client-credentials exchange (24 h)
+const shopTokens = new Map();       // shop → { token, exp } from a client-credentials exchange (24 h)
 let scopes = '';                    // scopes Shopify granted, from the last exchange
 
 const env = (k) => String(process.env[k] || '').trim();
 const cleanShop = (s) => String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.myshopify\.com$/, '');
 
-/** Which source is configured, and what's missing. Never includes a secret. */
-function status() {
+/** Vault stores: STORES (comma list of shop handles), else SHOPIFY_STORE. Lower case, de-duplicated. */
+function vaultStores() {
+  const list = env('STORES') ? env('STORES').split(',').map(cleanShop).filter(Boolean) : [cleanShop(env('SHOPIFY_STORE'))].filter(Boolean);
+  return [...new Set(list)];
+}
+
+/** Which source is configured, and what's missing; for one store when storeId is given. Never includes a secret. */
+function status(storeId) {
   const store = cleanShop(env('SHOPIFY_STORE'));
   const api = apiBase();
   if (api) {
     const missing = [];
     if (!/^https:\/\/[^\s/]+/i.test(api) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(api)) missing.push('PERFORMITY_POC_API_URL must start with https://');
     if (!apiKey()) missing.push('PERFORMITY_POC_API_KEY');
-    return { source: 'tokenapi', store: store || lastShop, brand: env('PERFORMITY_BRAND_ID') || lastBrand || null, kind: 'Performity POC API (token asked before each pull)', ready: !missing.length, missing };
+    const brand = storeId || env('PERFORMITY_BRAND_ID') || null;
+    return { source: 'tokenapi', store: (brand && shopOf(brand)) || (env('PERFORMITY_BRAND_ID') ? store : '') || '', brand, kind: 'Performity POC API (token asked before each pull)', ready: !missing.length, missing };
   }
   const vault = env('AZURE_KEY_VAULT_URL');
   if (vault) {
     const missing = [];
     if (!VAULT_RE.test(vault)) missing.push('AZURE_KEY_VAULT_URL must look like https://<name>.vault.azure.net');
     for (const k of ['AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET']) if (!env(k)) missing.push(k);
-    if (!STORE_RE.test(store)) missing.push('SHOPIFY_STORE');
-    return { source: 'vault', store, secretName: `shopify-${store}-client-id / -client-secret (or shopify-${store})`, ready: !missing.length, missing };
+    const list = vaultStores();
+    if (!list.length) missing.push('SHOPIFY_STORE (or STORES)');
+    for (const x of list) if (!STORE_RE.test(x)) missing.push(`${env('STORES') ? 'STORES' : 'SHOPIFY_STORE'}: "${x.slice(0, 40)}" isn’t a store handle`);
+    const one = storeId || list[0] || '';
+    return { source: 'vault', store: one, stores: list, secretName: `shopify-${one}-client-id / -client-secret (or shopify-${one})`, ready: !missing.length, missing };
   }
   if (env('SHOPIFY_CLIENT_ID') || env('SHOPIFY_CLIENT_SECRET') || env('SHOPIFY_ACCESS_TOKEN')) {
     const missing = [];
@@ -129,7 +142,8 @@ function parseSecret(value) {
 
 /** Apps made in Shopify's Dev Dashboard give a client ID + secret; swap them for a short-lived token. */
 async function exchange(shop, clientId, clientSecret) {
-  if (shopToken && Date.now() < shopToken.exp) return shopToken.token;
+  const have = shopTokens.get(shop);
+  if (have && Date.now() < have.exp) return have.token;
   const r = await fetch(`https://${shop}.myshopify.com/admin/oauth/access_token`, {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, redirect: 'error', signal: AbortSignal.timeout(15000),
     body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
@@ -142,24 +156,44 @@ async function exchange(shop, clientId, clientSecret) {
     throw new Error(`Shopify token exchange failed (HTTP ${r.status})`);
   }
   scopes = String(j.scope || '');
-  shopToken = { token: j.access_token, exp: Date.now() + Math.max(300, +j.expires_in || 86399) * 1000 - 5 * 60e3 };
-  return shopToken.token;
+  shopTokens.set(shop, { token: j.access_token, exp: Date.now() + Math.max(300, +j.expires_in || 86399) * 1000 - 5 * 60e3 });
+  return j.access_token;
 }
 
 /* ---- Performity POC API (option A) ---- */
 const apiBase = () => (env('PERFORMITY_POC_API_URL') || env('TOKEN_API_URL')).replace(/\/+$/, '');
 const apiKey = () => env('PERFORMITY_POC_API_KEY') || env('TOKEN_API_KEY');
 const EXT = '/catalys/shopify/service/external';
-let lastShop = '', lastBrand = '', brandCache = null, holdUntil = 0, holdWhy = '';
+const lastShop = new Map();          // brand → shop handle from its last fresh-token
+let brandCache = null, holdUntil = 0, holdWhy = '';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Performity's limits: 30 calls/min per IP, 10 token calls/min per brand. Calls queue one behind the other. */
+const PACE = { call: 2100, token: 6100 };
+let lastCall = 0, gate = Promise.resolve();
+const lastToken = new Map();         // brand → time of its last fresh-token call
+function pace(brand) {
+  const p = gate.then(async () => {
+    const now = Date.now();
+    let wait = Math.max(0, lastCall + PACE.call - now);
+    if (brand) wait = Math.max(wait, (lastToken.get(brand) || 0) + PACE.token - now);
+    if (wait > 0) await sleep(wait);
+    lastCall = Date.now(); if (brand) lastToken.set(brand, lastCall);
+  });
+  gate = p.catch(() => {});
+  return p;
+}
 
 /** One call to the POC API, with the guide's error handling. Never loops on a wrong key. */
 async function pocCall(path, opts = {}, retried = false) {
   if (Date.now() < holdUntil) throw new Error(holdWhy);
+  await pace(opts.brand);
+  if (Date.now() < holdUntil) throw new Error(holdWhy);
   let r;
   try {
+    const { brand, ...init } = opts;
     r = await fetch(`${apiBase()}${EXT}${path}`, {
-      ...opts, redirect: 'error', signal: AbortSignal.timeout(10000),
+      ...init, redirect: 'error', signal: AbortSignal.timeout(10000),
       headers: { 'X-Api-Key': apiKey(), accept: 'application/json', ...(opts.body ? { 'content-type': 'application/json' } : {}) },
     });
   } catch { throw new Error('Performity POC API is unreachable: pulls pause until it answers'); }
@@ -186,17 +220,15 @@ async function brands({ fresh = false } = {}) {
   return list;
 }
 
-/** Which brand to pull: PERFORMITY_BRAND_ID, or the only allowed one. */
-async function pickBrand() {
-  const want = env('PERFORMITY_BRAND_ID');
-  const list = await brands();
-  if (want) {
-    if (!list.some((b) => b.brand_id === want)) throw new Error(`Brand ${want} isn’t in our allowed list at Performity`);
-    return want;
-  }
-  if (!list.length) throw new Error('No brand is allowed for our key yet: ask Performity to allow one');
-  if (list.length > 1) throw new Error(`Performity allows ${list.length} brands: set PERFORMITY_BRAND_ID to pick one (${list.map((b) => b.brand_name || b.brand_id).join(', ')})`);
-  return list[0].brand_id;
+/** Check a brand may be pulled: in the allowed list, and PERFORMITY_BRAND_ID (when set) is that brand.
+ *  Store ids are lower case (folder names); the brand_id goes back to Performity exactly as it gave it. */
+async function checkBrand(storeId) {
+  const id = String(storeId || '').toLowerCase();
+  const want = env('PERFORMITY_BRAND_ID').toLowerCase();
+  if (want && id !== want) throw new Error(`PERFORMITY_BRAND_ID limits this app to brand ${want}`);
+  const hit = (await brands()).find((b) => b.brand_id.toLowerCase() === id);
+  if (!hit) throw new Error(`Brand ${id} isn’t in our allowed list at Performity`);
+  return hit.brand_id;
 }
 
 /** UTC without a zone ("2026-11-19T10:15:00") must not be read as local time. */
@@ -207,44 +239,55 @@ function utc(v) {
   return Number.isFinite(t) ? t : null;
 }
 
-async function fromTokenApi() {
-  const brand = await pickBrand();
-  const j = await pocCall('/fresh-token', { method: 'POST', body: JSON.stringify({ brand_id: brand }) });
+async function fromTokenApi(storeId) {
+  const brand = await checkBrand(storeId);
+  const j = await pocCall('/fresh-token', { method: 'POST', body: JSON.stringify({ brand_id: brand }), brand });
   if (!j || typeof j.access_token !== 'string' || !j.access_token) throw new Error('Performity gave no access_token');
   const domain = String(j.shop_domain || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(domain)) throw new Error('Performity gave a shop_domain that isn’t a *.myshopify.com store');
-  const want = cleanShop(env('SHOPIFY_STORE'));
+  const want = env('PERFORMITY_BRAND_ID') ? cleanShop(env('SHOPIFY_STORE')) : '';   // a check for the one pinned brand only
   if (want && cleanShop(domain) !== want) throw new Error(`Performity returned ${domain}, not ${want}.myshopify.com`);
   const expires = utc(j.expires_at);                                   // null = doesn't expire
   if (expires != null && expires - Date.now() < 60e3) throw new Error('Performity gave a token that is about to expire');
-  lastShop = cleanShop(domain); lastBrand = brand;
+  lastShop.set(brand.toLowerCase(), cleanShop(domain));
   /* kept for this pull only (beginPull clears it), and never past 5 minutes before expiry */
   const exp = Math.min(Date.now() + 30 * 60e3, expires == null ? Infinity : expires - API_SKEW);
-  return { value: { shop: lastShop, token: j.access_token, source: 'tokenapi', brand }, exp: Math.max(exp, Date.now() + 60e3) };
+  return { value: { shop: cleanShop(domain), token: j.access_token, source: 'tokenapi', brand }, exp: Math.max(exp, Date.now() + 60e3) };
 }
 
-/** { shop, token, source } for the configured store. Throws in plain words if it can't. */
-async function access() {
-  const s = status();
+/** { shop, token, source } for one store (default: the current one, src/scope.js). Throws in plain words if it can't. */
+async function access(storeId = scope.id()) {
+  const s = status(storeId);
   if (!s.source) throw new Error('Shopify isn’t connected');
   if (!s.ready) throw new Error(`Missing Railway variables: ${s.missing.join(', ')}`);
-  if (cache && Date.now() < cache.exp) return cache.value;
-  if (s.source === 'tokenapi') { cache = await fromTokenApi(); return cache.value; }
-  const raw = s.source === 'vault' ? await readVaultCredentials(s.store)
+  const c = caches.get(storeId);
+  if (c && Date.now() < c.exp) return c.value;
+  if (s.source === 'tokenapi') { const v = await fromTokenApi(storeId); caches.set(storeId, v); return v.value; }
+  if (s.source === 'vault' && !vaultStores().includes(storeId)) throw new Error(`Store "${storeId}" isn’t in STORES / SHOPIFY_STORE`);
+  if (s.source === 'variables' && storeId !== s.store) throw new Error(`Store "${storeId}" isn’t SHOPIFY_STORE`);
+  const raw = s.source === 'vault' ? await readVaultCredentials(storeId)
     : { token: env('SHOPIFY_CLIENT_ID') ? '' : env('SHOPIFY_ACCESS_TOKEN'), clientId: env('SHOPIFY_CLIENT_ID'), clientSecret: env('SHOPIFY_CLIENT_SECRET') };
-  const shop = cleanShop(raw.shop) || s.store;
+  const shop = cleanShop(raw.shop) || storeId;
   if (!STORE_RE.test(shop)) throw new Error('Store name is not valid');
   const token = raw.token || (raw.clientId && raw.clientSecret ? await exchange(shop, raw.clientId, raw.clientSecret) : '');
-  if (!token) throw new Error(s.source === 'vault' ? `No Shopify client ID + secret found for "${s.store}" in the vault` : 'No Shopify credentials');
+  if (!token) throw new Error(s.source === 'vault' ? `No Shopify client ID + secret found for "${storeId}" in the vault` : 'No Shopify credentials');
   const value = { shop, token, source: s.source };
-  cache = { value, exp: Date.now() + TTL };
+  caches.set(storeId, { value, exp: Date.now() + TTL });
   return value;
 }
 
-/** Forget the cached token (Shopify rejected it): the next access() asks the source again. */
-function clear() { cache = null; shopToken = null; }
-/** Start of a Shopify pull: the POC API's rule is to ask for the token right before each pull. */
-function beginPull() { if (status().source === 'tokenapi') cache = null; }
+/** Forget a store's cached token (Shopify rejected it): its next access() asks the source again. No store: forget all. */
+function clear(storeId = scope.current()) {
+  if (!storeId) { caches.clear(); shopTokens.clear(); return; }
+  const c = caches.get(storeId); caches.delete(storeId);
+  shopTokens.delete(c ? c.value.shop : storeId);
+}
+/** Start of a store's Shopify pull: the POC API's rule is to ask for the token right before each pull. */
+function beginPull(storeId = scope.id()) { if (status().source === 'tokenapi') caches.delete(storeId); }
 const grantedScopes = () => scopes;
+/** The shop handle Performity gave for a brand on its last fresh-token ('' before the first). */
+const shopOf = (brand) => lastShop.get(String(brand || '').toLowerCase()) || '';
 
-module.exports = { access, status, clear, beginPull, brands, parseSecret, cleanShop, grantedScopes, _utc: utc, _resetPoc: () => { holdUntil = 0; holdWhy = ''; brandCache = null; lastShop = ''; lastBrand = ''; } };
+module.exports = { access, status, clear, beginPull, brands, vaultStores, shopOf, parseSecret, cleanShop, grantedScopes, _utc: utc,
+  _resetPoc: () => { holdUntil = 0; holdWhy = ''; brandCache = null; lastShop.clear(); lastToken.clear(); lastCall = 0; gate = Promise.resolve(); },
+  _pace: (call, token) => { PACE.call = call; PACE.token = token; } };
