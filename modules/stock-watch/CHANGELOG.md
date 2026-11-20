@@ -4,6 +4,9 @@ User-facing changes, newest first. Semver: minor when a number's rule changes or
 
 ## 1.1.0 · 2026-11-20 · Sprint 3
 
+- ₹ lost on long stock-outs: the in-stock sales rate counts at least 7 days (was 1), so a product seen in stock for a few hours can't claim units-per-day it never showed (LOGIC §3).
+- Past stock-outs rebuilt from Shopify's stock change log (60 days, validated) right after a store connects, so ₹ lost is real from day one (SW-063).
+
 Five streams merged: money (suppliers, budget), weekly review, access and security, data import and API, ops.
 
 **Money: suppliers and budget (SW-040, SW-041)**

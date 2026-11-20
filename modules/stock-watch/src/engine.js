@@ -112,12 +112,15 @@ function unsellable(eps, spells, now) {
 
 const overlap = (a, b, from, to) => Math.max(0, Math.min(b, to) - Math.max(a, from));
 
-/** Sales per day while the product could be bought: units ÷ in-stock days (at least one day).
- *  rawDays = in-stock days before the one-day floor. */
+/** Sales per day while the product could be bought: units ÷ in-stock days, counting at least
+ *  MIN_RATE_DAYS (and never more than the span measured). A product seen in stock for a few hours
+ *  that sold 2 units is not "2 a day": with the old one-day floor that inflated ₹ lost on long
+ *  stock-outs (Sammsara, 20 Nov 2026). rawDays = in-stock days before the floor. */
+const MIN_RATE_DAYS = 7;
 function demandPerDay(units, from, to, eps) {
   const outMs = eps.reduce((s, e) => s + overlap(e.start, e.end, from, to), 0);
   const rawDays = Math.max(0, (to - from - outMs) / DAY);
-  const days = Math.max(1, rawDays);
+  const days = Math.max(rawDays, Math.min(MIN_RATE_DAYS, Math.max(1, (to - from) / DAY)));
   return { perDay: units / days, inStockDays: days, rawDays };
 }
 

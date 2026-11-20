@@ -409,3 +409,16 @@ test('on order: stock going down after the mark (rows with a blank before) is no
   const got = E.onOrderNow({ qty: 300, eta: now + 5 * D, at }, [...ch, { t: t0 + 5 * D, before: null, now: 560 }], now, 560, 5, 7);
   assert.equal(got, null, 'a real arrival of 280 (≥ 90%) still completes it');
 });
+
+test('demand rate: a few hours in stock never makes "units per day" (7-day floor)', () => {
+  const E = require('../src/engine');
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20), from = now - 60 * DAY;
+  const eps = [{ start: from + 3 * 3600e3, end: now }];        // in stock 3 hours, then out 60 days
+  const r = E.demandPerDay(2, from, now, eps);
+  assert.ok(r.perDay <= 2 / 7 + 1e-9, `perDay ${r.perDay}`);
+  assert.ok(r.rawDays < 1);
+  const ok = E.demandPerDay(30, from, now, []);                 // normal case unchanged: 30 units / 60 days
+  assert.equal(ok.perDay, 0.5);
+  const short = E.demandPerDay(6, now - 3 * DAY, now, []);      // a 3-day span stays 3 days (never more than the span)
+  assert.equal(short.perDay, 2);
+});
