@@ -13,6 +13,8 @@ const HOUR = 36e5;
 const DAY = 864e5;
 
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
+/** obj[key] only when it is obj's own key: a variant ID like "constructor" never reads Object.prototype (critic r2 S1). */
+const own = (obj, key) => (obj && typeof obj === 'object' && Object.hasOwn(obj, key) ? obj[key] : undefined);
 const round = (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; };
 /** Smallest and largest `key(x)` in one loop. Never spread a big array into Math.min/max: past ~120k
  *  items that throws "Maximum call stack size exceeded". Empty → { min: Infinity, max: -Infinity }. */
@@ -338,7 +340,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       });
     });
 
-    const oo = p.stock == null ? null : onOrderNow((opts.onOrder || {})[p.id], p.changes, now, p.stock, perDay, S.leadDays);
+    const oo = p.stock == null ? null : onOrderNow(own(opts.onOrder, p.id), p.changes, now, p.stock, perDay, S.leadDays);
     const pl = p.stock == null ? null : planWithOrder({ stock: p.stock, perDay, lead: S.leadDays, cover: S.coverDays, safety: S.safetyDays }, oo);
     const selling = perDay > 0 && perDay >= S.minPerDay;
     const row = {
@@ -478,7 +480,7 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, S.tzOffsetMin); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
   const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder });
-  const c = opts.catalog && opts.catalog[id];
+  const c = own(opts.catalog, String(id));
   if (!timeline.length && c && c.stock != null) timeline.push({ t: from, stock: num(c.stock) }, { t: now, stock: num(c.stock) });   // never moved: flat at its stock now
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,
     dailyUnits: Object.entries(units).map(([day, u]) => ({ day, units: u })),

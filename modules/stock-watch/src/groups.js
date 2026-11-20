@@ -21,11 +21,13 @@ const TODAY = ['Out now', 'Critical', 'Order now'];   // "Need order" = the app'
 const CATCH_ALL = 0.8;                                 // a collection holding ≥ 80% of products says nothing
 const TREND_MIN_UNITS = 6;                             // same floor as a product's trend (engine.js)
 
+/** The catalog entry for one variant: own keys only, so an ID like "constructor" never reads Object.prototype. */
+const variantOf = (catalog, id) => (catalog.variants && Object.hasOwn(catalog.variants, String(id)) ? catalog.variants[String(id)] : undefined);
 const round = (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; };
 
 /** Collections that hold at least 80% of the products in the report (e.g. "All products"). */
 function catchAll(rows, catalog) {
-  const pids = new Set(rows.map((r) => catalog.variants?.[r.id]?.productId).filter(Boolean));
+  const pids = new Set(rows.map((r) => variantOf(catalog, r.id)?.productId).filter(Boolean));
   if (!pids.size) return [];
   return Object.entries(catalog.collections || {}).map(([key, c]) => {
     const share = (c.productIds || []).filter((p) => pids.has(String(p))).length / pids.size;
@@ -35,7 +37,7 @@ function catchAll(rows, catalog) {
 
 /** The groups one variant row belongs to under a lens: [{ key, label }]. */
 function keysFor(row, catalog, lens, index) {
-  const c = catalog.variants?.[row.id];
+  const c = variantOf(catalog, row.id);
   if (lens === 'product') {
     return c?.productId ? [{ key: String(c.productId), label: c.product || row.name }] : [{ key: `variant:${row.id}`, label: row.name }];
   }

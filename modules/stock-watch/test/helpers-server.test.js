@@ -76,3 +76,20 @@ test('decide: trial values never bring a decided item back; loading demo data wi
   assert.equal((await post('/api/demo', {})).status, 200);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8')), {});
 });
+
+test('a variant ID that is an Object.prototype key ("constructor", "toString"…) never breaks the PO CSV (critic r2 S1)', async () => {
+  const d = await (await get('/api/settings')).json();
+  const key = d.settings.ingestKey;
+  for (const id of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+    const r = await fetch(base + '/ingest/stock', { method: 'POST', headers: { 'x-ingest-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ variantId: id, sku: `P-${id}`, now: 3, before: 5, price: 100 }) });
+    assert.equal(r.status, 200, id);
+  }
+  for (const f of ['all', 'today', 'week', 'ordered']) assert.equal((await get(`/api/export/reorder.csv?filter=${f}`)).status, 200, f);
+  assert.equal((await get('/api/report')).status, 200);
+  for (const lens of ['product', 'type']) assert.equal((await get(`/api/groups?lens=${lens}`)).status, 200, lens);
+  const H = require('../src/helpers');
+  const vm = H.vendorMap([{ t: 1, variantId: 'constructor', vendor: 'Acme' }, { t: 1, variantId: 'x', vendor: 'Zed' }]);
+  assert.equal(vm.constructor, 'Acme'); assert.equal(Object.getPrototypeOf(vm), null);
+  const rows = H.poLines({ settings: {}, reorder: [{ id: 'toString', name: 'a', status: 'Out now' }, { id: 'x', name: 'b', status: 'Out now' }] }, { vendors: vm });
+  assert.deepEqual(rows.slice(1).map((l) => l[0]), ['Zed', ''], 'unknown vendor is blank, never a function');
+});

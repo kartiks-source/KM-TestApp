@@ -163,7 +163,7 @@ function add(kind, rows, src) {
  */
 function pruneStock(rows, cut, catalog = {}) {
   if (!rows.some((r) => r.t < cut)) return rows;
-  const gone = (id) => { const c = catalog[id]; return !!c && c.status === 'DELETED' && c.inactiveSince < cut; };
+  const gone = (id) => { const c = Object.hasOwn(catalog, id) ? catalog[id] : null; return !!c && c.status === 'DELETED' && c.inactiveSince < cut; };
   const by = new Map();
   for (const r of rows) { const id = String(r.variantId); if (!by.has(id)) by.set(id, []); by.get(id).push(r); }
   const keep = new Set();
@@ -198,13 +198,14 @@ function prune(force = false, now = Date.now()) {
  */
 function setCatalog(next, now = Date.now()) {
   const d = load(); const prev = d.catalog || {}; const out = {};
+  const has = (o, id) => Object.hasOwn(o, id);   // variant IDs are data: never Object.prototype keys
   for (const [id, c] of Object.entries(next)) {
-    const p = prev[id];
+    const p = has(prev, id) ? prev[id] : null;
     out[id] = c.active !== false ? c : { ...c, inactiveSince: p && p.active === false && p.status !== 'DELETED' && p.inactiveSince ? p.inactiveSince : now };
   }
   const tomb = (id, base) => { out[id] = { ...base, active: false, status: 'DELETED', inactiveSince: base.status === 'DELETED' && base.inactiveSince ? base.inactiveSince : now, stock: base.stock ?? null }; };
-  for (const [id, p] of Object.entries(prev)) if (!out[id]) tomb(id, p);
-  for (const r of d.stock) { const id = String(r.variantId); if (!out[id]) tomb(id, { product: r.product, variant: r.variant, sku: r.sku, stock: null, seenAt: r.t }); }
+  for (const [id, p] of Object.entries(prev)) if (!has(out, id)) tomb(id, p);
+  for (const r of d.stock) { const id = String(r.variantId); if (!has(out, id)) tomb(id, { product: r.product, variant: r.variant, sku: r.sku, stock: null, seenAt: r.t }); }
   d.catalog = out;
   save();
   return out;

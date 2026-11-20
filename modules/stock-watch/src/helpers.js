@@ -135,7 +135,7 @@ function enrich(r, { decisions = {}, rates = null } = {}) {
   const decide = [], decided = [];
   for (const p of r.products) {
     const k = decideKind(p); if (!k) continue;
-    const rec = decisions[String(p.id)];
+    const rec = Object.hasOwn(decisions, String(p.id)) ? decisions[String(p.id)] : null;
     const item = { id: p.id, ...k, decision: rec && DECISIONS.includes(rec.d) ? rec.d : null };
     if (item.decision && !salesChanged(rec.base, rates ? rates.get(String(p.id)) : p.perDay)) decided.push(item); else decide.push(item);
   }
@@ -174,7 +174,7 @@ function mktSort(rows, kind) {
 
 /** Vendor per variant: Shopify's product.vendor from the newest stock row that has one, or the catalog when there is one. */
 function vendorMap(stock = [], catalog = null) {
-  const m = {}, seen = {};
+  const m = Object.create(null), seen = Object.create(null);   // no prototype: a variant ID "constructor" is just a key (critic r2 S1)
   for (const r of stock) if (r && r.vendor && !(seen[r.variantId] > r.t)) { m[String(r.variantId)] = String(r.vendor); seen[r.variantId] = r.t; }
   if (catalog && typeof catalog === 'object') for (const [id, c] of Object.entries(catalog)) if (c && c.vendor) m[String(id)] = String(c.vendor);
   return m;
@@ -214,7 +214,7 @@ const PO_HEAD = ['Vendor', 'Product', 'SKU', 'Variant ID', 'Order qty', 'Unit co
 function poLines(r, { filter, q, vendors = {} } = {}) {
   const off = r.settings.tzOffsetMin ?? 330;
   const rows = reorderRows(filter === 'ordered' ? r.products : r.reorder, { filter, q });
-  const vOf = (p) => vendors[String(p.id)] || '';
+  const vOf = (p) => (Object.hasOwn(vendors, String(p.id)) ? String(vendors[String(p.id)] || '') : '');
   const sorted = rows.map((p, i) => [p, i]).sort(([a, i], [b, j]) => {
     const x = vOf(a), y = vOf(b);
     if (x !== y) return !x ? 1 : !y ? -1 : x.localeCompare(y);

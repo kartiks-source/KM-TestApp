@@ -180,8 +180,8 @@ test('SW-025 PO CSV: tab filter + search, UI status labels, vendor, unit cost, v
 
 test('SW-025 vendor map: newest stock row wins, catalog overrides', () => {
   const m = H.vendorMap([{ t: 2, variantId: 'A', vendor: 'New' }, { t: 1, variantId: 'A', vendor: 'Old' }, { t: 1, variantId: 'B' }]);
-  assert.deepEqual(m, { A: 'New' });
-  assert.deepEqual(H.vendorMap([], { A: { vendor: 'Cat' }, B: {} }), { A: 'Cat' });
+  assert.deepEqual({ ...m }, { A: 'New' });   // a null-prototype map (critic r2 S1)
+  assert.deepEqual({ ...H.vendorMap([], { A: { vendor: 'Cat' }, B: {} }) }, { A: 'Cat' });
 });
 
 test('SW-025 CSV cells: formula guard on text, numbers untouched, BOM', () => {
