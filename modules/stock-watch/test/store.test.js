@@ -266,7 +266,8 @@ test('a stock-out open for 130 days keeps its opening row and stays in the out-n
   const r = E.report(d.stock, d.orders, {}, { now });
   const so = r.stockouts.find((x) => x.id === 'X');
   assert.equal(so.open, true); assert.equal(so.start, now - 130 * DAYMS);
-  assert.equal(r.totals.stillOut, 1);
+  assert.equal(r.totals.stillOut + r.totals.outNotSelling, 1);
+  assert.equal(r.totals.outNotSelling, 1, 'no sales at all: out but not selling (LOGIC §1c), not in still out');
   assert.equal(r.products.find((p) => p.id === 'X').stock, -1);
 });
 

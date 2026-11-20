@@ -423,3 +423,59 @@ test('demand rate: a few hours in stock never makes "units per day" (7-day floor
   const short = E.demandPerDay(6, now - 3 * DAY, now, []);      // a 3-day span stays 3 days (never more than the span)
   assert.equal(short.perDay, 2);
 });
+
+/* L5 (validation 20 Nov 2026): Tara 5 Arm sold 2 units in the 17 h before a 40-day stock-out → 0.29 a day, ₹23,280
+ * lost, and Aspen (3 units) ranked a best seller. Under 5 units and 14 in-stock days the rate is capped at units ÷
+ * calendar days since the first sale, the row says lowData, and it is never A. */
+test('low data: a few units before a long stock-out are capped at the calendar pace and never A', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const outAt = now - 40 * DAY;
+  const stock = [
+    { t: outAt - DAY, variantId: 'tara', product: 'Tara', before: null, now: 2, price: 4000 },   // first seen a day before it sold out
+    { t: outAt, variantId: 'tara', product: 'Tara', before: 2, now: 0, price: 4000 },
+    { t: now - 60 * DAY, variantId: 'big', product: 'Big', before: null, now: 500, price: 100 },
+  ];
+  const orders = [{ t: outAt - 17 * 3600e3, order: '#1', variantId: 'tara', qty: 1, price: 4000 }, { t: outAt - 3600e3, order: '#2', variantId: 'tara', qty: 1, price: 4000 }];
+  for (let i = 0; i < 56; i++) orders.push({ t: now - 56 * DAY + i * DAY, order: `#b${i}`, variantId: 'big', qty: 1, price: 100 });
+  const r = E.report(stock, orders, {}, { days: 30, now });
+  const tara = r.products.find((p) => p.id === 'tara');
+  assert.equal(tara.lowData, true);
+  assert.ok(Math.abs(tara.perDay - 2 / ((now - orders[0].t) / DAY)) < 0.01, `perDay ${tara.perDay}`);   // 2 units ÷ ~40.7 days
+  assert.notEqual(tara.abc, 'A');
+  assert.ok(tara.lost < 30 * 0.06 * 4000, `lost ${tara.lost}`);   // was 30 × 2/7 × ₹4,000 ≈ ₹34,000
+  assert.equal(r.products.find((p) => p.id === 'big').lowData, undefined, 'plenty of sales: unchanged');
+  /* a new launch selling well over 3 days isn't held back: same rate as before */
+  const launch = E.report([{ t: now - 3 * DAY, variantId: 'n', before: null, now: 50, price: 10 }], [1, 2, 3, 4].map((i) => ({ t: now - i * 0.7 * DAY, order: `#n${i}`, variantId: 'n', qty: 1, price: 10 })), {}, { days: 7, now });
+  assert.equal(launch.products[0].perDay, 1.43);   // 4 units ÷ the 2.8 days the store's data covers, as before
+});
+
+/* L6: totals.stillOut was 87 (every open stock-out) while the Stock-outs page said 45 (out but not selling left out). */
+test('still out leaves out products that are out but not selling; they are counted apart', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [
+    { t: now - 20 * DAY, variantId: 'sells', before: null, now: 5, price: 100 }, { t: now - 2 * DAY, variantId: 'sells', before: 5, now: 0, price: 100 },
+    { t: now - 20 * DAY, variantId: 'dead', before: null, now: 0, price: 100 },
+  ];
+  const orders = [5, 6, 7, 8, 9].map((i) => ({ t: now - i * DAY, order: `#${i}`, variantId: 'sells', qty: 1, price: 100 }));
+  const t = E.report(stock, orders, {}, { days: 7, now }).totals;
+  assert.equal(t.stillOut, 1);
+  assert.equal(t.outNotSelling, 1);
+});
+
+/* L4: after a peak the 28-day rate over-orders; with the product or store down 20%+ the row also carries the order
+ * at the last 14 days' in-stock pace (paceQty), never more than the order itself. */
+test('order at the last 2 weeks’ pace when sales are falling', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [{ t: now - 40 * DAY, variantId: 'c', before: null, now: 7, price: 1000 }];
+  const orders = [];
+  for (let i = 0; i < 14; i++) for (let k = 0; k < 6; k++) orders.push({ t: now - 28 * DAY + i * DAY + k * 3600e3, order: `#a${i}${k}`, variantId: 'c', qty: 1, price: 1000 });   // 6 a day, weeks 3–4 back
+  for (let i = 0; i < 14; i++) for (let k = 0; k < 3; k++) orders.push({ t: now - 14 * DAY + i * DAY + k * 3600e3, order: `#b${i}${k}`, variantId: 'c', qty: 1, price: 1000 });   // 3 a day since
+  const p = E.report(stock, orders, {}, { days: 30, now, catalog: { c: { product: 'C', price: 1000, stock: 7, active: true } } }).products[0];
+  assert.ok(p.trendPct <= -40, `trend ${p.trendPct}`);
+  assert.equal(p.orderQty, Math.ceil(4.5 * 40 - 7));          // 126 at 28-day rate 4.5 a day
+  assert.equal(p.paceQty, Math.ceil(3 * 40 - 7));             // 113 at 3 a day
+  assert.equal(p.pacePerDay, 3); assert.equal(p.paceValue, 113 * 1000);
+  /* steady sales: no pace line */
+  const flat = []; for (let i = 0; i < 28; i++) flat.push({ t: now - 28 * DAY + i * DAY, order: `#f${i}`, variantId: 'c', qty: 4, price: 1000 });
+  assert.equal(E.report(stock, flat, {}, { days: 30, now }).products[0].paceQty, undefined);
+});

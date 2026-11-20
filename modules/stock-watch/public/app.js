@@ -408,11 +408,15 @@
   const whyCell = (p, short) => (p.why ? `<span class="why${p.stock != null && p.stock <= 0 ? ' out' : p.daysLeft != null && p.daysLeft <= 3 ? ' crit' : ''}" title="${esc(p.why)}">${esc(short ? p.why.replace(/ · supplier takes \d+ d$/, '') : p.why)}</span>` : '–');
   const trendOnly = (p) => (p.trendPct == null && !p.trendNew ? '<span class="muted" title="Not enough sales yet to call a trend">–</span>' : trendChip(p));
 
+  /* L3 (1.1.1): with no unit costs in Shopify every ₹ to order / overstock is at selling price, so never say "at cost" then */
+  const atCost = () => (state.report.totals.hasCost ? 'at cost' : 'at selling price');
+  /* F2 (1.1.1): Shopify pull prices are ex GST (net sales by order date); other sources: as sent */
+  const soldTip = () => ((state.shopify || {}).priceBasis === 'exTax' ? 'Net sales: price paid after discounts, before GST, refunds netted on the order’s day (Shopify’s Net sales by order date)' : 'Price paid × units, as your data sends it');
   function summaryText() {
     const r = state.report, t = r.totals;
     const prods = new Set(r.stockouts.map((s) => s.id)).size;
     return t.stockouts
-      ? `${inPeriod(r).replace(/^./, (c) => c.toUpperCase())}, ${prods} products ran out of stock ${t.stockouts} times. That cost about ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand)${t.hasCost ? ` and ${moneyFull(t.lostProfit)} in profit` : ''}. ${t.orderToday} products need ordering today (${moneyFull(t.orderValueNow)} at cost)${t.excessValue ? `, and ${moneyFull(t.excessValue)} sits in overstock` : ''}.`
+      ? `${inPeriod(r).replace(/^./, (c) => c.toUpperCase())}, ${prods} products ran out of stock ${t.stockouts} times. That cost about ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand)${t.hasCost ? ` and ${moneyFull(t.lostProfit)} in profit` : ''}. ${t.orderToday} products need ordering today (${moneyFull(t.orderValueNow)} ${atCost()})${t.excessValue ? `, and ${moneyFull(t.excessValue)} sits in overstock` : ''}.`
       : `No product ran out of stock ${inPeriod(r)}.`;
   }
 
@@ -437,10 +441,10 @@
         ${t.hasCost
     ? `<button class="tile lost" data-go="stockouts" data-filter="all" title="Profit on the ${money(t.lost)} of sales lost while products were out of stock: units lost × (price paid − unit cost)${t.costed < t.active ? `. Only ${t.costed} of ${t.active} products have a cost, so it is a minimum` : ''}"><b>${money(t.lostProfit)}</b><span>profit lost · ${n1(t.lostPct)}% of demand${t.costed < t.active ? ` (${t.costed}/${t.active} costed)` : ''}</span></button>`
     : `<button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost ÷ (sold + sales lost)"><b>${n1(t.lostPct)}%</b><span>of demand lost · ${inr.format(t.stockouts)} stock-outs</span></button>`}
-        <button class="tile amber" data-go="reorder" data-filter="week" title="Cash to commit at unit cost for what needs ordering this week, after today’s order"><b>${money(weekValue)}</b><span>more to order this week · ${week} products</span></button>
+        <button class="tile amber" data-go="reorder" data-filter="week" title="Cash to commit ${atCost()}${t.hasCost ? ' (selling price where a product has none)' : ' (no unit costs in Shopify)'} for what needs ordering this week, after today’s order"><b>${money(weekValue)}</b><span>more to order this week · ${week} products</span></button>
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that need ordering today"><b>${t.bestAtRisk}<small> of ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
-        <button class="tile plum" data-go="products" data-filter="push" title="Cash in stock beyond what lead time + days to last + buffer need, for overstocked products: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
-      </section>
+        <button class="tile plum" data-go="products" data-filter="push" title="Stock beyond what lead time + days to last + buffer need, for overstocked products, ${atCost()}: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
+      </section>${t.hasCost ? '' : '<p class="muted small" id="nocost-note">No unit costs in Shopify, so ₹ to order and overstock are at selling price. Fill <b>Cost per item</b> in Shopify for cash at cost.</p>'}
       <section class="grid2 grid3">
         <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder" data-go="reorder" data-filter="today">All ${t.orderToday}</a></div>
           ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
@@ -451,7 +455,7 @@
         ${moving()}
       </section>
       <section class="panel chart" id="daily-chart">
-        <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
+        <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span title="${esc(soldTip())}"><i style="background:#0978BE"></i>Sold${(state.shopify || {}).priceBasis === 'exTax' ? ' ex GST' : ''} ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
         ${dailyChart(r.daily)}
       </section>
       ${window.SW_WEEKLY ? SW_WEEKLY.panel() : ''}`;
@@ -596,7 +600,7 @@
     : (a, b) => (a.stock <= 0 ? -1 : a.daysLeft ?? 1e9) - (b.stock <= 0 ? -1 : b.daysLeft ?? 1e9) || b.perDay * b.price - a.perDay * a.price);
   /* SW-032: the decision cell and its buttons */
   const DECIDE_LABEL = { drop: 'Don’t reorder?', clear: 'Clear' };
-  const decideCell = (p) => { const x = decideOf().get(p.id); if (!x) return '–'; return `<span class="dec ${x.kind}" title="${x.kind === 'drop' ? 'Sells slowly and is out of stock: sales lost in the period' : 'Sells slowly and has stock: stock × unit cost (price when no cost)'}">${DECIDE_LABEL[x.kind]}${x.value ? ` <b>${money(x.value)}</b>${x.kind === 'drop' ? ' lost' : ' at cost'}` : ''}</span>`; };
+  const decideCell = (p) => { const x = decideOf().get(p.id); if (!x) return '–'; return `<span class="dec ${x.kind}" title="${x.kind === 'drop' ? 'Sells slowly and is out of stock: sales lost in the period' : 'Sells slowly and has stock: stock × unit cost (price when no cost)'}">${DECIDE_LABEL[x.kind]}${x.value ? ` <b>${money(x.value)}</b>${x.kind === 'drop' ? ' lost' : ` ${atCost()}`}` : ''}</span>`; };
   const decideBtns = (p) => { const x = decideOf().get(p.id); if (!x || viewOnly()) return ''; return `<span class="decb">${['keep', x.kind === 'drop' ? 'drop' : 'clear', ...(x.kind === 'clear' ? ['drop'] : [])].map((d) => `<button class="btn ghost xs" data-decide="${esc(p.id)}|${d}" title="${esc(DECIDE_TIP[d])}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</span>`; };
   const DECIDE_TIP = { keep: 'Keep selling and reordering as now', drop: 'Stop reordering it', clear: 'Sell off the stock (discount, bundle)' };
   /* SW-026: the Pause / Push action bar: counts, copy SKUs, CSV */
@@ -624,7 +628,7 @@
     { k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'OK', 'Slow seller', 'No stock data'].indexOf(p.status), csv: (p) => GROUP_LABEL[group(p.status)] },
     { k: 'stock', label: 'In stock', r: 1, f: (p) => (p.stock == null ? '–' : inr.format(p.stock)) },
     { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1, csv: (p) => p.daysLeft ?? '' },
-    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold ${inPeriod()}`, f: (p) => money(p.sold) },
+    { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold ${inPeriod()}. ${soldTip()}`, f: (p) => money(p.sold) },
     { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
@@ -764,7 +768,7 @@
     if (!sh.source) return '';
     const h = sh.history, btn = viewOnly() ? '' : ' <button class="linkbtn" id="history-rebuild">Rebuild stock history</button>';
     const txt = !h ? 'Stock history: rebuilt after the first pull'
-      : h.ok ? `Stock history rebuilt from Shopify’s change log for ${inr.format(h.kept)} of ${inr.format(h.total)} products (${dt(h.from).slice(0, 6)} → ${dt(h.until).slice(0, 6)})${h.dropped ? ` · ${inr.format(h.dropped)} left out: the log doesn’t add up for them` : ''}`
+      : h.ok ? `Stock history rebuilt from Shopify’s change log for ${inr.format(h.kept)} of ${inr.format(h.total)} products (${dt(h.from).slice(0, 6)} → ${dt(h.until).slice(0, 6)})${h.dropped ? ` · ${inr.format(h.dropped)} left out: the log doesn’t add up for them` : ''}${h.check ? ` · check: ${inr.format(h.check.bad)} of ${inr.format(h.check.lines)} orders fell while out${h.check.bad ? ' (those products left out)' : ''}` : ''}`
         : h.note;
     const fail = h && h.ok && h.note ? ` · last try: ${h.note}` : '';
     return `<p class="muted small" id="history-line">${esc(txt + fail)}${btn}</p>`;
@@ -841,9 +845,9 @@
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
         ${p?.why ? `<p class="dwhy">${whyCell(p)}</p>` : ''}
         <section class="tiles dtiles">
-          <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)}` : ''}</span></div>
+          <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)} ${atCost()}` : ''}${p?.paceQty != null ? `<br><small id="pace-qty" title="Sales are falling (${p.trendPct ?? '–'}% this product, ${state.report.totals.storeTrendPct ?? '–'}% the typical product): the same order at the last 14 days’ in-stock pace, ${n1(p.pacePerDay)} a day">${inr.format(p.paceQty)} pcs at last 2 weeks’ pace</small>` : ''}</span></div>
           <div class="tile ${p?.daysLeft != null && p.daysLeft <= 3 ? 'lost' : ''}"><b>${p?.daysLeft == null ? (p?.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b><span>days left · ${p?.stock ?? '–'} in stock</span></div>
-          <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day</span></div>
+          <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
           <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
         </section>
         ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}

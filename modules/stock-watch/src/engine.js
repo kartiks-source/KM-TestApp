@@ -128,6 +128,12 @@ function demandPerDay(units, from, to, eps) {
 const KEEP_DAYS = 120;
 /** Fewer in-stock days than this in the demand window and the window can't say what the product sells. */
 const MIN_IN_STOCK_DAYS = 7;
+/** Low data (LOGIC.md §3): a rate resting on fewer than LOW_UNITS units AND fewer than LOW_DAYS in-stock days is
+ *  capped at units ÷ calendar days since the product's first sale, and can't make the product a best seller (A).
+ *  Before: 2 units sold in the 17 h before a long stock-out read as 0.29 a day → ₹23,280 lost, ranked A. */
+const LOW_UNITS = 5, LOW_DAYS = 14;
+/** A falling trend (product or store, ≤ PACE_DROP %) shows the order quantity at the last 14 days' pace too (§6). */
+const PACE_DROP = -20;
 
 /** Earliest t ≥ histFrom such that [t, to) holds `wantMs` of in-stock time (eps sorted, oldest first).
  *  histFrom when there isn't that much. */
@@ -180,7 +186,7 @@ function demandRate(lines, eps, { winFrom, histFrom, now, wantDays, first = -Inf
  */
 const TREND_MIN_UNITS = 6;
 function trend(lines, eps, now, since = -Infinity) {
-  const weeks = [];
+  const weeks = [], out0 = {};
   for (let w = 7; w >= 0; w--) {
     const a = now - (w + 1) * 7 * DAY, b = now - w * 7 * DAY;
     if (b <= since) { weeks.push({ units: null, outDays: 0 }); continue; }
@@ -203,7 +209,10 @@ function trend(lines, eps, now, since = -Infinity) {
   const trendNew = before.inDays >= 7 && before.units === 0 && recent.units >= 3;
   /* rateDelta: change in sales per in-stock day behind the % (null when there's no trend to call) */
   const rateDelta = trendPct != null || trendNew ? round(recent.rate - before.rate, 3) : null;
-  return { weeks, trendPct, trendNew, rateDelta };
+  /* recentRate: sales per in-stock day over the last 14 days (null under 3 in-stock days), for the pace check (§6) */
+  const recentRate = recent.inDays >= 3 ? recent.rate : null;
+  Object.defineProperty(out0, 'recentRate', { value: recentRate, enumerable: false });
+  return Object.assign(out0, { weeks, trendPct, trendNew, rateDelta });
 }
 
 /** The baseline to read a product's trend against: the median trend of all products that have one.
@@ -359,7 +368,13 @@ function report(stock, orders, settings = {}, opts = {}) {
     const units = rate.units;
     const revenue = rate.lines.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
     const price = units ? revenue / units : p.price;
-    const { perDay } = rate;
+    let { perDay } = rate, lowData = false;
+    if (units > 0 && units < LOW_UNITS && rate.rawDays < LOW_DAYS) {
+      lowData = true;
+      const firstSale = minMax(p.lines, (o) => o.t).min;
+      const all = p.lines.reduce((s, o) => s + num(o.qty), 0);
+      perDay = Math.min(perDay, all / Math.max(1, (now - firstSale) / DAY));
+    }
     const perSellingHour = perDay / 24;
 
     let lost = 0, unitsLost = 0, outs = 0, smallTopUps = 0, repeats = 0;
@@ -404,7 +419,8 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '', onOrder: oo,
     };
-    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0) }, enumerable: false });
+    if (lowData) row.lowData = true;
+    Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0), lead, oo, sup, stock: p.stock }, enumerable: false });
     if (sup) { row.supplier = sup.name; if (sup.leadDays != null) row.leadDays = lead; }
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
@@ -418,7 +434,8 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.excessUnits = Math.max(0, Math.floor(have - need));
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
     row.overstock = have > 0 && (perDay === 0 || have > 2 * need);
-    Object.assign(row, trend(p.lines, eps, now, p.first));
+    const tr = trend(p.lines, eps, now, p.first);
+    Object.assign(row, tr); row._plan.recentRate = tr.recentRate;
     /* ₹ effect of the trend (Overview "Moving"): the change in daily rate × average price × 30 = ₹ a month at the new pace */
     row.trendValue = row.rateDelta == null ? null : Math.round(row.rateDelta * price * 30);
     if (p.inactive) {   // left out of reorder and overstock; listed only if it sold or lost sales in the period
@@ -443,7 +460,7 @@ function report(stock, orders, settings = {}, opts = {}) {
   let run = 0;
   for (const p of byDemand) {
     const before = allDemand ? run / allDemand : 1; run += demandOf(p);
-    p.abc = !(demandOf(p) > 0) ? 'C' : before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C';
+    p.abc = !(demandOf(p) > 0) ? 'C' : before < 0.8 ? (p.lowData ? 'B' : 'A') : before < 0.95 ? 'B' : 'C';   // low data is never A (§7a)
   }
   /* a best seller is never "slow": it earns its place by ₹ even when it sells few units (e.g. furniture) */
   for (const p of products) {
@@ -458,9 +475,19 @@ function report(stock, orders, settings = {}, opts = {}) {
      median trend, so a season-wide fall doesn't paint every row red. No baseline (under 5 trends) → against 0. */
   const baseTrend = storeTrend(products);
   for (const p of products) p.trendCall = trendCall(p.trendPct, baseTrend);
+  /* the order at the last 14 days' pace (LOGIC.md §6): when the product or the store is falling 20%+ and that pace is
+     slower, so a post-peak order isn't sized on the peak alone. Shown beside the order quantity; it doesn't replace it. */
+  for (const p of products) {
+    const x = p._plan, rr = x.recentRate;
+    if (!x.pl || rr == null || !(rr < x.perDay) || !((p.trendPct != null && p.trendPct <= PACE_DROP) || (baseTrend != null && baseTrend <= PACE_DROP))) continue;
+    let q = planWithOrder({ stock: x.stock, perDay: rr, lead: x.lead, cover: S.coverDays, safety: S.safetyDays }, x.oo).qty;
+    if (x.sup) q = roundOrder(q, x.sup).qty;
+    p.paceQty = q; p.pacePerDay = round(rr, 2);
+  }
 
   /* an order quantity only where an order is due (Order today / This week); "OK" never asks you to order */
-  for (const p of products) if (!['Out now', 'Critical', 'Order now', 'Order this week'].includes(p.status)) { p.orderQty = 0; p.orderValue = 0; }
+  for (const p of products) if (!['Out now', 'Critical', 'Order now', 'Order this week'].includes(p.status)) { p.orderQty = 0; p.orderValue = 0; delete p.paceQty; delete p.pacePerDay; }
+  for (const p of products) if (p.paceQty != null) { if (p.paceQty >= p.orderQty) { delete p.paceQty; delete p.pacePerDay; } else p.paceValue = Math.round(p.paceQty * p._plan.unitValue); }
   /* SW-040: units the MOQ / case pack added, and their cash (LOGIC.md §6c) */
   for (const p of products) {
     const raw = p._plan.pl && p._plan.pl.rawQty;
@@ -478,6 +505,10 @@ function report(stock, orders, settings = {}, opts = {}) {
   /* totals come from the product rows, so they always equal what the Products page adds up to */
   const sold = products.reduce((s, p) => s + p.sold, 0);
   const lost = products.reduce((s, p) => s + p.lost, 0);
+  /* out but not selling (LOGIC.md §1c): no units, no sales and no sales lost in the period; counted apart from "still out" */
+  const rowOf = new Map(products.map((p) => [String(p.id), p]));
+  const notSelling = (id) => { const p = rowOf.get(String(id)); return !!p && !p.unitsSold && !p.sold && !p.lost; };
+  const openOuts = stockouts.filter((s) => s.open);
 
   return {
     generatedAt: now, days, from, settings: S,
@@ -488,7 +519,8 @@ function report(stock, orders, settings = {}, opts = {}) {
       ordered: products.filter((p) => p.status === 'Ordered').length,
       orderNow: products.filter((p) => ['Critical', 'Order now'].includes(p.status)).length,
       orderToday: products.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
-      stillOut: stockouts.filter((s) => s.open).length,
+      stillOut: openOuts.filter((s) => !notSelling(s.id)).length,
+      outNotSelling: openOuts.filter((s) => notSelling(s.id)).length,
       orderWeek: products.filter((p) => p.status === 'Order this week').length,
       stockouts: stockouts.length,
       smallTopUps: stockouts.filter((s) => s.small).length,
@@ -546,4 +578,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  trend, trendCall, storeTrend, TREND_MIN_UNITS, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
