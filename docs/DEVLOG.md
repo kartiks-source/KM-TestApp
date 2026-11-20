@@ -3,6 +3,13 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · multi-store critic round
+stock-watch, branch `feature/multistore` (92e6c02, a32cf51, 82ebbfe + this entry; not pushed, not deployed).
+- ISO-1 (P1): migration is once per `DATA_DIR` (a marker in any `stores/<id>/` = done for good) and goes to the store `SHOPIFY_STORE` / `PERFORMITY_BRAND_ID` names, else the first (`stores.home()`). A later top-level `restore.json` or a store-list change no longer moves files into another store or crash-loops the start.
+- SEC-1 (P1): `stores.refresh()` and `keys.pocCall()` make no call unless `keys.status().ready` (https or localhost URL, key set): the brand list had sent `X-Api-Key` over plain http / empty.
+- UI-1..UI-6: dot classes `s-*` (`.stale` banner clash); menu `max-height` + scroll; ellipsis on long names + pill title; range never shrinks, role name one line; phone store bar for one store, drawer names the store; picker re-reads `/api/stores` every minute. Smoke: sign-in waits for the first page (pre-existing flake: goto aborted its report call).
+- Checked: `npm test` 233 pass / 13 skip; `test:ui` 18/18; `smoke.js` 30/30 ×3; `roles-smoke.js` all pass.
+
 ## 2026-11-20 · multi-store + show everything by default
 stock-watch, branch `feature/multistore` (5ce0981, 6d5454d, e8f6fba merge of main, e6714bc, 0c27383, d3bfab1 + this entry; not pushed, not deployed). Resumed after the first builder was killed mid-UI.
 - Kept from the killed run: server side (ADR-0015: registry, `scope.run`, per-store folders, crash-safe migration, `?store=` + `sw_store` cookie, 404 on bad ids, one pull queue, per-store alerts/digest/CSV names, `/status` totals) and the half-done UI (`public/stores.js`, app.js store calls). Fixed in it: a comment had swallowed `state.q` (every page threw on load); ARIA `menuitemradio` without a menu → plain buttons with `aria-current`; picker / store bar / dot CSS was missing; duplicate doc comment in `server.js` freshness.
