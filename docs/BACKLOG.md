@@ -214,6 +214,10 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: `node:22-alpine` pinned by digest; runs as `node` via an entrypoint that chowns `DATA_DIR` once and drops privileges with su-exec when started as root, else just runs; shell test with stubs; RUNBOOK verify + roll back.
 - Status: Done, not yet deployed. `FROM node:22.23.5-alpine@sha256:1314fb30…` (Docker Hub, 12 Nov 2026); `modules/stock-watch/scripts/entrypoint.sh`; `test/entrypoint.test.sh` (run by `test/entrypoint.test.js`). No docker daemon here: the image was not built locally; first deploy follows RUNBOOK "Container user" to verify.
 
+**SW-057 · Trial inputs keep the raw text** (S · builder)
+- Accept: Advanced planning rules and Reorder what-ifs keep the typed text (no reformat, no caret jump); read on blur / Enter; invalid shows a hint.
+- Status: Done. `public/trial-input.js`; LOGIC §6a; browser test `test/ui-trial.test.js` (in `npm run test:ui`); smoke presses Enter after typing.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -233,7 +237,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
-| SW-057 | Trial input keeps raw text while typing | S | builder | QA F10 |
 | SW-058 | Agent token savings: doc routing table, DEVLOG rotation, `test:agent` dot reporter, `.ignore`, LOGIC index, critic reports saved to `docs/reviews/` | S | builder | tokens T2–T11, process ideas |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |

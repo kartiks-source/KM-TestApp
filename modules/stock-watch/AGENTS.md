@@ -63,6 +63,7 @@ Google Sheet CSV / upload ───┘
 | `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
 | `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (the phone bar also shows the role and holds the role list, `#role-menu-m`, filled by `SW_ROLES.paint()`) (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
 | `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
+| `public/tz.js`, `public/ops.js`, `public/trial-input.js` | store time helper (SW-049); Data notice for capacity / read-only (SW-055); number boxes that keep raw text, read on Enter / leave, hint when invalid (SW-057; browser test `test/ui-trial.test.js`) |
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |

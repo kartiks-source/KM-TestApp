@@ -207,7 +207,7 @@
     const S = state.settings, R = state.report.settings, t = state.report.totals;
     const trial = Object.keys(state.what).length > 0;
     const fields = ASSUME.slice(0, 3).map(([k, label, unit, step, tip]) => `<div class="pf" title="${esc(tip)}"><label for="w-${k}">${label}</label>
-        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
+        <span class="pin"><button class="pm" data-step="${k}|-${step}" aria-label="Less ${label}">−</button><input id="w-${k}" data-what="${k}" data-trial="${k}" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" value="${esc(window.SW_TRIAL?.typed(`w-${k}`) ?? R[k])}" class="${state.what[k] != null && +state.what[k] !== +S[k] ? 'changed' : ''}"><button class="pm" data-step="${k}|${step}" aria-label="More ${label}">+</button></span></div>`).join('');
     return `<details class="plan" ${(state.planOpen ?? false) || trial ? 'open' : ''}><summary>Plan settings <span class="muted">lead time ${R.leadDays} d · lasts ${R.coverDays} d · buffer ${R.safetyDays} d</span>${trial ? ' <span class="badge demo">trying new values</span>' : ''}</summary>
       <div class="pbody">${fields}${trial ? `<span class="pact">${viewOnly() ? '' : '<button class="btn" id="what-save">Save as default</button>'}<button class="btn ghost" id="what-reset">Reset</button></span>` : ''}</div>${state.lastPlanChange ? `<p class="muted small plast">Last changed ${dt(state.lastPlanChange.at)} by ${esc(state.lastPlanChange.by)} · ${changeText(state.lastPlanChange)}</p>` : ''}</details>`;
   }
@@ -800,7 +800,7 @@
   const manyStores = () => !!(window.SW_STORES && SW_STORES.list().length > 1);
   const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
-  const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" type="${type}" step="any" value="${esc(v)}"><small>${esc(hint)}</small></div>`;
+  const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" ${type === 'number' ? `type="text" inputmode="decimal" autocomplete="off" data-trial="${k}"` : `type="${type}"`} value="${esc(type === 'number' ? window.SW_TRIAL?.typed(`f-${k}`) ?? v : v)}"><small>${esc(hint)}</small></div>`;   // SW-057: numbers keep what you type
 
   /* ---------- product drawer ---------- */
   async function openProduct(id) {
@@ -948,7 +948,7 @@
     if (t.id === 'g-clear') { state.group = null; state.limit.products = 0; render(); return; }
     if (t.id === 'g-all') { state.allColl = !state.allColl; render(); return; }
     if (t.id === 'copy-summary') { copy(summaryText()); return; }
-    if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; setWhat(k, v); return; }
+    if (t.dataset.step) { const [k, d] = t.dataset.step.split('|'); const el = document.getElementById('w-' + k); const v = Math.max(0, Math.round((+el.value + +d) * 10) / 10); el.value = v; window.SW_TRIAL?.forget(el.id); setWhat(k, v); return; }
 
     if (t.matches('th[data-k]')) {
       const id = t.closest('table').dataset.table, k = t.dataset.k, s = state.sort[id];
@@ -1006,15 +1006,20 @@
       }
       if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update X-Ingest-Key in both Flow workflows'); await load(); }
       if (t.id === 'save-settings') {
-        const patch = {}; $$('[data-setting]').forEach((i) => { patch[i.dataset.setting] = i.value; });
+        const patch = {}; $$('[data-setting]').forEach((i) => { patch[i.dataset.setting] = i.dataset.trial ? i.value.trim().replace(',', '.') : i.value; });
         await api('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }); toast('Settings saved'); await load();
       }
     } catch (err) { toast(err.message); t.disabled = false; }
   });
   document.addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.what) { render._focus = e.target.id; render._caret = e.target.selectionStart; setWhat(e.target.dataset.what, e.target.value.replace(',', '.')); return; }
+    if (e.target.dataset && e.target.dataset.what) { if (window.SW_TRIAL) return; render._focus = e.target.id; render._caret = e.target.selectionStart; setWhat(e.target.dataset.what, e.target.value.replace(',', '.')); return; }   // SW-057: read on leave / Enter (sw:trial)
     const m = e.target.id && e.target.id.match(/^q-(reorder|stockouts|products)$/);
     if (m) { state.q[m[1]] = e.target.value; state.limit[m[1]] = 0; render._focus = e.target.id; render._caret = e.target.selectionStart; render(); }
+  });
+  document.addEventListener('sw:trial', (e) => {   // SW-057: a what-if typed and read (public/trial-input.js)
+    const el = e.detail.el; if (!el.dataset.what) return;
+    if (document.activeElement === el) render._focus = el.id;
+    setWhat(el.dataset.what, e.detail.value);
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'f-view') { state.lens = e.target.value; state.limit.products = 0; state.limit.groups = 0; render(); return; }

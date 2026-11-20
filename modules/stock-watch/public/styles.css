@@ -683,3 +683,6 @@ table.fixed td:first-child { max-width: none; }
 .ops-warn { background: var(--amber-soft); border: 1px solid var(--amber); color: var(--ink); border-radius: var(--r); padding: 10px 14px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
 .ops-warn b { color: var(--amber); font-size: 14px; }
 .ops-warn p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+/* SW-057: hint under a number that isn't valid (Plan settings, Advanced planning rules) */
+.trial-hint { display: block; color: var(--lost); font-size: 12px; margin-top: 2px; }
+input[aria-invalid="true"] { border-color: var(--lost); }

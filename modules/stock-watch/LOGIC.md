@@ -250,6 +250,8 @@ Settings: *Lead time* [7 days], *Cover after a reorder* [30 days], *Safety stock
 
 ## 6a. Changing the assumptions (live)
 
+**Typing (SW-057, `public/trial-input.js`):** the number boxes (Plan settings on Reorder, Advanced planning rules on Data) keep exactly what you type; the value is read when you press Enter or leave the box, so the numbers don't jump mid-typing. `1,5` reads as 1.5. Text that isn't a number in the setting's range (the same ranges the server clamps to) shows "Enter a number from X to Y" under the box and changes nothing.
+
 The six assumptions (lead time, cover, safety, sales history window, slow-seller cutoff, small top-up) sit in the **Assumptions** bar on Overview, Reorder and Products. Changing one recalculates every number straight away, but only for you and only until you leave or press **Reset**. **Save as default** stores them for everyone. Next to the inputs the bar shows what the change does to the cash side: order value for everything urgent, the whole reorder list, and cash in overstock.
 
 **Why:** the right lead time or cover differs by supplier, season and cash position. Seeing "cover 30 → 20 days frees ₹X of order value" lets a brand trade working capital against stock-out risk before committing.

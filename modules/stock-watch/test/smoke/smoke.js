@@ -103,6 +103,7 @@ async function openPlan(page) {
 async function tryLead(page, v) {
   await openPlan(page);
   await page.fill('#w-leadDays', String(v));
+  await page.press('#w-leadDays', 'Enter');   // SW-057: read on Enter / leaving the box
   await page.waitForSelector('#what-reset', { timeout: 5000 });
 }
 
