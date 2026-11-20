@@ -196,6 +196,12 @@ Goal: each role sees its one decision first, with less on screen than today. See
 
 ---
 
+## Sprint 3 · D-ops (ops, time zone, agent docs)
+
+**SW-049 · One IANA time zone per store** (S · builder)
+- Accept: one `timeZone` setting per store used by rows, engine, digest and backups; no fixed +5:30 left; LOGIC note; tests in a daylight-saving zone.
+- Status: Partial. Done: `public/tz.js` (+ `src/tz.js`) is the one helper; rows, engine, period, Mark ordered, helpers, digest, backups, demo and the page use it; Settings has a zone picker; old `tzOffsetMin` stores keep working (LOGIC §0a, `test/tz.test.js` at New York and London). Open: the Google Sheet version (`modules/stock-watch-sheets`) still uses the spreadsheet's own zone.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -211,7 +217,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-046 | Storage move per ADR-0003 (node:sqlite) + cached report + gzip | L | builder | architect A6, SRE-10 |
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
-| SW-049 | One IANA time zone setting used by rows, engine and Sheet | S | builder | architect A12, SRE-12 |
 | SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |

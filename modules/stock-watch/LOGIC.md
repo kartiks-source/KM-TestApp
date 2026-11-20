@@ -12,6 +12,19 @@ If you change a rule, change this file in the same commit and add a line to `doc
 
 ---
 
+## 0a. Store time (SW-049, `public/tz.js` via `src/tz.js`)
+
+**Rule:** every store has one time zone, `settings.timeZone`, an IANA name such as `Asia/Kolkata` (default) or `Europe/London`. Every store-time day, hour, month and date stamp goes through the one helper `public/tz.js` (the page loads it, the server requires it through `src/tz.js`): rows without a zone (§1a), the daily chart and hour profile (§4a, §5), This month and Yesterday (§5a), Mark ordered dates (§6b), Why / PO / Pause dates (§15), the digest hour and title (§17), backup file names and the page's own dates. Nothing adds a fixed +5:30 any more.
+
+- **Daylight saving:** the offset is looked up per moment (cached per 15 minutes), so a London or New York store's days run midnight to midnight on its own clock. The day the clocks go forward is 23 hours long, the day they go back 25; each is still one day on the chart and one Yesterday.
+- **Clock times that don't exist or happen twice:** a row stamped 02:30 on the spring change day reads as the moment the clock jumps (03:00); 01:30 on the autumn day reads as the first 01:30.
+- **Digest hour** is the store's wall clock: "09:00" stays 09:00 after the change.
+- **Older stores** saved only `tzOffsetMin` (minutes east of UTC). 330 reads as `Asia/Kolkata`; any other number as a fixed offset (`+05:45`) with no daylight saving. Picking a zone in Settings replaces it. Reports still echo `tzOffsetMin` = today's offset, for older readers.
+
+**Why:** one helper means one answer; a fixed offset breaks every store outside India twice a year.
+**Considered:** keeping fixed offsets (wrong in Europe, US, Australia); the server's local time (Railway runs in UTC).
+**Can be wrong:** a zone whose rules change after the runtime's time zone data was built (Node and browsers update with their releases).
+
 ## 1. What goes in
 
 Two streams, nothing else:
@@ -185,7 +198,7 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 | Sold | sum of quantity × price paid for every order line in the period. Totals are the sum of the product rows, so the Overview and the Products page always agree |
 | Lost to stock-outs | sum of ₹ lost (section 4) for stock-out hours inside the period; a stock-out spanning midnight is split across the days it covers |
 | % of demand | lost ÷ (sold + lost). "Demand" = what was sold plus what would have been sold |
-| Daily chart | the same two numbers per local day (India time by default, setting *Time zone offset* [330 minutes]); the first bar is the partial day the period starts in |
+| Daily chart | the same two numbers per store day (setting *Time zone* [Asia/Kolkata], §0a); the first bar is the partial day the period starts in |
 | Selling items out now | products at 0 stock that sell at least the minimum rate (section 7) |
 | Out of stock right now (list) | every open stock-out, slow sellers included, so it can be higher than the count above |
 | Product-days with an empty shelf | total stock-out hours across all products ÷ 24 |
@@ -452,7 +465,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - "Mark ordered" spots arrivals from stock increases, so returns after the mark count as received; one open order per variant (section 6b).
 - Profit lost and excess at cost need a unit cost per product; without one they fall back to selling price or are left out (sections 7b, 7c).
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
-- Time zone is a fixed offset per store (no daylight saving, which India doesn’t use).
+- One time zone per store (§0a); a store selling across zones still sees its own clock only.
 - Group by: collection membership can be up to 24 hours old; tag and collection rows overlap, so they have no grand total (section 9a).
 
 **By source** (what counts as a sale is in section 1):

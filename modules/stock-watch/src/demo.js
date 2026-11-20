@@ -13,6 +13,7 @@
  *     top-ups, slow movers sitting on too much stock, and a few left out of stock for weeks
  */
 const { HOUR, DAY } = require('./engine');
+const TZ = require('./tz');   // the demo brand is in India
 const CATALOG = require('./demo-catalog.json').items;
 
 const VERSION = 'sammsara-6';           // bump to make running servers rebuild their demo data
@@ -84,7 +85,7 @@ function generate({ now = Date.now(), days = 60, seed = 11, priceMix = 1, every 
   const paidFor = (it) => Math.round(it.price * (r() < 0.3 ? 0.9 : r() < 0.08 ? 0.8 : 1));
 
   for (let t = start; t < now; t += HOUR) {
-    const local = new Date(t + 330 * 60e3);
+    const local = TZ.local(t, 'Asia/Kolkata');
     const h = local.getUTCHours();
     const weekend = [0, 6].includes(local.getUTCDay());
     for (const it of items) {

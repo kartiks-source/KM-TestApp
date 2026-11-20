@@ -39,6 +39,7 @@ const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
+const TZ = require('./src/tz');             // the store's time zone (SW-049): every store-time day, hour and stamp
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -170,6 +171,8 @@ const clampSetting = (k, v) => (v == null || String(v).trim() === '' || !Number.
 function settingsFor(url, saved) {
   const out = access.visibleSettings(saved, access.VIEW);   // reports echo these back; they never need the Flow key, for any role (SW-029)
   for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, url.searchParams.get(k)); if (v !== undefined) out[k] = v; }
+  if (out.tzOffsetMin !== saved.tzOffsetMin) out.timeZone = TZ.fromOffset(out.tzOffsetMin);   // an old ?tzOffsetMin= trial
+  const z = TZ.canonical(url.searchParams.get('timeZone')); if (z) out.timeZone = z;           // SW-049
   return out;
 }
 
@@ -224,7 +227,7 @@ async function syncSheet() {
       const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
       if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
       let parsed;
-      try { parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order', { tzOffsetMin: s.tzOffsetMin, keepDays: KEEP_DAYS }); }
+      try { parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order', { timeZone: TZ.zoneOf(s), keepDays: KEEP_DAYS }); }
       catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows, 'sheet'); else out.orders = store.add('orders', parsed.rows, 'sheet');
     }
@@ -437,7 +440,7 @@ async function ingestRoute(req, res, url, kind) {
   const raw = await readBody(req, 2e6);
   let body = raw; try { body = JSON.parse(raw); } catch { /* a plain comma-separated line */ }
   if (Array.isArray(body) && body.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
-  const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, kind, { tzOffsetMin: d.settings.tzOffsetMin }));
+  const list = (Array.isArray(body) ? body : [body]).flatMap((b) => rows.fromWebhook(b, kind, { timeZone: TZ.zoneOf(d.settings) }));
   if (list.length > MAX_INGEST_ROWS) return fail(res, 413, `At most ${MAX_INGEST_ROWS} rows per request`);
   const n = store.add(kind === 'stock' ? 'stock' : 'orders', list, 'flow');
   return send(res, 200, { ok: true, received: list.length, added: n });
@@ -447,13 +450,13 @@ async function ingestRoute(req, res, url, kind) {
 async function storeApi(req, res, url, role, id) {
   const p = url.pathname;
   const d = store.load();
-  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), d.settings.tzOffsetMin);   // { days } or { from } ("This month")
+  const { period: periodKind, ...span } = period.range(url.searchParams.get('days'), Date.now(), TZ.zoneOf(d.settings));   // { days } or { from } ("This month")
   const here = { id, name: storeName(id) };
   /* view-only (SW-029): one gate before every route, Sprint 1's included (Mark ordered, settings, import, backup) */
   if (access.refused(role, req.method, p)) return fail(res, 403, access.READ_ONLY);
   if (role !== access.ADMIN && p === '/api/export/backup.json') return fail(res, 403, access.READ_ONLY);   // the whole store: ingest key, change log
   if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
-  const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
+  const oo = await onorder.handle(req, p, readBody, TZ.zoneOf(d.settings));   // "Mark ordered" (LOGIC.md §6b)
   if (oo) return send(res, oo.code, oo.body);
   const dg = await digests.handle(req, url, readBody, digestCtx, whoOf(req, role));   // settings changes go to the change log (SW-029)   // /api/digest… (SW-028); writes already refused above for view-only
   if (dg) return send(res, dg.code, dg.body, dg.type);
@@ -495,6 +498,12 @@ async function storeApi(req, res, url, role, id) {
   if (p === '/api/settings' && req.method === 'PUT') {
     const b = jsonObject(await readBody(req, SETTINGS_LIMIT)); const patch = {};
     for (const k of Object.keys(LIMITS)) { const v = clampSetting(k, b[k]); if (v !== undefined) patch[k] = v; }
+    if (patch.tzOffsetMin !== undefined && b.timeZone == null) { if (patch.tzOffsetMin === d.settings.tzOffsetMin) delete patch.tzOffsetMin; else patch.timeZone = TZ.fromOffset(patch.tzOffsetMin); }   // old clients: minutes → zone
+    if (b.timeZone != null) {   // SW-049: one IANA zone per store ("Asia/Kolkata"), or a fixed "+05:30"
+      const z = TZ.canonical(b.timeZone);
+      if (!z) throw badRequest('Unknown time zone: pick one from the list (for example Asia/Kolkata)');
+      patch.timeZone = z; delete patch.tzOffsetMin;   // the zone decides; reports work out the minutes per moment
+    }
     if (typeof b.storeName === 'string') patch.storeName = b.storeName.slice(0, 60);
     for (const k of ['sheetStockCsv', 'sheetOrderCsv']) if (typeof b[k] === 'string') patch[k] = b[k].trim().slice(0, 500);
     if (b.newIngestKey === true) { patch.ingestKey = crypto.randomBytes(16).toString('hex'); patch.ingestKeyAt = Date.now(); }
@@ -507,7 +516,7 @@ async function storeApi(req, res, url, role, id) {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself, with its
     // Mark ordered and decisions (store.endDemo, SW-007), as it does for Flow, Sheet and Shopify.
-    const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
+    const parsed = rows.fromCsv(await readBody(req), kind, { timeZone: TZ.zoneOf(d.settings), keepDays: KEEP_DAYS });
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
   }
@@ -526,7 +535,7 @@ async function storeApi(req, res, url, role, id) {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));
     const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
-    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
+    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, TZ.zoneOf(r.settings))}.csv"` });
   }
   return fail(res, 404, 'Not found');
 }

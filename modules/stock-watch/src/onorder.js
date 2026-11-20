@@ -7,6 +7,7 @@
  * The engine works out what's still to come (stock increases after `at` count as received).
  */
 const { sideFile } = require('./sidefile');
+const TZ = require('./tz');
 
 const DAY = 864e5;
 const MAX_ITEMS = 500;
@@ -17,11 +18,11 @@ const has = (o, k) => Object.hasOwn(o, k);   // product IDs are data: never Obje
 const all = () => box.read();
 const save = () => box.write();
 
-/** ETA from "YYYY-MM-DD" (end of that day, store time) or ms. Must be within −1 … +365 days of now. */
-function parseEta(v, now, offMin = 330) {
+/** ETA from "YYYY-MM-DD" (end of that day, store time; zone = src/tz.js) or ms. Must be within −1 … +365 days of now. */
+function parseEta(v, now, zone = TZ.DEFAULT_ZONE) {
   let t = NaN;
   if (typeof v === 'number') t = v;
-  else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) t = Date.parse(v + 'T23:59:00Z') - offMin * 60e3;
+  else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) { const w = Date.parse(v + 'T23:59:00Z'); t = Number.isFinite(w) ? TZ.fromLocal(w, zone) : NaN; }
   if (!Number.isFinite(t) || t < now - DAY || t > now + 365 * DAY) return null;
   return t;
 }
@@ -30,7 +31,7 @@ function parseEta(v, now, offMin = 330) {
  * Validate and store a batch. items: [{ id, qty, eta }]; qty 0 (or clear: true) removes the record.
  * Returns { ok, saved, removed } or { ok: false, error }.
  */
-function mark(items, { by = null, now = Date.now(), offMin = 330 } = {}) {
+function mark(items, { by = null, now = Date.now(), offMin = TZ.DEFAULT_ZONE } = {}) {   // offMin: the store's zone (name kept for callers)
   if (!Array.isArray(items) || !items.length) return { ok: false, error: 'Nothing to mark' };
   if (items.length > MAX_ITEMS) return { ok: false, error: `At most ${MAX_ITEMS} products at a time` };
   const d = all(), next = {};

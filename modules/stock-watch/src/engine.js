@@ -11,6 +11,7 @@
 
 const HOUR = 36e5;
 const DAY = 864e5;
+const TZ = require('./tz');   // the store's time zone (SW-049)
 
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
 /** obj[key] only when it is obj's own key: a variant ID like "constructor" never reads Object.prototype (critic r2 S1). */
@@ -24,11 +25,12 @@ function minMax(arr, key = (x) => x) {
   return { min, max };
 }
 
-/** Local calendar day (YYYY-MM-DD) for a UTC ms timestamp, at a fixed offset in minutes (India = 330). */
-function dayKey(t, offMin) { return new Date(t + offMin * 60e3).toISOString().slice(0, 10); }
-function localHour(t, offMin) { return new Date(t + offMin * 60e3).getUTCHours(); }
-/** Start of the local hour after t, as a UTC timestamp. */
-function nextLocalHour(t, offMin) { const off = offMin * 60e3; return Math.floor((t + off) / HOUR) * HOUR + HOUR - off; }
+/** Store calendar day (YYYY-MM-DD) for a UTC ms timestamp. zone = the store's time zone (src/tz.js, SW-049: an IANA
+ *  name with daylight saving, or minutes east of UTC; India = 330). */
+function dayKey(t, zone) { return TZ.dayKey(t, zone); }
+function localHour(t, zone) { return TZ.hour(t, zone); }
+/** Start of the store's clock hour after t, as a UTC timestamp. */
+function nextLocalHour(t, zone) { return TZ.nextHour(t, zone); }
 
 /**
  * How sales spread over the day: 24 weights with mean 1, from the order lines (plus one per hour
@@ -282,7 +284,8 @@ function report(stock, orders, settings = {}, opts = {}) {
   /* opts.from (e.g. the 1st of this month, see src/period.js) overrides opts.days; never more than 90 days back */
   const from = opts.from != null ? Math.min(now, Math.max(now - 90 * DAY, opts.from)) : now - Math.max(1, Math.min(90, Math.round(opts.days || 30))) * DAY;
   const days = Math.max(1, Math.ceil((now - from) / DAY));
-  const off = S.tzOffsetMin;
+  const off = S.timeZone = TZ.zoneOf(S);   // SW-049: the store's IANA zone (old stores: their saved offset)
+  S.tzOffsetMin = TZ.offsetAt(off, now);    // today's offset, for anything that still reads the minutes
   const profile = hourProfile(orders.filter((o) => o.t >= now - 60 * DAY), off);
 
   /* group by product (variant) */
@@ -327,7 +330,7 @@ function report(stock, orders, settings = {}, opts = {}) {
      chart adds up to the same totals as the product rows */
   const daily = {};
   const lastKey = dayKey(now, off);
-  for (let t = from; ; t += DAY) { const k = dayKey(Math.min(t, now), off); daily[k] = daily[k] || { sold: 0, lost: 0, units: 0, unitsLost: 0, outSkus: new Set() }; if (k === lastKey || t >= now) break; }
+  for (const k of TZ.dayKeys(from, now, off)) { daily[k] = daily[k] || { sold: 0, lost: 0, units: 0, unitsLost: 0, outSkus: new Set() }; if (k === lastKey) break; }   // a 23- or 25-hour day is one day (SW-049)
   for (const o of orders) {
     if (o.t < from) continue;
     const d = daily[dayKey(o.t, off)]; if (!d) continue;
@@ -516,8 +519,9 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (const c of changes) if (c.t >= from) timeline.push({ t: c.t, stock: num(c.now) });
   if (timeline.length) timeline.push({ t: now, stock: timeline[timeline.length - 1].stock });
   const units = {};
-  for (let t = now - (days - 1) * DAY; t <= now; t += DAY) units[dayKey(t, S.tzOffsetMin)] = 0;
-  for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, S.tzOffsetMin); if (k in units) units[k] += num(o.qty); }
+  const zone = TZ.zoneOf(S);
+  for (const k of TZ.dayKeys(now - (days - 1) * DAY, now, zone)) units[k] = 0;
+  for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, zone); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
   const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder });
   const c = own(opts.catalog, String(id));

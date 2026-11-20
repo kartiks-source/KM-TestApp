@@ -3,25 +3,21 @@
  * Periods (SW-027): "This month" in the period picker, and the Yesterday strip on the Overview.
  * Pure functions, no I/O. Rules: LOGIC.md §5a.
  */
-const { report, dayKey, DAY } = require('./engine');
+const { report, dayKey } = require('./engine');
+const TZ = require('./tz');
 
-/** Start of the local calendar month that `now` falls in, as a UTC timestamp. offMin = store time zone (India = 330). */
-function monthStart(now, offMin) {
-  const d = new Date(now + offMin * 60e3);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - offMin * 60e3;
-}
-/** Start of the local calendar day that `t` falls in, as a UTC timestamp. */
-function dayStart(t, offMin) {
-  const off = offMin * 60e3;
-  return Math.floor((t + off) / DAY) * DAY - off;
-}
+/** Start of the store's calendar month that `now` falls in, as a UTC timestamp. zone = the store's time zone
+ *  (src/tz.js: IANA name, or minutes east of UTC; India = 330). */
+function monthStart(now, zone) { return TZ.monthStart(now, zone); }
+/** Start of the store's calendar day that `t` falls in, as a UTC timestamp. */
+function dayStart(t, zone) { return TZ.dayStart(t, zone); }
 
 /**
  * What the `days` query value asks for: a number of days (7, 14, 30, 60; 30 when missing), or
  * "month" = from the 1st of this month (store time) until now. Returns engine options.
  */
-function range(daysParam, now, offMin) {
-  if (String(daysParam) === 'month') return { period: 'month', from: monthStart(now, offMin) };
+function range(daysParam, now, zone) {
+  if (String(daysParam) === 'month') return { period: 'month', from: monthStart(now, zone) };
   return { period: 'days', days: Number(daysParam) || 30 };
 }
 
@@ -60,11 +56,11 @@ function catalogAsOf(catalog, t) {
  * how many came back (a stock-out ended). A product counts once even if it ran out twice.
  * Returns null when the report doesn't reach back to the start of yesterday.
  */
-function yesterday(r, offMin) {
+function yesterday(r, zone) {
   const now = r.generatedAt;
-  const end = dayStart(now, offMin), start = end - DAY;
+  const end = dayStart(now, zone), start = dayStart(end - 1, zone);   // yesterday may be 23 or 25 hours long (SW-049)
   if (r.from > start) return null;
-  const key = dayKey(start, offMin);
+  const key = dayKey(start, zone);
   const d = r.daily.find((x) => x.day === key) || { sold: 0, lost: 0 };
   const ranOut = new Set(), back = new Set();
   for (const s of r.stockouts) {
@@ -78,7 +74,7 @@ function yesterday(r, offMin) {
  *  The page's own period (from / days) is dropped from `extra`: `from` would override days: 2 (engine) and
  *  bring back the same window that didn't reach yesterday (This month on the 1st). */
 function yesterdayFor(stock, orders, settings, r, extra = {}) {
-  const off = r.settings.tzOffsetMin;
+  const off = TZ.zoneOf(r.settings);
   const { from, days, period, ...rest } = extra;
   return yesterday(r, off) || yesterday(report(stock, orders, settings, { ...rest, now: r.generatedAt, days: 2 }), off);
 }

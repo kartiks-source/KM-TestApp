@@ -29,6 +29,7 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 | Param | Meaning |
 |---|---|
 | `days` | `7`, `14`, `30`, `60` (default 30), or `month` = from the 1st of this month, store time |
+| `timeZone` | trial IANA zone (`Europe/London`), not saved; unknown = the saved zone (SW-049). The answer's `settings` carries `timeZone` and `tzOffsetMin` = today's offset |
 | `leadDays`, `coverDays`, `safetyDays`, `demandWindowDays`, `smallTopUpDays`, `minPerDay`, `tzOffsetMin` | trial values, not saved; clamped to 0–180, 1–365, 0–60, 7–90, 1–60, 0–100, −720–840. Blank or not a number = the saved value |
 
 ## Open routes
@@ -70,7 +71,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 
 | Method · path | Body / params | Answer | Errors |
 |---|---|---|---|
-| `PUT /api/settings` | JSON ≤ 64 KB: any of the trial keys above (clamped), `storeName` (≤ 60 chars), `sheetStockCsv`, `sheetOrderCsv` (≤ 500 chars), `newIngestKey: true` ⚠ rotates the key | `{ ok, settings }` (includes the new key). Each changed value is logged `{at, by, key, old, new}` (key masked) | 400 not a JSON object; 413 |
+| `PUT /api/settings` | JSON ≤ 64 KB: any of the trial keys above (clamped), `storeName` (≤ 60 chars), `timeZone` (IANA name or `+05:30`; an old `tzOffsetMin` alone becomes a zone, 330 = `Asia/Kolkata`), `sheetStockCsv`, `sheetOrderCsv` (≤ 500 chars), `newIngestKey: true` ⚠ rotates the key | `{ ok, settings }` (includes the new key). Each changed value is logged `{at, by, key, old, new}` (key masked) | 400 not a JSON object or an unknown time zone; 413 |
 | ⚠ `POST /api/onorder` | JSON ≤ 256 KB `{ items: [{ id, qty, eta }], by? }`; `qty` 1–1,000,000 whole; `eta` `YYYY-MM-DD` (end of that day, store time) or ms, within −1…+365 days; `qty: 0` or `clear: true` removes; ≤ 500 items | `{ ok, saved, removed }` | 400 `Nothing to mark`, bad qty/date/id, not JSON; 405 other methods |
 | ⚠ `POST /api/decide` | JSON ≤ 16 KB `{ id, decision }`; `decision` = `keep` \| `drop` \| `clear`, or null/'' to remove | `{ ok }` or `{ ok, removed }` | 404 `No such product` (not in the report); 400 bad decision, not JSON, over 5,000 decisions; 405 other methods |
 | ⚠ `POST /api/import?kind=stock\|order` | CSV text (≤ 25 MB) with a header row; `FORMATS.md` §CSV | `{ ok, read, added, skipped, skips: { badTime, badNumber, noId, tooOld } }`. On a demo store the demo goes first, with its Mark ordered and decisions (always; there is no option, SW-007) | 400 missing columns (named); 409 Shopify connected or a pull running; 413 |
@@ -85,7 +86,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 |---|---|---|---|---|
 | `GET /api/digest` | view | `role` = `ceo`, `founder`, `ops`, `buyer`, `marketing`, `finance`, `warehouse`, or none / `all` = everyone | `{ ok, role, roleName, title, lines[], link, text }` (≤ 6 lines + link) | 400 unknown role |
 | `GET /api/digest.txt` | view | same | the text (`text/plain`) | 400 unknown role |
-| `GET /api/digest/settings` | view | none | `{ ok, webhook: { set, host }, tzOffsetMin, hour, roles[], paused, scheduled[{ role, name, cadence, host, own }], log[] }` (last 20 sends; never a webhook URL) | — |
+| `GET /api/digest/settings` | view | none | `{ ok, webhook: { set, host }, tzOffsetMin, timeZone, hour, roles[], paused, scheduled[{ role, name, cadence, host, own }], log[] }` (last 20 sends; never a webhook URL) | — |
 | `PUT /api/digest/settings` | admin | JSON ≤ 64 KB `{ hour?: 0–23, roles?: [...], paused?: bool }`; roles without a scheduled digest (buyer, warehouse, unknown) dropped | same as GET; each changed value goes to the store's change log (`digest.hour` / `digest.roles` / `digest.paused`, SW-029) | 400 bad hour, not JSON, or any `webhookUrl` (env only) |
 | ⚠ `POST /api/digest/send` | admin | `role` (none = every ticked role) | 200 `{ ok, sent[{ at, role, trigger, ok, status, error }] }`; 502 with `error` when any send failed | 400 no roles ticked; 400 no webhook (`DIGEST_WEBHOOK_URL` / `_<ROLE>`) |
 

@@ -6,6 +6,7 @@
  */
 const R = require('../public/roles');
 const H = require('./helpers');   // the page's own rules (LOGIC.md §15), so the digest and the page agree
+const TZ = require('./tz');        // the store's time zone (SW-049)
 
 const MAX_LINES = 6;          // title included; the link goes on its own line after these
 const TODAY = ['Out now', 'Critical', 'Order now'];
@@ -24,7 +25,7 @@ const plural = (n, one, many = one + 's') => `${inr.format(n)} ${n === 1 ? one :
 const names = (list, n = 3) => list.slice(0, n).map((p) => cut(p.name, 30)).join(', ');
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const dateLabel = (t, offMin) => { const d = new Date(t + offMin * 60e3); return `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+const dateLabel = (t, zone) => { const d = TZ.local(t, zone); return `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
 
 /** ₹ of sales a day the products that are out of stock right now are missing: in-stock rate × price paid.
  *  Same sum as the Stock-outs headline (helpers.enrich → totals.stillOutPerDay, LOGIC.md §15a). */
@@ -107,7 +108,7 @@ const BUILD = {
   },
   /* warehouse receives: what is due to land (Reorder → Ordered, LOGIC.md §6b / §16), late first; never "order today" */
   warehouse: (r) => {
-    const s = H.onOrderSummary(r.products, r.generatedAt), off = r.settings.tzOffsetMin;
+    const s = H.onOrderSummary(r.products, r.generatedAt), off = TZ.zoneOf(r.settings);
     if (!s.lines) return ['Nothing on order.'];
     return [
       `On order: ${plural(s.lines, 'line')}, ${inr.format(s.pcs)} pcs to come · ${inr.format(s.week)} due this week${s.late ? ` · ${inr.format(s.late)} late` : ''}.`,
@@ -131,7 +132,7 @@ function build({ report: r, yesterday = null, week = null, prev = null, role = '
   const key = R.valid(role) ? role : '';
   const roleName = key ? R.ROLES[key].name : 'Everyone';
   const at = now || r.generatedAt;
-  const title = `Stock-out Watch · ${storeName || 'your store'} · ${dateLabel(at, r.settings.tzOffsetMin)}${key ? ` · ${roleName}` : ''}`;
+  const title = `Stock-out Watch · ${storeName || 'your store'} · ${dateLabel(at, TZ.zoneOf(r.settings))}${key ? ` · ${roleName}` : ''}`;
   const body = (BUILD[key] || BUILD.founder)(r, { yesterday, week, prev }).filter(Boolean);
   const lines = [title, ...body].slice(0, MAX_LINES);
   const qs = [storeId ? `store=${encodeURIComponent(storeId)}` : '', key ? `role=${key}` : ''].filter(Boolean).join('&');
