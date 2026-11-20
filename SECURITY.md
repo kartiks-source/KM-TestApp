@@ -62,6 +62,7 @@ Each also answers at `/api/v1/…` with exactly the same checks (SW-050: the pat
 | `POST /api/digest/send` | posts the digest (sales numbers) to the configured webhook now, logged | — (a sent message can't be recalled; check who the webhook reaches) |
 | `POST /api/people`, `PUT /api/people/<id>`, `POST /api/people/<id>/reset`, `DELETE /api/people/<id>` (owner only, SW-062) | add a person (password shown once), change their name / role / stores, give a new password (old one and its sessions end), remove (signs them out); `DATA_DIR/access.json`, previous copy kept as `access.json.bak` | add them again / give a new password; or copy `access.json.bak` over `access.json` and restart |
 | `POST /api/sync`, `POST /api/shopify/sync` | fetch new rows from the Sheet links / Shopify now (a first Shopify pull on a demo store clears the demo) | — |
+| `POST /api/shopify/history` (admin only, SW-063) | replaces the store's `src: 'rebuilt'` stock rows with a fresh rebuild from Shopify's change log (ShopifyQL, read-only through the same guard; needs `read_reports`) | run it again; restore a backup |
 | `POST /ingest/stock`, `POST /ingest/order` | add rows (ingest key, no login) | restore a backup; rotate the key if misused |
 | `GET /api/export/backup.json` (admin only), `GET /api/export/reorder.csv` | read-only downloads (the backup includes the ingest key) | — |
 

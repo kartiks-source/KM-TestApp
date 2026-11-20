@@ -106,8 +106,9 @@
     if (window.SW_STORES && SW_STORES.list().length) SW_STORES.rename(name);   // stores.js draws the pill (dot + name)
     else { $('#store-name').textContent = name; document.title = `${name} · Stock-out Watch`; }
     $('#n-reorder').textContent = r.totals.orderToday || '';
-    $('#n-stockouts').textContent = r.totals.stillOut || '';
-    $('#n-stockouts').title = `${r.totals.stillOut} products still out of stock`;
+    const stillOut = outsByProduct().filter((a) => a.open && !a.dead).length;   // out but not selling don't count (SW-063)
+    $('#n-stockouts').textContent = stillOut || '';
+    $('#n-stockouts').title = `${stillOut} products still out of stock`;
     const src = state.source, d = r.data, sh = state.shopify || {};
     const err = sh.lastError || src.err;
     const pill = $('#sync-pill');
@@ -528,10 +529,12 @@
   }
 
   /* stock-outs, one row per product (the individual stock-outs are in the product drawer) */
+  /* out but not selling (SW-063): no sales and no sales lost in the period, so nothing was lost; counted apart, not in the headline */
   function outsByProduct() {
-    const m = new Map();
+    const m = new Map(), prod = new Map(state.report.products.map((p) => [p.id, p]));
+    const dead = (id) => { const p = prod.get(id); return !!p && !p.unitsSold && !p.sold && !p.lost; };
     for (const s of state.report.stockouts) {
-      const a = m.get(s.id) || { id: s.id, name: s.name, sku: s.sku, times: 0, days: 0, lost: 0, open: false, small: 0, repeat: 0, last: 0 };
+      const a = m.get(s.id) || { id: s.id, name: s.name, sku: s.sku, times: 0, days: 0, lost: 0, open: false, small: 0, repeat: 0, last: 0, dead: dead(s.id) };
       a.times++; a.days += (s.hoursInPeriod ?? s.hours) / 24; a.lost += s.lost; a.open = a.open || s.open; a.small += s.small ? 1 : 0; a.repeat += s.repeat ? 1 : 0; a.last = Math.max(a.last, s.start);
       m.set(s.id, a);
     }
@@ -539,9 +542,12 @@
   }
   function stockouts() {
     const r = state.report, t = r.totals, f = state.filter.stockouts, q = state.q.stockouts.toLowerCase();
-    const all = outsByProduct();
-    const groups = [['all', 'All', all.length], ['open', 'Still out', all.filter((a) => a.open).length], ['small', 'Refilled too little', all.filter((a) => a.small).length], ['again', 'Ran out again', all.filter((a) => a.repeat).length]];
-    const rows = all.filter((a) => (f === 'all' || (f === 'open' ? a.open : f === 'small' ? a.small : a.repeat)) && (!q || `${a.name} ${a.sku}`.toLowerCase().includes(q)));
+    const every = outsByProduct(), all = every.filter((a) => !a.dead), dead = every.filter((a) => a.dead);
+    const stillOut = all.filter((a) => a.open).length, times = all.reduce((n, a) => n + a.times, 0);
+    const groups = [['all', 'All', all.length], ['open', 'Still out', stillOut], ['small', 'Refilled too little', all.filter((a) => a.small).length], ['again', 'Ran out again', all.filter((a) => a.repeat).length], ...(dead.length ? [['dead', 'Out but not selling', dead.length]] : [])];
+    const rows = (f === 'dead' ? dead : all).filter((a) => (f === 'all' || f === 'dead' || (f === 'open' ? a.open : f === 'small' ? a.small : a.repeat)) && (!q || `${a.name} ${a.sku}`.toLowerCase().includes(q)));
+    const h = (state.shopify || {}).history;
+    const extra = `${dead.length ? `<p class="muted small" id="dead-note" title="No sales and no sales lost ${inPeriod()}: nothing was lost while they were out">${dead.length} out but not selling, not counted above</p>` : ''}${h && h.ok && h.kept && r.from < h.until ? `<p class="muted small" id="rebuilt-note" title="Shopify keeps no past stock levels; these come from its stock change log, to the hour (LOGIC §1c)">Before ${esc(dt(h.until).slice(0, 6))}: rebuilt from Shopify’s change log</p>` : ''}`;
     const pattern = (a) => [a.small ? `<span class="st small" title="Refilled with less than ${state.report.settings.smallTopUpDays} days of sales, ${a.small}×">Refilled too little</span>` : '', a.repeat ? `<span class="st again" title="Ran out again within a week, ${a.repeat}×">Ran out again</span>` : ''].join(' ') || '–';
     const cols = [
       { k: 'name', label: 'Product', f: (a) => `<span class="pname" title="${esc(a.name)}">${esc(a.name)}</span>` },
@@ -552,9 +558,9 @@
       { k: 'pattern', label: 'Pattern', f: pattern, val: (a) => a.small + a.repeat },
     ];
     return `
-      <section class="headline">${t.stillOut && t.stillOutPerDay
-        ? `<h1>${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span></h1><p>${all.length} products ran out ${t.stockouts} times · <span class="lostv">${money(t.lost)}</span> sales lost${t.hasCost ? ` · <span class="nw">${money(t.lostProfit)} profit lost</span>` : ''}</p>`   // M10 + final r2 SIMP-B: the action leads, phone and desktop
-        : `<h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> sales lost${t.hasCost ? ` · ${money(t.lostProfit)} profit lost` : ''}</h1>`}
+      <section class="headline">${stillOut && t.stillOutPerDay
+        ? `<h1>${stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span></h1><p>${all.length} products ran out ${times} times · <span class="lostv">${money(t.lost)}</span> sales lost${t.hasCost ? ` · <span class="nw">${money(t.lostProfit)} profit lost</span>` : ''}</p>`   // M10 + final r2 SIMP-B: the action leads, phone and desktop
+        : `<h1>${all.length} products ran out ${times} times · <span class="lost">${money(t.lost)}</span> sales lost${t.hasCost ? ` · ${money(t.lostProfit)} profit lost` : ''}</h1>`}${extra}
         <details class="how exp"><summary>How we estimate this</summary><p>Hours out of stock, weighted by when this store usually sells, × the product’s normal sales per hour × the average price paid. Open a product for each stock-out.</p></details></section>
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
@@ -749,6 +755,16 @@
     const extra = common.includes(cur) || SW_TZ.all().includes(cur) ? '' : opt(cur, SW_TZ.fixedMinutes(cur) != null ? `Fixed ${SW_TZ.offsetLabel(cur)} (no daylight saving)` : cur);
     return `<select id="f-timeZone" data-setting="timeZone">${extra}<optgroup label="Common">${SW_TZ.COMMON.map(([z, n]) => opt(z, lab(z, n))).join('')}</optgroup><optgroup label="All time zones">${SW_TZ.all().filter((z) => !common.includes(z)).map((z) => opt(z, z.replace(/_/g, ' '))).join('')}</optgroup></select>`;
   }
+  /* SW-063: past stock rebuilt from Shopify's change log (LOGIC §1c); one line, the button is admin only (Data is) */
+  function historyLine(sh) {
+    if (!sh.source) return '';
+    const h = sh.history, btn = viewOnly() ? '' : ' <button class="linkbtn" id="history-rebuild">Rebuild stock history</button>';
+    const txt = !h ? 'Stock history: rebuilt after the first pull'
+      : h.ok ? `Stock history rebuilt from Shopify’s change log for ${inr.format(h.kept)} of ${inr.format(h.total)} products (${dt(h.from).slice(0, 6)} → ${dt(h.until).slice(0, 6)})${h.dropped ? ` · ${inr.format(h.dropped)} left out: the log doesn’t add up for them` : ''}`
+        : h.note;
+    const fail = h && h.ok && h.note ? ` · last try: ${h.note}` : '';
+    return `<p class="muted small" id="history-line">${esc(txt + fail)}${btn}</p>`;
+  }
   function dataView() {
     const s = state.settings, d = state.report.data, src = state.source, sh = state.shopify || {};
     const base = location.origin;
@@ -758,7 +774,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. The main passwords open every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${historyLine(sh)}${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
 
       ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
@@ -1011,6 +1027,12 @@
         t.disabled = true; t.textContent = 'Pulling…';
         const j = await api('/api/shopify/sync', { method: 'POST' });
         toast(j.running ? 'Still pulling in the background (the first pull can take a while)' : `Read from Shopify: ${j.stock} stock changes, ${j.orders} order lines new`); await load();
+      }
+      if (t.id === 'history-rebuild') {
+        t.disabled = true; t.textContent = 'Rebuilding…';
+        const j = await api('/api/shopify/history', { method: 'POST' });
+        const h = j.history || {};
+        toast(j.running ? 'Still rebuilding in the background' : h.note || (h.ok ? `Stock history rebuilt for ${h.kept} of ${h.total} products` : 'Not rebuilt')); await load();
       }
       if (t.id === 'new-key') { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ newIngestKey: true }) }); toast('New key made: update X-Ingest-Key in both Flow workflows'); await load(); }
       if (t.id === 'save-settings') {

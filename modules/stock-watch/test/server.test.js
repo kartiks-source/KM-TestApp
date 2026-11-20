@@ -229,3 +229,14 @@ test('login page on a phone: 16 px fields (no iOS zoom on the autofocused passwo
   assert.match(html, /@media\(max-width:760px\)\{input,button\{font-size:16px;min-height:44px\}\}/);
   assert.match(html, /autofocus/);
 });
+
+test('POST /api/shopify/history (SW-063): admin only, 400 without Shopify; demo report still works', async (t) => {
+  const s = await start({ ADMIN_PASSWORD: PASSWORD, VIEW_PASSWORD: PASSWORD + '-view' }); t.after(s.stop);
+  assert.equal((await s.req('/api/shopify/history', { method: 'POST', headers: basic(PASSWORD + '-view') })).status, 403);
+  const r = await s.req('/api/shopify/history', { method: 'POST', headers: basic(PASSWORD) });
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /isn’t connected/);
+  const set = await (await s.req('/api/settings', { headers: basic(PASSWORD) })).json();
+  assert.equal(set.shopify.history, null);
+  assert.equal((await s.req('/api/report', { headers: basic(PASSWORD) })).status, 200);
+});

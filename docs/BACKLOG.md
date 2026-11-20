@@ -267,6 +267,14 @@ Goal: each role sees its one decision first, with less on screen than today. See
 
 ---
 
+## Feature · stock history
+
+**SW-063 · Rebuild past stock from Shopify's change log** (P1 · M · builder)
+- Why: ₹ lost needs past stock-outs, but Shopify has no API for past stock levels; a store connected today showed ~₹16 lost (Sammsara).
+- Accept: ShopifyQL `inventory_adjustment_history` ('available' only, by hour, paged by time window, window split on the 1,000-row cap) walked back from the first live read; rows in pullStock's shape with `src: 'rebuilt'`, only before the first read; variants going below 0 dropped and counted; runs once per store after the first good pull and from Data → Rebuild stock history (admin); no `read_reports` / ShopifyQL error → plain note, pull never fails; Data line "rebuilt … for N of M products"; Stock-outs note on rebuilt periods; "Out but not selling" counted apart from the Stock-outs headline. Tests with a fake ShopifyQL.
+- Source: owner, 20 Nov 2026 (verified by hand on Sammsara: 245/257 variants, ~₹2.05 L lost in 30 days).
+- Status: Done (branch `feature/stock-history`). `src/history.js`, LOGIC §1c, API `POST /api/shopify/history`, `test/history.test.js`. Open: not checked live through the app yet; hour precision only.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.

@@ -59,6 +59,7 @@ Google Sheet CSV / upload ───┘
 | `src/runs.js` | sync progress ("Syncing · 2,340 orders") and the last 20 runs: start, time taken, rows, error, notes (SW-030) |
 | `src/keys.js` | where the Shopify key comes from: Performity POC API, Azure Key Vault or Railway variables; `access(storeId)`, caches per store; Performity calls paced (≥ 2.1 s, token calls per brand ≥ 6.1 s) |
 | `src/shopify.js` | stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget; every call through the read-only guard |
+| `src/history.js` | SW-063, LOGIC §1c: stock before the first Shopify read rebuilt from Shopify's change log (ShopifyQL `inventory_adjustment_history`, 'available', by hour, Admin API 2025-10, `read_reports`). `rebuild()` pure (walk back from the first read; below 0 → dropped), `fetchChanges()` paged by week, split at the 1,000-row cap; `run()` once per store after the first good pull (`shopify.historyRebuiltAt`) and from `POST /api/shopify/history`; rows `src: 'rebuilt'` via `store.setRebuilt`; never throws, outcome in `shopify.history`. Tests: `test/history.test.js` (fake ShopifyQL) |
 | `src/gql-guard.js` | the read-only guard (SW-051): a GraphQL tokeniser (comments, strings, block strings as whole tokens); every top-level definition must be `query`, the `{` shorthand, or a fragment beside one. Tests: `test/gql-guard.test.js` |
 | `src/token-scopes.js` | token permissions once per pull (SW-051): `currentAppInstallation.accessScopes`; own app (vault / variables) with any `write_*` → pull refused; Performity token → `shopify.writeScopes`, Data note, logged once per store |
 | `src/sheet-fetch.js` | Sheet sync fetch (SW-052): link must be https docs.google.com; ≤ 3 redirects by hand, only to https docs.google.com / *.googleusercontent.com; ≤ 20 MB; 20 s. Tests: `test/sheet-fetch.test.js` |
@@ -88,7 +89,7 @@ Google Sheet CSV / upload ───┘
 - Key source 1: **Azure Key Vault**, secrets `shopify-<store>-client-id` and `shopify-<store>-client-secret` (or one `shopify-<store>` JSON secret). Variables: `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`.
 - Key source 2 (stop-gap): `SHOPIFY_STORE` + `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`.
 - Fallback if tokens can't be shared: our own read-only Shopify app (not built).
-- Scopes needed: `read_products`, `read_inventory`, `read_orders`.
+- Scopes needed: `read_products`, `read_inventory`, `read_orders`; `read_reports` for the stock history rebuild (SW-063; without it the rebuild is skipped with a note).
 - Once a key source is set, the app refuses to start without `ADMIN_PASSWORD`, and demo data is turned off.
 
 ## Role views and digest (Sprint 2 · B-roles)
@@ -135,6 +136,8 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
 
 - Sprint 3 A-money (branch `sprint3/A-money`): SW-040 suppliers (terms, SKU map, MOQ / case-pack rounding, supplier lead time, By supplier PO drafts) and SW-041 Budget ₹ cut line. ADR-0018. `test/ui-money.test.js` is not yet in the root `test:ui` script (module `npm test` runs it, skipped without Playwright).
+
+- Stock history (SW-063, branch `feature/stock-history`): past stock rebuilt from Shopify's change log after the first pull (Data line + Rebuild button, Stock-outs note); Stock-outs counts "Out but not selling" apart.
 
 ## Next
 

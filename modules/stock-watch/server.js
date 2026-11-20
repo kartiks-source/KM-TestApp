@@ -48,6 +48,7 @@ const lock = require('./src/lock');         // one app per data folder (SW-055)
 const capacity = require('./src/capacity'); // size, rows and disk warnings (SW-055)
 const sheetFetch = require('./src/sheet-fetch');   // Sheet sync: fenced redirects, size cap, timeout (SW-052)
 const people = require('./src/people');   // per-store sign-ins made by the owner (SW-062, ADR-0016)
+const history = require('./src/history');   // SW-063: past stock rebuilt from Shopify's change log
 const tokenScopes = require('./src/token-scopes');   // refuse our own apps' write scopes; note Performity's (SW-051)
 const csvmap = require('./src/csvmap');     // import preview + column mapping, Shopify exports (SW-045)
 const apiv1 = require('./src/apiv1');       // /api/v1: every /api route + summary and paginated rows (SW-050)
@@ -280,7 +281,7 @@ function shopifyStatus(id = scope.id()) {
   const k = keys.status(id); const st = store.load().shopify;
   return { source: k.source, store: k.store, secretName: k.secretName || null, kind: k.kind || null, ready: k.ready, missing: k.missing,
     lastSync: st.lastSync, lastError: st.lastError, lastTry: st.lastTry, running: pulls.has(id), progress: runs.progress(progress.get(id) || null),
-    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION, writeScopes: st.writeScopes || [] };
+    backfilled: !!st.ordersCursor, scopes: shopify.SCOPES, apiVersion: shopify.API_VERSION, writeScopes: st.writeScopes || [], history: st.history || null };
 }
 /** Pull one store from Shopify (default: the current store). Queued behind any other store's pull. */
 function syncShopify(id = scope.id()) {
@@ -314,6 +315,7 @@ async function pullOne(id) {
     });
     runs.finish(store.load(), run);
     store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
+    if (!store.load().shopify.historyRebuiltAt) await history.run().catch((e) => console.warn('history:', e.message));   // SW-063: once per store, never fails the pull
     await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
     log.info('shopify pull done', { store: id, stockChanges: stock, orderLines: orders, seconds: Math.round((Date.now() - started) / 1000) });
     alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
@@ -324,6 +326,13 @@ async function pullOne(id) {
     alert.syncResult(false, e.message, { store: storeName(id), key: id }).catch(() => {});
     throw e;
   } finally { progress.delete(id); }
+}
+
+/** SW-063: Data → Rebuild stock history. Queued like a pull, so it never runs beside one. */
+function rebuildHistory(id) {
+  const p = pullQueue.then(() => inStore(id, () => history.run()));
+  pullQueue = p.catch(() => {});
+  return p;
 }
 
 /** The 15-minute loop: brand list, then each store's sheet sync and Shopify pull, one store at a time. */
@@ -539,6 +548,13 @@ async function storeApi(req, res, url, role, id) {
     const done = await Promise.race([run.then((x) => x, (e) => ({ error: e.message })), new Promise((r) => setTimeout(() => r(null), 25000))]);
     if (!done) return send(res, 202, { ok: true, running: true });
     return done.error ? fail(res, 502, done.error) : send(res, 200, { ok: true, ...done });
+  }
+  if (p === '/api/shopify/history' && req.method === 'POST') {   // SW-063: admin only (view sessions refused above), same-origin like every write
+    if (role !== access.ADMIN) return fail(res, 403, access.READ_ONLY);
+    if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
+    if (pulls.has(id)) return fail(res, 409, PULL_RUNNING);
+    const done = await Promise.race([rebuildHistory(id), new Promise((r) => setTimeout(() => r(null), 25000))]);
+    return done ? send(res, 200, { ok: true, history: done }) : send(res, 202, { ok: true, running: true });
   }
   if (p === '/api/settings' && req.method === 'PUT') {
     const b = jsonObject(await readBody(req, SETTINGS_LIMIT)); const patch = {};

@@ -28,6 +28,8 @@ test('pull loop: stores one after the other, never two at once; a manual pull qu
   S.pullOrders = async (since, { onPage }) => { await onPage([`#${scope.id()}`], [{ t: Date.now(), order: `#${scope.id()}`, line: '1', variantId: `v-${scope.id()}`, sku: 'x', qty: 1, price: 100 }], Date.now()); return { total: 1 }; };
   C.refreshCollections = async () => ({ skipped: true });
   require('../src/token-scopes').check = async () => ({ handles: [], write: [] });   // SW-051 scope check: stubbed like the reads
+  const ql = [];   // SW-063: the history rebuild runs once per store, after its first good pull, through gql
+  S.gql = async (doc, vars, opts) => { ql.push([scope.id(), opts && opts.version]); return { shopifyqlQuery: { tableData: { columns: [{ name: 'hour' }, { name: 'product_variant_id' }, { name: 'inventory_adjustment_change' }], rows: [] }, parseErrors: [] } }; };
 
   const loop = pullAll();
   const manual = syncShopify('beta');                       // while the loop starts: queued like any other pull
@@ -41,5 +43,9 @@ test('pull loop: stores one after the other, never two at once; a manual pull qu
     assert.deepEqual([...new Set(j.stock.map((r) => r.variantId))], [`v-${id}`], `${id} holds only its own stock rows`);
     assert.deepEqual([...new Set(j.orders.map((r) => r.order))], [`#${id}`], `${id} holds only its own orders`);
     assert.ok(j.shopify.lastSync, `${id} pulled`);
+    assert.ok(j.shopify.historyRebuiltAt && j.shopify.history.ok, `${id} history rebuilt`);
   }
+  assert.equal(new Set(ql.map((x) => x[0])).size, 3);
+  assert.equal(ql.filter((x) => x[0] === 'beta').length, ql.filter((x) => x[0] === 'alpha').length, 'beta pulled twice, rebuilt once');
+  assert.ok(ql.every((x) => x[1] === '2025-10'));
 });

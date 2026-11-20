@@ -6,6 +6,13 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+## 2026-11-20 · stock history rebuild
+stock-watch, branch `feature/stock-history` (not merged, not deployed).
+- SW-063: past stock rebuilt from Shopify's change log (`src/history.js`, LOGIC §1c): ShopifyQL `inventory_adjustment_history`, 'available' only (committed double-counts), by hour, a week per query, split in half at the 1,000-row cap, a capped day read by day. Walked back from the first live read, 60 days; rows `src: 'rebuilt'` before the first read only; a variant going below 0 is dropped and counted. Runs once per store after the first good pull (`shopify.historyRebuiltAt`) and from Data → Rebuild stock history (`POST /api/shopify/history`, admin, queued behind pulls). No `read_reports` or a ShopifyQL error → note on Data, the pull never fails. `gql()` takes an API version (ShopifyQL on 2025-10).
+- Data: one line "Stock history rebuilt … for N of M products (dates)". Stock-outs: "Before <date>: rebuilt" note; products out with no sales and no sales lost go to an "Out but not selling" chip and are not in the headline or the menu badge.
+- Why: a store connected today showed ~₹16 lost; checked by hand on Sammsara: 245/257 variants rebuild, 94 products out ≥ 1 day in 30, ~₹2.05 L lost.
+- Open: not run live through the app yet (first pull with the Performity token will do it); CHANGELOG / version not bumped (another branch is merging into main). Speed mode: no critic round, browser tests not run (no Playwright here).
+
 ## 2026-11-20 · Sprint 3 · D-ops
 stock-watch, branch `sprint3/D-ops` (not merged, not deployed).
 - SW-049: one IANA time zone per store (`public/tz.js`, `src/tz.js`): rows, engine, period, Mark ordered, helpers, digest, backups, demo and the page; daylight saving followed (23/25-hour days count once); Settings has a zone picker; old `tzOffsetMin` stores still read. LOGIC §0a. Open: the Google Sheet version still uses the sheet's zone.
