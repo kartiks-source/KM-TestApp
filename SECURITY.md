@@ -60,4 +60,6 @@ All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 
 | `POST /ingest/stock`, `POST /ingest/order` | add rows (ingest key, no login) | restore a backup; rotate the key if misused |
 | `GET /api/export/backup.json` (admin only), `GET /api/export/reorder.csv` | read-only downloads (the backup includes the ingest key) | — |
 
-Still open: SW-051 (read-only guard tokeniser, refuse keys with write scopes), SW-052 (Sheet sync redirects, host allow-list, size cap), SW-053 (non-root on Railway: the image sets `USER node`, but `RAILWAY_RUN_UID=0` runs it as root so it can write the volume; pinned image digest).
+Still open: SW-051 (read-only guard tokeniser, refuse keys with write scopes), SW-052 (Sheet sync redirects, host allow-list, size cap).
+
+**Container (SW-053):** the base image is pinned by digest; the app runs as `node`, not root: `scripts/entrypoint.sh` starts as root (`RAILWAY_RUN_UID=0`) only to hand the root-owned volume to `node` once, then drops privileges with `su-exec` (docs/RUNBOOK.md, Container user).

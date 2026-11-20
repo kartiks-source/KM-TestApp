@@ -68,6 +68,19 @@ Deploys are a local `railway up` (no auto-deploy from GitHub yet; ADR-0012):
 
 Roll back: Railway dashboard → Deployments → the previous deployment → Redeploy. The volume is not touched by a deploy or a rollback. **Data written by a newer version:** `store.json` carries `schemaVersion` (SW-047, `FORMATS.md`); an older build refuses to start on a file with a higher schemaVersion (log: `… is schema N, written by a newer version of the app …`) rather than overwrite what it doesn't know. Today every release reads and writes schema 1, so rolling back within 1.x is safe; when a release bumps it, its CHANGELOG says so, and rolling back past it means restoring a backup taken before that deploy.
 
+### Container user (SW-053)
+
+The image starts as root only long enough for `/app/entrypoint.sh` to hand `/data` to the `node` user (once: only while `/data` isn't owned by `node`), then runs the app as `node` via `su-exec`. `RAILWAY_RUN_UID=0` stays set (it makes Railway start the container as root so the hand-over can happen).
+
+**Verify after the first deploy with this image:**
+1. Railway → Deployments → Logs: one `entrypoint: giving /data to user node (once)` line on the first boot only, then the JSON `"msg":"boot"` line.
+2. `railway ssh` (or the service shell): `ps -o user,args | grep server.js` shows `node`, not `root`; `ls -ln /data` shows uid 1000.
+3. `/health` 200 with the version you meant; on Data, Save settings works (proves `node` can write the volume).
+
+**Roll back:** Railway → Deployments → the previous deployment → Redeploy. The older image runs as root (`RAILWAY_RUN_UID=0`), which reads the node-owned files fine; nothing to undo on the volume. If the new one can't write (`/health` 503 `Saving data fails`): roll back, then check the volume's mount path is `/data`.
+
+**Update the base image:** the `FROM` line pins `node:<version>-alpine@sha256:<digest>`. Find the newest 22.x tag and its digest: `curl -s "https://hub.docker.com/v2/repositories/library/node/tags?name=22.&page_size=50" | jq -r '.results[] | select(.name|test("^22\\.[0-9]+\\.[0-9]+-alpine$")) | "\(.name) \(.digest)"' | head -1` (or `docker buildx imagetools inspect node:22-alpine`). Change tag and digest together, run `npm test` (it checks the pin's shape), deploy, verify as above.
+
 ## Backups
 
 **1. App backups (on the volume, automatic).** `src/backup.js` writes, for each store, in `/data/stores/<id>/`:

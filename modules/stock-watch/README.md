@@ -116,12 +116,13 @@ Notes on these formats:
 
 ## Deploy (Railway)
 
-Railway builds the `Dockerfile` at the repo root, which copies this folder. Attach a volume at `/data` and set `RAILWAY_RUN_UID=0` so the app can write to it. Run **one** replica only, so the 15-minute pulls never run twice.
+Railway builds the `Dockerfile` at the repo root, which copies this folder. Attach a volume at `/data` and set `RAILWAY_RUN_UID=0` so the entrypoint can hand it to the `node` user once; the app itself runs as `node` (SW-053). Run **one** replica only, so the 15-minute pulls never run twice.
 
 | Variable | Meaning |
 |---|---|
 | `ADMIN_PASSWORD` | required in production (any user name) |
-| `RAILWAY_RUN_UID` | `0`, so the app can write to the Railway volume |
+| `RAILWAY_RUN_UID` | `0`: the container starts as root so `scripts/entrypoint.sh` can chown the volume to `node` once, then drops to `node` |
+| `KEEP_DAYS` | backups kept per kind (dailies = days back), 1–365, default 14 (SW-055) |
 | `PORT` | set by Railway (default 4400 locally) |
 | `DATA_DIR` | where the data lives (default `./data`; `/data` in Docker): `stores/<id>/store.json` and side files per store, `secret` and `stores.json` for all. An old single-store `DATA_DIR` moves into its store (`SHOPIFY_STORE` / `PERFORMITY_BRAND_ID`, else the first) on the first start, once (`docs/RUNBOOK.md`) |
 | `STORES` | Key Vault only: several stores, `STORES=brand-a,brand-b` (else `SHOPIFY_STORE`) |

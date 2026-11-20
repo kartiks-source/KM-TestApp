@@ -87,7 +87,7 @@ Google Sheet CSV / upload ───┘
 
 ## Railway variables now
 
-`ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (so the app can write to the volume), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
+`ADMIN_PASSWORD`, `RAILWAY_RUN_UID=0` (the container starts as root; `scripts/entrypoint.sh` chowns `/data` to `node` once and drops to `node` with su-exec, SW-053), with a volume at `/data`. No Shopify variables yet, so it shows the demo.
 
 ## Running in production
 
