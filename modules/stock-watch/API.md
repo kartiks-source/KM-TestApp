@@ -22,7 +22,7 @@ Every HTTP route `server.js` answers, version 0.9.0. Source of truth: `server.js
 | 429 | too many wrong passwords (10 per IP / 15 min; or a wrong one while 100 across all IPs failed); `retry-after: 900` |
 | 500 | a bug: `Something went wrong on the server` (logged) |
 
-**Which store** (ADR-0015): every `/api/*` route except `/api/stores`, and `/ingest/*`, takes `?store=<id>`. Without it: the `sw_store` cookie when it names a listed store (the page sets it), else the first store (Flow ingest: always the first store unless `?store=` is given). An id that isn't listed, or isn't a uuid / `^[a-z0-9][a-z0-9-]{0,60}$`, → **404** `Unknown store`, before anything is read. No store at all yet (Performity's brand list never loaded) → **503** `No store yet: …`. Every route then reads and writes only that store's data.
+**Which store** (ADR-0015): every `/api/*` route except `/api/stores`, and `/ingest/*`, takes `?store=<id>`. Without it: the `sw_store` cookie when it names a listed store (the page sets it), else the first store (Flow ingest: always the first store unless `?store=` is given). An id that isn't listed, or isn't a uuid / `^[a-z0-9][a-z0-9-]{0,60}$`, → **404** `Unknown store`, before anything is read. No store at all yet (Performity's brand list never loaded) → **503** `No store yet: …`. Every route then reads and writes only that store's data. The page (`public/stores.js`) always sends `?store=` itself, so two tabs on two stores never cross; the cookie is only the default for a bare address.
 
 **Report query values** (`/api/report`, `/api/product/:id`, `/api/groups`, `/api/export/reorder.csv`)
 

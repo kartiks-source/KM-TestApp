@@ -108,6 +108,18 @@ UTF-8 with BOM, every cell quoted, text starting with `= + - @ tab CR` gets a le
 - Pause promotion (`pause-promotion-YYYY-MM-DD.csv`): `Product, SKU, Variant ID, Why, Back in stock, In stock, Days left`.
 - Push these (`push-these-YYYY-MM-DD.csv`): `Product, SKU, Variant ID, Overstock ₹, In stock, Days left`.
 
+## Kept in the browser (per browser, never on the server)
+
+Nothing here is a secret or a number; clearing site data only resets choices.
+
+| Key | Where | Shape | Set by |
+|---|---|---|---|
+| `sw_store` | cookie, `Path=/`, a year, `SameSite=Lax` (`Secure` on https), readable by the page | a store id (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`) | the store picker (`public/stores.js`); the server uses it only when the request has no `?store=` and the id is listed (ADR-0015) |
+| `sw-store` | `localStorage` | the same store id | the store picker; the page's default when the address has no `?store=` |
+| `sw-role` | `localStorage` | a role key (`ceo`, `ops`, …) or absent = All (the default) | the role list under the store pill, Data → Show me, `/?role=` (SW-020) |
+| `sw-cols-off` | `localStorage` | `{ reorder: ['outs', …], products: [...] }`: optional columns **unticked** (every optional column is on by default; replaces the old opt-in `sw-cols`, which is ignored) | Columns… on Reorder / Products |
+| `sw-colw` | `localStorage` | `{ <table>: { <column>: px } }`: dragged column widths | dragging a header edge; double-click resets |
+
 ## Files in `DATA_DIR` (`/data` on Railway)
 
 Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/stores/<id>/`, laid out exactly as one store's were before (`<id>` = Performity brand_id in lower case, a Key Vault store handle, or `sammsara-demo` / `second-demo`). Only `secret` and `stores.json` sit at the top, for every store. The table below is one store's folder, then the two shared files.

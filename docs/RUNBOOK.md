@@ -39,7 +39,9 @@ Both routes are open by design and return no names, keys or error details (`SECU
   - `Refusing to start: DATA_DIR holds single-store files … and stores/<id> already holds data`: someone ran both layouts. Nothing was moved. Decide which is right: move the old top-level files into `/data/old-<date>/` (or the folder's files aside), then restart.
   - `migrate: left in DATA_DIR (changed or new since the move …)`: a file at the top changed after the copy (an old version ran?). The store folder holds the copy from the move; compare and delete the top-level file by hand.
 - **Pulls:** one store at a time, every 15 minutes; logs say `shopify (<store name>): …`. Alerts name the store.
-- **Store ids in URLs:** `/?store=<id>`. An id not in the list is a 404 (never a folder lookup).
+- **Store ids in URLs:** `/?store=<id>`. An id not in the list is a 404 for `/api` (never a folder lookup); the page itself then opens the default store.
+- **Picker:** the store pill (phones: the store bar under the top bar) lists every store with a dot: green ok, amber data over 45 minutes old, red last pull failed (hover / second line says why). With one store it shows only the name. Links to send someone: `/?store=<id>#reorder` (the address bar always carries it).
+- **Checking a release with two stores locally:** no key → two demo stores (`Sammsara (demo)`, `Second store (demo)`, different numbers). Performity stand-in: `STAND_IN_BRANDS=2 PORT=4499 node modules/stock-watch/scripts/stand-in-token-api.js`, then the app with `PERFORMITY_POC_API_URL=http://localhost:4499 PERFORMITY_POC_API_KEY=stand-in-key ADMIN_PASSWORD=…`: two stores, red dots until `SHOPIFY_DEV_TOKEN` (+ `_2`) point at development stores.
 
 ## Deploy and roll back
 
