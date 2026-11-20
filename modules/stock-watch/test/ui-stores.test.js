@@ -91,7 +91,7 @@ test('phone 390 and 360: a store bar under the top bar, 44 px targets, no sidewa
   }
 });
 
-test('one store: the pill is the plain name (no dot, no store menu); phones show the name in the store bar, whose menu is the role picker (final critic M1)', opts, async () => {
+test('one store: the pill is the plain name (no dot, no store menu, does not open); phones show the plain name in the store bar (final critic M1)', opts, async () => {
   for (const [w, h] of [[1440, 900], [390, 844]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h } });
     await ctx.route('**/api/stores', async (route) => {
@@ -102,8 +102,10 @@ test('one store: the pill is the plain name (no dot, no store menu); phones show
     await pg.goto(base + '/#overview'); await pg.waitForSelector('.tiles');
     assert.equal(await pg.$eval('#store-name', (e) => e.innerHTML), 'Sammsara (demo)');
     assert.equal(await pg.$eval('#store-menu', (e) => e.innerHTML), '');
-    const bar = await pg.$eval('#storebar', (e) => ({ shown: getComputedStyle(e).display !== 'none', text: e.querySelector('summary').textContent, dot: !!e.querySelector('.sdot'), stores: e.querySelectorAll('[data-store]').length, roles: e.querySelectorAll('#role-menu-m [data-role]').length }));
-    assert.deepEqual(bar, { shown: w <= 760, text: 'Sammsara (demo)', dot: false, stores: 0, roles: 8 }, `${w}: store bar (UI-5, M1)`);
+    assert.ok(await pg.$('details.rolepick.one'), `${w}: one brand: the pill is marked plain`);
+    if (w > 760) { await pg.click('.top .store-pill'); assert.equal(await pg.$eval('details.rolepick .menu', (m) => getComputedStyle(m).display), 'none', 'nothing to pick'); }
+    const bar = await pg.$eval('#storebar', (e) => ({ shown: getComputedStyle(e).display !== 'none', text: e.querySelector('summary').textContent, dot: !!e.querySelector('.sdot'), stores: e.querySelectorAll('[data-store]').length, roles: e.querySelectorAll('[data-role]').length }));
+    assert.deepEqual(bar, { shown: w <= 760, text: 'Sammsara (demo)', dot: false, stores: 0, roles: 0 }, `${w}: store bar (UI-5, M1)`);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -118,11 +120,29 @@ test('show everything by default: no role, Reorder opens on All, every Overview 
   assert.equal(await vis('#view > .grid2 > .panel'), 3, 'Order today, Biggest losses, Moving');
   assert.equal(await vis('#view > .panel.chart'), 1, 'daily chart');
   await pg.click('.top .store-pill');
-  assert.equal(await pg.$eval('#role-menu [data-role=""]', (b) => [b.getAttribute('aria-pressed'), b.querySelector('b').textContent].join()), 'true,All');
+  assert.equal(await pg.$$eval('#role-menu, #role-menu-m, #role-name, button[data-role], #f-role', (b) => b.length), 0, 'no role menu (roles off, 20 Nov 2026)');
   await pg.goto(base + '/#reorder');   await pg.waitForSelector('.tbl.desk table');
   assert.ok(await pg.$('[data-filter-reorder="all"].on'), 'Reorder → All');
   assert.deepEqual(pg.errors, []);
   await pg.context().close();
+});
+
+test('roles off: an old ?role=ceo link and a remembered sw-role are ignored and dropped; the page shows everything', opts, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctx.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem('sw-role', 'marketing'); } });
+  const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));
+  await pg.goto(base + '/?store=sammsara-demo&role=ceo#overview'); await pg.waitForSelector('.tiles');
+  assert.doesNotMatch(pg.url(), /role=/, 'address bar loses ?role=');
+  assert.match(pg.url(), /store=sammsara-demo/);
+  assert.equal(await pg.evaluate(() => localStorage.getItem('sw-role')), null, 'stale sw-role cleared');
+  assert.equal(await pg.evaluate(() => document.documentElement.dataset.role), '');
+  assert.equal(await pg.$eval('#role-css', (s) => s.textContent), '', 'nothing removed');
+  const vis = (sel) => pg.$$eval(sel, (els) => els.filter((e) => e.offsetParent && getComputedStyle(e).display !== 'none').length);
+  assert.equal(await vis('#view > .tiles.t4 > .tile'), 4);
+  assert.equal(await vis('#view > .grid2 > .panel'), 3);
+  assert.equal(await vis('#view > .panel.chart'), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
 });
 
 test('viewer address: an unknown or unsafe ?store= falls back to a listed store, never an error page', opts, async () => {
@@ -168,49 +188,33 @@ test('status dot is an 8 px dot in every state, on the pill, in the menu and in 
   }
 });
 
-test('store + view menu: every store and role reachable on a short laptop (8 stores at 1280x720) (UI-2)', opts, async () => {
+test('store menu: every store reachable on a short laptop (8 stores at 1280x720) (UI-2)', opts, async () => {
   const pg = await many(1280, 720, 8, 'ok');
   await pg.click('.top .store-pill');
   await pg.mouse.wheel(0, 20000);
-  const m = await pg.$eval('details.rolepick .menu', (e) => { const b = e.getBoundingClientRect(); return { bottom: b.bottom, vh: innerHeight, scrolls: e.scrollHeight > e.clientHeight }; });
+  const m = await pg.$eval('details.rolepick .menu', (e) => { const b = e.getBoundingClientRect(); return { bottom: b.bottom, vh: innerHeight }; });
   assert.ok(m.bottom <= m.vh, `menu ends at ${m.bottom}, window ${m.vh}`);
-  assert.ok(m.scrolls, 'the menu scrolls inside itself');
-  await pg.$eval('#role-menu button:last-child', (b) => b.scrollIntoView({ block: 'nearest' }));
-  const last = await pg.$eval('#role-menu button:last-child', (b) => { const r = b.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
-  assert.ok(last, 'last role in view');
+  assert.equal(await pg.$$eval('#store-menu [data-store]', (b) => b.length), 8);
+  await pg.$eval('#store-menu [data-store]:last-child', (b) => b.scrollIntoView({ block: 'nearest' }));
+  const last = await pg.$eval('#store-menu [data-store]:last-child', (b) => { const r = b.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  assert.ok(last, 'last store in view');
   await pg.context().close();
 });
 
-test('phone store bar with a role: the store name wins over the role and the store count (final r2 M7)', opts, async () => {
-  for (const [w, h] of [[360, 740], [390, 844]]) {
-    const pg = await open(w, h, '/?store=second-demo&role=founder#overview', '.tiles');
-    const r = await pg.evaluate(() => {
-      const nm = document.querySelector('#storebar .sm-name'), n = [...document.querySelectorAll('#storebar .sm-n:not(.sm-role)')];
-      return { name: nm.scrollWidth <= nm.clientWidth, role: document.querySelector('#storebar .sm-role').textContent, count: n.every((x) => getComputedStyle(x).display === 'none') };
-    });
-    assert.deepEqual(r, { name: true, role: r.role, count: true }, `${w}: "Second store (demo)" whole, "2 stores" hidden with a role`);
-    assert.ok(r.role, `${w}: role shown`);
-    await pg.context().close();
-  }
-  const pg = await open(360, 740, '/?store=second-demo&role=#overview', '.tiles');
-  assert.match(await pg.textContent('#storebar summary'), /2 stores/, 'no role: the count is back');
-  await pg.context().close();
-});
-
-test('long store name: ellipsis on the pill (full name in its title); at 1280 with a role the range and role stay whole (UI-3, UI-4)', opts, async () => {
+test('long store name: ellipsis on the pill (full name in its title); at 1280 the range stays whole (UI-3, UI-4)', opts, async () => {
   const LONG = 'Sammsara Luxury Home Decor and Gifting Company India';
   const put = (name) => fetch(`${base}/api/settings?store=second-demo`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ storeName: name }) });
   assert.equal((await put(LONG)).status, 200);
   try {
     for (const [w, h] of [[1280, 800], [1440, 900]]) {
-      const pg = await open(w, h, '/?store=second-demo&role=ops#overview', '.tiles');
+      const pg = await open(w, h, '/?store=second-demo#overview', '.tiles');
       const r = await pg.evaluate(() => {
-        const nm = document.querySelector('#store-name'), cs = getComputedStyle(nm), role = document.querySelector('#role-name');
+        const nm = document.querySelector('#store-name'), cs = getComputedStyle(nm);
         return { ellipsis: cs.textOverflow === 'ellipsis' && cs.display === 'block', cut: nm.scrollWidth > nm.clientWidth, title: document.querySelector('.store-pill').title,
           range: [...document.querySelectorAll('.top .range button')].every((b) => b.scrollWidth <= b.clientWidth + 1 && b.getBoundingClientRect().right <= innerWidth),
-          roleOneLine: role.textContent !== '' && role.getBoundingClientRect().height <= 20, sx: document.documentElement.scrollWidth - innerWidth };
+          sx: document.documentElement.scrollWidth - innerWidth };
       });
-      assert.deepEqual(r, { ellipsis: true, cut: true, title: r.title, range: true, roleOneLine: true, sx: 0 }, `${w}`);
+      assert.deepEqual(r, { ellipsis: true, cut: true, title: r.title, range: true, sx: 0 }, `${w}`);
       assert.ok(r.title.startsWith(LONG), `${w}: title ${r.title}`);
       await pg.context().close();
     }

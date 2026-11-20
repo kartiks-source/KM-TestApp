@@ -113,12 +113,12 @@
   /* ---------- browser ---------- */
   const read = () => { try { const r = localStorage.getItem(KEY) || ''; return valid(r) ? r : ''; } catch { return ''; } };
   const write = (r) => { try { if (valid(r)) localStorage.setItem(KEY, r); else localStorage.removeItem(KEY); } catch { /* private window: role lasts this page only */ } };
-  let role = read();
-  /* ?role=ceo link: remember it, then drop it from the address bar */
+  /* Roles are switched off in the UI (20 Nov 2026: "remove roles, just keep the brand switch"): everyone sees
+     everything. A role remembered earlier is forgotten, and an old ?role= link is ignored and dropped. */
+  let role = '';
+  if (read()) write('');
   const qs = new URLSearchParams(location.search);
   if (qs.has('role')) {
-    role = valid(qs.get('role')) ? qs.get('role') : '';
-    write(role);
     qs.delete('role');
     history.replaceState(null, '', location.pathname + (qs.toString() ? `?${qs}` : '') + location.hash);
   }

@@ -73,7 +73,7 @@ Google Sheet CSV / upload ───┘
 | `src/digest.js` | morning digest text per role, pure (SW-028) |
 | `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
 | `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (the phone bar also shows the role and holds the role list, `#role-menu-m`, filled by `SW_ROLES.paint()`) (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
-| `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
+| `public/roles.js` | role home views (SW-020): switched off in the UI since 20 Nov 2026 (brand switch only; clears `sw-role`, drops `?role=`); pure functions kept, also read by the digest |
 | `public/tz.js`, `public/ops.js`, `public/trial-input.js` | store time helper (SW-049); Data notice for capacity / read-only (SW-055); number boxes that keep raw text, read on Enter / leave, hint when invalid (SW-057; browser test `test/ui-trial.test.js`) |
 | `public/people.js` | Data → People (owner only, SW-062): add / edit / new password / remove; the new password is shown once with Copy |
 | `public/import-ui.js` | Data → Upload a CSV preview (SW-045): file / kind / select change → `POST /api/import/preview`; mapping selects + 5-row sample in `#imp-preview`; `SW_IMPORT.query()` adds `&map=` to the upload in app.js; Upload stopped on the page while a needed column is unmapped. Browser test `test/ui-import.test.js` |
@@ -97,7 +97,7 @@ Google Sheet CSV / upload ───┘
 
 ## Role views and digest (Sprint 2 · B-roles)
 
-- Role views only remove UI (ADR-0006); config in `public/roles.js`, rules in LOGIC.md §16. Browser check: `node test/smoke/roles-smoke.js` (needs Playwright; uses its browser, else system Chrome, else `CHROMIUM_PATH`). Not in `npm test` (no browser in CI, no deps).
+- Roles are switched off in the UI (20 Nov 2026, user: "remove roles, just keep it brand switch"): the store pill only switches brands, no role menu, no *Show me*, everyone sees everything; old `?role=` links and a remembered `sw-role` are dropped. Code kept in `public/roles.js` (pure functions, `test/roles.test.js`) in case they come back; rules as they were in LOGIC.md §16. The roles smoke was deleted.
 - Digest: LOGIC.md §17. Optional variables `DIGEST_WEBHOOK_URL`, `DIGEST_WEBHOOK_URL_<ROLE>` (per-role recipient), `PUBLIC_URL`. Env only, never saved from the page. Without a webhook nothing is sent; Share → Copy / WhatsApp still works.
 - Warehouse home = Reorder → Ordered: every open PO (part, late, too late), late first, *Lands* + *On order (pcs)*, headline "N on order · M due this week · K late"; warehouse digest lists the same (`helpers.onOrderRows` / `onOrderSummary`, LOGIC §6b). Marketing home = Products → Pause promotion.
 - Smoke (`test/smoke/smoke.js`): refuses a `SMOKE_PORT` already in use and fails when the app dies or no check runs.
@@ -119,7 +119,7 @@ npm start          # http://localhost:4400 (demo data on first run)
 npm test           # unit + server tests, no dependencies (browser tests skip)
 # at the repo root (Playwright 1.65.1: npm ci, or PLAYWRIGHT_PATH=…; PLAYWRIGHT_CHANNEL=chrome for installed Chrome):
 npm run test:ui    # test/ui-helpers + test/ui-stores in a real browser (1280–1920, 390x844, 360x740)
-npm run test:smoke # test/smoke/smoke.js + roles-smoke.js (SMOKE_OUT=folder keeps the screenshots)
+npm run test:smoke # test/smoke/smoke.js (SMOKE_OUT=folder keeps the screenshots)
 npm run stamp      # before `railway up`: writes BUILD_SHA so /status and the footer name the commit (docs/RUNBOOK.md)
 ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET=… npm start
 ```

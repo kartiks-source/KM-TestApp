@@ -6,6 +6,14 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+## 2026-11-20 · roles off, brand switch only (1.1.2)
+stock-watch 1.1.2, on `main` (not pushed, not deployed). User: "remove roles, just keep it brand switch".
+- Store pill only switches brands (one brand: plain name, doesn't open); phone store bar the same. No role menu, no *Show me* on Data. Everyone sees everything.
+- `public/roles.js`: role always ''; a remembered `sw-role` is cleared, `?role=` links ignored and stripped. Pure functions kept (`test/roles.test.js`) in case roles come back. LOGIC §16 marked off.
+- Tests: role-only browser tests deleted (Marketing phone home, phone store bar with a role); mixed ones keep their non-role checks; new: `?role=ceo` + stale `sw-role` → everything shown, both dropped. `test/smoke/roles-smoke.js` deleted (root `test:smoke`, CI step).
+- Open: digest links still carry `?role=` (now just open the default view); digest content per role unchanged.
+- Tests: npm test 391 pass (36 browser skips); test:ui 36/36; smoke 30/30 (roles smoke gone).
+
 ## 2026-11-20 · UI + mobile fixes (1.1.1)
 stock-watch 1.1.1, on `main` (not pushed, not deployed). Fixes from the UI, simplicity and mobile critics, checked on a copy of the live Sammsara data at 1440 and 360.
 - Counts (P1, UI-2/M2/SIMP-3): `totals.stockouts` leaves out not-selling episodes (`stockoutsNotSelling`, episode `notSelling`); tile/summary 94 → 54 = Stock-outs page "53 products ran out 54 times" (local copy); weekly `ranOut` too. Badge = stillOut 47 = page.

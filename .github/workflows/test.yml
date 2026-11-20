@@ -1,8 +1,8 @@
 # CI gate (SW-014): every push and pull request. Deploy only a green main (docs/RUNBOOK.md).
 #   test: npm test on Node 20 and 22. Plain Node, no dependencies, no install step (browser tests skip here).
 #   ui:   Playwright 1.65.1 (root devDependency, pinned in package-lock.json; dev tooling only, never in the
-#         Docker image) + cached Chromium. Runs the browser tests (npm run test:ui), the smoke and the roles smoke
-#         at 1280/1440/1920/390x844/360x740 (SW-023), and uploads the screenshots as the "screenshots" artifact.
+#         Docker image) + cached Chromium. Runs the browser tests (npm run test:ui) and the smoke at
+#         1440x900/390x844/360x740 (SW-023; the roles smoke went with roles, 20 Nov 2026), and uploads the screenshots as the "screenshots" artifact.
 name: test
 on:
   push:
@@ -55,9 +55,6 @@ jobs:
       - name: Smoke (1440x900, 390x844, 360x740)
         if: ${{ !cancelled() }}
         run: node modules/stock-watch/test/smoke/smoke.js
-      - name: Roles smoke (1280, 1440, 1920, 390x844, 360x740)
-        if: ${{ !cancelled() }}
-        run: node modules/stock-watch/test/smoke/roles-smoke.js
       - name: Upload screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

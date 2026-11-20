@@ -1,6 +1,6 @@
 'use strict';
-/* SW-020: role home views only remove UI (ADR-0006, docs/RACI.md). The browser check (fewer visible
- * elements than the default, no sideways scroll) is test/smoke/roles-smoke.js. */
+/* SW-020: role home views only remove UI (ADR-0006, docs/RACI.md). Roles are switched off in the UI since
+ * 20 Nov 2026 (brand switch only); these pure functions are kept in case they come back. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

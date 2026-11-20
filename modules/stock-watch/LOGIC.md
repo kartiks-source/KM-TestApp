@@ -784,6 +784,8 @@ One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop
 
 ## 16. Role home views (SW-020, `public/roles.js`)
 
+**Roles are switched off in the UI** (20 Nov 2026, at the user's request: "remove roles, just keep it brand switch"). The store pill only switches brands (with one brand it is the plain name and doesn't open); there is no role menu and no *Show me* field, and everyone sees everything. A role remembered in this browser (`sw-role`) is cleared and an old `/?role=` link is ignored and dropped from the address bar. The code is kept (`public/roles.js` pure functions, `test/roles.test.js`) in case roles come back; the rest of this section describes them as they were.
+
 No number changes with a role: a role view only **removes** parts of today's default screen (ADR-0006) and picks the page you land on. No role chosen = **All** (the default): every page, every panel, every column. Reorder opens on its **All** tab unless a role lands elsewhere; there its headline states the scope, "Order ₹X today across N products · ₹Z more this week (M)", so the list, the CSV and *Tick all* add up to the headline (₹X + ₹Z = the whole list's order cost; final critic SIMP-2). The *Order today* tab's headline is today only.
 
 | Role | Lands on | Removed (everything else stays) |
@@ -802,7 +804,7 @@ No number changes with a role: a role view only **removes** parts of today's def
 - RACI "the A's number first": a role that drops the "more to order this week" tile also drops "Order ₹X today" from the Overview headline, so it starts with "₹Y sales lost".
 - Data & settings is never removed: it holds the switch back. Removing a page from the menu doesn't lock it (view-only access is SW-029).
 - Why: each role has one decision (docs/RACI.md); the rest is noise for that person. Considered: per-role pages. Rejected: they'd add screens for everyone and drift from the default.
-- Checked: `test/roles.test.js` (every role removes something on its home page, never Data); `test/smoke/roles-smoke.js` counts visible pieces per role against the default at 1280/1440/1920/390.
+- Checked: `test/roles.test.js` (every role removes something on its home page, never Data); `test/smoke/roles-smoke.js` counted visible pieces per role (deleted with roles off, 20 Nov 2026; `test/ui-stores.test.js` checks an old `?role=` link shows everything).
 
 ## 17. Morning digest (SW-028, `src/digest.js`, `src/digest-service.js`)
 

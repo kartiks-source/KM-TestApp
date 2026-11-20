@@ -28,7 +28,7 @@ Requires Node 20 or newer.
 | **Products** | Every product. Click one for its stock-level chart (out-of-stock periods shaded), units sold per day, and its stock-outs. |
 | **Data & settings** | Data status, demo reload and clear, CSV upload, Google Sheet links, Shopify Flow webhook URLs, and the settings (all for the store chosen in the top bar). |
 
-**Everything shows by default.** No role is chosen ("All"), Reorder opens on its All tab, every optional column is on (untick in Columns…; on a narrow laptop the right-most ones step aside and a note names them), and Overview shows every panel. A role under the store pill only removes things.
+**Everything shows, always.** Roles are switched off in the UI (20 Nov 2026, at the user's request): the store pill only switches brands, and old `/?role=` links are ignored (the code stays in `public/roles.js` in case roles come back). Reorder opens on its All tab, every optional column is on (untick in Columns…; on a narrow laptop the right-most ones step aside and a note names them), and Overview shows every panel.
 
 **Stores.** The store pill in the top bar lists every store with a dot: green = data fresh, amber = last good pull over 45 minutes ago, red = the last pull or sync failed. Choosing one opens it (`?store=<id>` in the address, remembered on this browser). With one store the pill shows just its name. Every page, export, digest and setting is for the chosen store.
 
@@ -152,7 +152,7 @@ src/demo.js        made-up demo store
 src/period.js      "This month" + the Yesterday strip
 src/digest.js      morning digest text per role (pure)
 src/digest-service.js  digest routes, webhook, daily schedule, send log
-public/            the web page (no build step); stores.js = store picker, roles.js = role views, digest-ui.js = Share menu + digest settings
+public/            the web page (no build step); stores.js = store picker, roles.js = role views (off in the UI since 20 Nov 2026), digest-ui.js = Share menu + digest settings
 test/              node --test
 ```
 

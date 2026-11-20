@@ -60,7 +60,8 @@
     const nm = document.getElementById('store-name');
     if (nm && c) nm.innerHTML = `${many ? dot(c) : ''}${esc(c.name)}`;
     const pill = nm && nm.closest('.store-pill');
-    if (pill && c) pill.title = `${c.name}${many ? ` · ${statusLine(c)}` : ''} · choose ${many ? 'store and ' : ''}what you see`;
+    if (pill && c) pill.title = `${c.name}${many ? ` · ${statusLine(c)} · switch brand` : ''}`;
+    const pd = pill && pill.closest('details'); if (pd) { pd.classList.toggle('one', !many); if (!many) pd.removeAttribute('open'); }   // one brand: nothing to pick
     if (c) document.title = `${c.name} · Stock-out Watch`;
     const menu = document.getElementById('store-menu');
     if (menu) menu.innerHTML = many ? `<p class="rp-h" id="store-h">Store</p><div role="group" aria-labelledby="store-h">${items()}</div>` : '';
@@ -69,8 +70,8 @@
       bar.hidden = !c;
       /* phones (critic M1): the bar is the store and role picker, as the pill is on a laptop; the role is shown in it
          (#role-name-m) and chosen in its menu (#role-menu-m), both filled by roles.js */
-      bar.innerHTML = !c ? '' : `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}. Change ${many ? 'store or ' : ''}what you see">${many ? dot(c) : ''}<span class="sm-name">${esc(c.name)}</span><span class="sm-n sm-role" id="role-name-m"></span>${many ? `<span class="sm-n">${list.length} stores</span>` : ''}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
-        + `<div class="menu">${many ? `<p class="rp-h" id="store-h-m">Store</p><div role="group" aria-labelledby="store-h-m">${items()}</div>` : ''}<div id="role-menu-m"></div></div></details>`;
+      bar.innerHTML = !c ? '' : `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}${many ? '. Switch brand' : ''}">${many ? dot(c) : ''}<span class="sm-name">${esc(c.name)}</span>${many ? `<span class="sm-n">${list.length} stores</span>` : ''}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
+        + `<div class="menu">${many ? `<p class="rp-h" id="store-h-m">Store</p><div role="group" aria-labelledby="store-h-m">${items()}</div>` : ''}</div></details>`;
       if (root.SW_ROLES && root.SW_ROLES.paint) root.SW_ROLES.paint();
     }
     document.documentElement.classList.toggle('multi-store', many);

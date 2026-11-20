@@ -834,7 +834,6 @@
       <section class="panel">
         <div class="form">
           ${field('storeName', 'Store name', s.storeName || (state.report.store && state.report.store.name) || '', 'Shown in the store picker, the tab title and digests', 'text')}
-          ${window.SW_ROLES ? SW_ROLES.field() : ''}
           <div class="field"><label for="f-timeZone">Time zone</label>${tzSelect(s)}<small>Store days, the sales-by-hour pattern, the digest hour and backup dates follow this</small></div>
         </div>
         <details class="fold-in"><summary>Advanced: planning rules</summary>

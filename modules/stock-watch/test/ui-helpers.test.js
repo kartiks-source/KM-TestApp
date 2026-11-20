@@ -129,22 +129,6 @@ test('Products filters: no duplicate lists; overstock tile opens Push these (cri
   await pg.context().close();
 });
 
-test('Marketing phone home (390 and 360) leads with its decision: "Pause promotion on N products", cards lead with Back in stock (critic r2 M1)', opts, async () => {
-  for (const [w, h] of PHONES) {
-    const pg = await page(w, h);
-    await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
-    const r = await (await fetch(base + '/api/report?days=30')).json();
-    const n = r.products.filter((p) => p.mkt === 'pause').length;
-    assert.equal(await pg.textContent('.headline h1'), `Pause promotion on ${n.toLocaleString('en-IN')} products`);
-    const card = await pg.$eval('.phone .mcard header', (x) => ({ st: x.querySelector('.st')?.textContent || '', order: !!x.querySelector('.st.g-today') }));
-    assert.match(card.st, /^(Lands|Late|Not ordered|Slow seller)/, `${w}: card badge: ${card.st}`);
-    assert.equal(card.order, false, 'no "Order today" badge on the marketing list');
-    assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}: no sideways scroll`);
-    assert.deepEqual(pg.errors, []);
-    await pg.context().close();
-  }
-});
-
 test('Group rows carry a spark like product rows (SW-021): desktop Trend cell, phone card header; fits 1280–1920, 390, 360', opts, async () => {
   for (const [w, h] of [[1280, 800], [1440, 900], [1920, 1080], ...PHONES]) {
     const pg = await page(w, h);
@@ -240,7 +224,7 @@ test('final critic round 1, desktop: focus ring inside the period buttons (UI-1)
   await pg.context().close();
   for (const w of [1280, 1440, 1920]) {
     const p2 = await page(w, 900);
-    await p2.goto(base + '/?role=marketing'); await p2.waitForSelector('[data-filter-products="pause"].on .c');
+    await p2.goto(base + '/#products'); await p2.click('[data-filter-products="pause"]'); await p2.waitForSelector('[data-filter-products="pause"].on .c');
     const hs = await p2.$$eval('.tbl.desk tbody tr', (r) => r.map((x) => x.getBoundingClientRect().height));
     assert.ok(hs.length && Math.max(...hs) < 40, `${w}: Pause rows ${Math.max(...hs)} px (Back in stock wrapped)`);
     assert.equal(await p2.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${w}: no sideways scroll`);
@@ -280,19 +264,10 @@ test('final critic round 1: Overview tiles do not repeat the headline (SIMP-1); 
   await pg.context().close();
 });
 
-test('final critic round 1, phones 390 and 360 (M1–M8, M10): role in the store bar, Pause names readable, chips, cards, folds, range, text sizes', opts, async () => {
+test('final critic round 1, phones 390 and 360 (M2–M8, M10): Pause names readable, chips, cards, folds, range, text sizes', opts, async () => {
   for (const [w, h] of PHONES) {
     const pg = await page(w, h);
-    await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
-    assert.match(await pg.textContent('#storebar summary'), /Marketing/, `${w}: M1 role shown`);
-    await pg.click('#storebar summary');
-    const roles = await pg.$$eval('#storebar #role-menu-m [data-role]', (b) => b.map((x) => x.getBoundingClientRect().height));
-    assert.ok(roles.length >= 7 && roles.every((x) => x >= 44), `${w}: M1 role menu ${roles}`);
-    assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, `${w}: menu open, no sideways scroll`);
-    await Promise.all([pg.waitForNavigation(), pg.click('#storebar #role-menu-m [data-role=""]')]);
-    await pg.waitForSelector('.tiles');
-    assert.equal(await pg.evaluate(() => document.documentElement.dataset.role), '', `${w}: M1 role switched from the store bar`);
-    await pg.goto(base + '/?role=marketing#products'); await pg.waitForSelector('.phone .mcard');
+    await pg.goto(base + '/#products'); await pg.click('[data-filter-products="pause"]'); await pg.waitForSelector('[data-filter-products="pause"].on'); await pg.waitForSelector('.phone .mcard');
     const h3 = await pg.$$eval('.phone .mcard header h3', (x) => x.slice(0, 20).map((e) => e.getBoundingClientRect().width));
     assert.ok(Math.min(...h3) >= 150, `${w}: M2 Pause card names ${Math.min(...h3)} px wide`);
     const sortBy = await pg.$eval('.msort > span', (e) => e.getBoundingClientRect().height);

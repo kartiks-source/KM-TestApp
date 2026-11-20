@@ -135,7 +135,7 @@ Nothing here is a secret or a number; clearing site data only resets choices.
 |---|---|---|---|
 | `sw_store` | cookie, `Path=/`, a year, `SameSite=Lax` (`Secure` on https), readable by the page | a store id (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`) | the store picker (`public/stores.js`); the server uses it only when the request has no `?store=` and the id is listed (ADR-0015) |
 | `sw-store` | `localStorage` | the same store id | the store picker; the page's default when the address has no `?store=` |
-| `sw-role` | `localStorage` | a role key (`ceo`, `ops`, …) or absent = All (the default) | the role list under the store pill, Data → Show me, `/?role=` (SW-020) |
+| `sw-role` | `localStorage` | a role key (`ceo`, `ops`, …) or absent = All (the default) | roles off in the UI since 20 Nov 2026: cleared on load, `/?role=` ignored (SW-020) |
 | `sw-cols-off` | `localStorage` | `{ reorder: ['outs', …], products: [...] }`: optional columns **unticked** (every optional column is on by default; replaces the old opt-in `sw-cols`, which is ignored) | Columns… on Reorder / Products |
 | `sw-budget:<store id>` | `localStorage` | a whole ₹ amount, or absent = no budget | Reorder → Budget ₹ (SW-041); per store, this browser only |
 | `sw-polens` | `localStorage` | `supplier`, or absent = List | Reorder → List / By supplier (SW-040) |

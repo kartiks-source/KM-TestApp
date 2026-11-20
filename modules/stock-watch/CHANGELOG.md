@@ -2,6 +2,10 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.2 · 2026-11-20
+
+- Roles removed from the menu: the store pill only switches brands; everyone sees everything.
+
 ## 1.1.1 · 2026-11-20 · number validation fixes
 
 - Sales rate shown in words: "5 a day", "3 a week", "1 every 2 weeks" (the maths keeps the exact rate).

@@ -34,8 +34,8 @@ docs/RUNBOOK.md           deploy, rollback, backups, restore, what to do when so
 docs/BACKLOG.md           the work, by SW-number; docs/DEFINITION-OF-DONE.md (DoR, DoD, PR checklist); docs/adr/ (ADRs)
 SECURITY.md               every secret, where it lives, how to rotate it; auth model; destructive endpoints
 .github/workflows/test.yml  CI on every push and PR: job `test` (npm test, Node 20 + 22, no install) and job `ui`
-                          (npm ci → Playwright 1.65.1 + Chromium: npm run test:ui, smoke, roles smoke; screenshots artifact)
-package.json              root scripts: test, test:ui (browser tests), test:smoke (smoke + roles smoke), stamp (BUILD_SHA before deploy)
+                          (npm ci → Playwright 1.65.1 + Chromium: npm run test:ui, smoke; screenshots artifact)
+package.json              root scripts: test, test:ui (browser tests), test:smoke (smoke), stamp (BUILD_SHA before deploy)
 .railway/railway.ts       Railway as code: region, one replica, /health check, /data volume
 modules/<name>/           one folder per module, with its own AGENTS.md
   AGENTS.md               the module's context: purpose, data flow, files, status, next steps
