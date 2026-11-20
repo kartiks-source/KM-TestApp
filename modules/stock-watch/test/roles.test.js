@@ -54,7 +54,7 @@ test('css removes exactly the role’s parts and re-flows the tiles', () => {
 
 test('phones: an odd number of tiles (3) lets the last one span the row, so no half-empty row (critic M7)', () => {
   const mkt = R.css('marketing');                             // lost, best sellers at risk, overstock
-  assert.match(mkt, /@media \(max-width: 760px\) \{ #view > \.tiles\.t4 > \.tile\[data-filter="over"\] \{ grid-column: 1 \/ -1; \} \}/);
+  assert.match(mkt, /@media \(max-width: 760px\) \{ #view > \.tiles\.t4 > \.tile\[data-filter="push"\] \{ grid-column: 1 \/ -1; \} \}/);
   assert.doesNotMatch(R.css('ceo'), /grid-column: 1 \/ -1/);  // 2 tiles: even
   for (const r of R.ORDER) {
     const kept = ['tile:lost', 'tile:order', 'tile:bestrisk', 'tile:over'].filter((k) => !R.ROLES[r].hide.includes(k)).length;

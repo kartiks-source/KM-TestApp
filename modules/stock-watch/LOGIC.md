@@ -539,13 +539,15 @@ Two chips on Products, each with a count line, **Copy SKUs** (one per line; vari
 | **Pause promotion** | stock ≤ 0, or days left < lead time (it can't be refilled before it runs out) | out now first, then fewest days left, then most ₹ a day | "42 to reorder · 14 slow": on the list with an order quantity / slow sellers |
 | **Push these** | overstocked (section 7c) | most ₹ stuck first | "₹2.60 L stuck" |
 
-Archived/untracked and no-stock-data rows are on neither. **Back in stock** on the Pause list = the marked order's ETA (SW-012), "Late · was due …" past it, a slow seller with no order quantity "Slow seller · not reordered" (it is off the reorder list, section 7, so an earliest date means nothing), else "Not ordered · earliest <today + lead time>". Push replaces the old *Overstock* chip (same products); *Overstock* moves to More….
+Archived/untracked and no-stock-data rows are on neither. **Back in stock** on the Pause list = the marked order's ETA (SW-012), "Late · was due …" past it, a slow seller with no order quantity "Slow seller · not reordered" (it is off the reorder list, section 7, so an earliest date means nothing), else "Not ordered · earliest <today + lead time>". Push replaces the old *Overstock* chip (same products) and is the only overstock list: the Overview's overstock tile opens it, and More… no longer has an *Overstock* duplicate (critic r2 S1; an old `over` filter opens Push these).
+
+**Headline leads with the decision** (critic r2 M1, ADR-0006): on Pause promotion the page title is "Pause promotion on N products", on Push these "Push N overstocked products" (N = the rows shown); other filters keep "Products". Pause promotion cards on the phone show **Back in stock** in the badge place, not the reorder status (the buyer's decision, not marketing's).
 
 **Why days left < lead time (not ≤ lead + buffer):** promotion spend should stop only when the shelf will empty before any new stock can land; the buffer is for ordering, not for ads.
 
 ### 15d. Slow-seller "Decide" bucket (SW-032)
 
-Products → More… → *Slow sellers to decide*: every **Slow seller** (section 7) with stock data, biggest ₹ first.
+Products → More… → *Slow sellers to decide*: every **Slow seller** (section 7) with stock data, biggest ₹ first. It is the only slow-seller filter (critic r2 S1: a separate *Slow sellers* option listed the same rows without the Decide column); its count leaves out decided items, which are listed under the table.
 
 | Case | Shows | ₹ |
 |---|---|---|

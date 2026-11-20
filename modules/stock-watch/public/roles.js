@@ -20,7 +20,7 @@
     'tile:lost': ['overview', '#view > .tiles.t4 > .tile[data-go="stockouts"]'],
     'tile:order': ['overview', '#view > .tiles.t4 > .tile[data-go="reorder"]'],
     'tile:bestrisk': ['overview', '#view > .tiles.t4 > .tile[data-filter="bestrisk"]'],
-    'tile:over': ['overview', '#view > .tiles.t4 > .tile[data-filter="over"]'],
+    'tile:over': ['overview', '#view > .tiles.t4 > .tile[data-filter="push"]'],   /* overstock tile → Products → Push these (critic r2 S1) */
     'list:today': ['overview', '#view > .grid2 > .panel:has(a[data-filter="today"])'],
     'list:losses': ['overview', '#view > .grid2 > .panel:has(a[data-filter="lost"])'],
     chart: ['overview', '#view > .panel.chart'],

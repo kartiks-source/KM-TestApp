@@ -79,7 +79,7 @@ test('Products: Pause / Push count line and Copy SKUs', opts, async () => {
 test('Products → Slow sellers to decide: Keep hides the row, Undo brings it back; no "₹0 lost"', opts, async () => {
   const pg = await page();
   await pg.goto(base + '/#products'); await pg.waitForSelector('#f-more');
-  await pg.selectOption('#f-more', 'decide'); await pg.waitForSelector('.tbl.desk [data-decide]');
+  await pg.selectOption('#f-more', 'slow'); await pg.waitForSelector('.tbl.desk [data-decide]');
   if (await pg.$('[data-more="products"][data-all]')) await pg.click('[data-more="products"][data-all]');
   const zeroDrop = (await (await fetch(base + '/api/report')).json()).decide.some((x) => x.kind === 'drop' && !x.value);   // depends on the demo draw
   if (zeroDrop) assert.ok(await pg.$$eval('.tbl.desk .dec.drop', (d) => d.some((x) => x.textContent.trim() === 'Don’t reorder?')), 'a drop row with nothing lost reads "Don’t reorder?"');
@@ -102,6 +102,36 @@ test('Phone 390: new small buttons are at least 44 px tall; sort label names the
   const hs = await pg.$$eval('.mktbar .btn.xs', (b) => b.map((x) => x.getBoundingClientRect().height));
   assert.ok(hs.length && hs.every((h) => h >= 44), `button heights ${hs}`);
   assert.equal(await pg.$eval('.phone select[data-msort] option[value=""]', (o) => o.textContent), 'Out first, then fewest days left');
+  assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no sideways scroll');
+  assert.deepEqual(pg.errors, []);
+  await pg.context().close();
+});
+
+test('Products filters: no duplicate lists; overstock tile opens Push these (critic r2 S1)', opts, async () => {
+  const pg = await page();
+  await pg.goto(base + '/#products'); await pg.waitForSelector('#f-more');
+  const chips = await pg.$$eval('[data-filter-products]', (b) => b.map((x) => x.dataset.filterProducts));
+  const more = await pg.$$eval('#f-more option', (o) => o.map((x) => x.value).filter(Boolean));
+  assert.equal(chips.length, 6); assert.equal(more.length, 6, `More… options ${more}`);
+  assert.ok(!more.includes('over') && !more.includes('decide'), 'Overstock = Push these; Slow sellers = Slow sellers to decide');
+  await pg.selectOption('#f-more', 'slow'); await pg.waitForSelector('.tbl.desk');
+  assert.ok((await heads(pg)).includes('Decide'), 'Slow sellers carries the Decide column');
+  await pg.goto(base + '/#overview'); await pg.waitForSelector('.tile.plum');
+  await pg.click('.tile.plum'); await pg.waitForSelector('[data-filter-products="push"].on');
+  assert.match(await pg.textContent('.headline h1'), /^Push [\d,]+ overstocked products$/);
+  assert.deepEqual(pg.errors, []);
+  await pg.context().close();
+});
+
+test('Marketing phone home leads with its decision: "Pause promotion on N products", cards lead with Back in stock (critic r2 M1)', opts, async () => {
+  const pg = await page(390, 844);
+  await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
+  const r = await (await fetch(base + '/api/report?days=30')).json();
+  const n = r.products.filter((p) => p.mkt === 'pause').length;
+  assert.equal(await pg.textContent('.headline h1'), `Pause promotion on ${n.toLocaleString('en-IN')} products`);
+  const card = await pg.$eval('.phone .mcard header', (h) => ({ st: h.querySelector('.st')?.textContent || '', order: !!h.querySelector('.st.g-today') }));
+  assert.match(card.st, /^(Lands|Late|Not ordered|Slow seller)/, `card badge: ${card.st}`);
+  assert.equal(card.order, false, 'no "Order today" badge on the marketing list');
   assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no sideways scroll');
   assert.deepEqual(pg.errors, []);
   await pg.context().close();
