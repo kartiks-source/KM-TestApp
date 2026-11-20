@@ -39,6 +39,7 @@ const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
+const sheetFetch = require('./src/sheet-fetch');   // Sheet sync: fenced redirects, size cap, timeout (SW-052)
 const tokenScopes = require('./src/token-scopes');   // refuse our own apps' write scopes; note Performity's (SW-051)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
@@ -221,11 +222,10 @@ async function syncSheet() {
   try {
     for (const [kind, url] of [['stock', s.sheetStockCsv], ['order', s.sheetOrderCsv]]) {
       if (!url) continue;
-      if (!/^https:\/\/docs\.google\.com\//.test(url)) throw new Error('Sheet links must be Google Sheets "Publish to web" CSV links');
-      const r = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
-      if (!r.ok) throw new Error(`${kind} sheet: HTTP ${r.status}`);
+      let text;   // SW-052: docs.google.com only, ≤ 3 redirects to Google hosts, ≤ 20 MB, 20 s (src/sheet-fetch.js)
+      try { text = await sheetFetch.sheetText(url); } catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       let parsed;
-      try { parsed = rows.fromCsv(await r.text(), kind === 'stock' ? 'stock' : 'order', { tzOffsetMin: s.tzOffsetMin, keepDays: KEEP_DAYS }); }
+      try { parsed = rows.fromCsv(text, kind === 'stock' ? 'stock' : 'order', { tzOffsetMin: s.tzOffsetMin, keepDays: KEEP_DAYS }); }
       catch (e) { throw new Error(`${kind} sheet: ${e.message}`); }
       if (kind === 'stock') out.stock = store.add('stock', parsed.rows, 'sheet'); else out.orders = store.add('orders', parsed.rows, 'sheet');
     }

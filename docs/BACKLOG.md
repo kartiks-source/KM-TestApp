@@ -203,6 +203,11 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: SEC-7, security idea.
 - Status: Done (`src/gql-guard.js`, `src/token-scopes.js`; `test/gql-guard.test.js`, `test/token-scopes.test.js`).
 
+**SW-052 · Sheet sync: manual redirects, host allow-list, size cap** (S · security)
+- Accept: redirects followed by hand (max 3), only to https `docs.google.com` / `*.googleusercontent.com`; body capped at 20 MB; 20 s timeout; tests.
+- Source: SEC-9.
+- Status: Done (`src/sheet-fetch.js`; `test/sheet-fetch.test.js`).
+
 ---
 
 ## Later
@@ -222,7 +227,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
 | SW-049 | One IANA time zone setting used by rows, engine and Sheet | S | builder | architect A12, SRE-12 |
 | SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
-| SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |
 | SW-054 | JSON logs + request log without query strings; boot config line | S | ops | SRE-11, SRE idea |
 | SW-055 | Single-instance lock file; KEEP_DAYS env; capacity warnings | S | ops | SRE ideas |

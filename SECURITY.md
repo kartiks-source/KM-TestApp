@@ -60,4 +60,6 @@ All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 
 | `POST /ingest/stock`, `POST /ingest/order` | add rows (ingest key, no login) | restore a backup; rotate the key if misused |
 | `GET /api/export/backup.json` (admin only), `GET /api/export/reorder.csv` | read-only downloads (the backup includes the ingest key) | — |
 
-Still open: SW-052 (Sheet sync redirects, host allow-list, size cap), SW-053 (non-root on Railway: the image sets `USER node`, but `RAILWAY_RUN_UID=0` runs it as root so it can write the volume; pinned image digest).
+Sheet sync (SW-052, `src/sheet-fetch.js`): the typed link must be `https://docs.google.com/…`; redirects are followed by hand, at most 3, only to https `docs.google.com` or `*.googleusercontent.com` (no other host, http, user:password@ or port); the body is capped at 20 MB and the whole fetch at 20 s. The link is never put in an error or log.
+
+Still open: SW-053 (non-root on Railway: the image sets `USER node`, but `RAILWAY_RUN_UID=0` runs it as root so it can write the volume; pinned image digest).
