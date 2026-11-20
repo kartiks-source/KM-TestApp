@@ -58,6 +58,8 @@ function list() {
 /** Performity only: read the brand list again (keys.brands caches it 10 minutes). Keeps the last good list on failure. */
 async function refresh({ fresh = false } = {}) {
   if (mode() !== 'tokenapi') return list();
+  const st = keys.status();
+  if (!st.ready) { lastError = `Missing Railway variables: ${st.missing.join(', ')}`; readCache(); return list(); }   // never send the key to a URL we refuse
   try {
     const b = await keys.brands({ fresh });
     const prev = new Map(readCache().map((s) => [s.id, s]));

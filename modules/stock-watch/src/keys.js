@@ -186,6 +186,8 @@ function pace(brand) {
 
 /** One call to the POC API, with the guide's error handling. Never loops on a wrong key. */
 async function pocCall(path, opts = {}, retried = false) {
+  const st = status();   // the key goes only to an https:// (or localhost) URL, and never empty (a wrong key counts towards an IP block)
+  if (st.source !== 'tokenapi' || !st.ready) throw new Error(`Missing Railway variables: ${st.missing.join(', ') || 'PERFORMITY_POC_API_URL'}`);
   if (Date.now() < holdUntil) throw new Error(holdWhy);
   await pace(opts.brand);
   if (Date.now() < holdUntil) throw new Error(holdWhy);

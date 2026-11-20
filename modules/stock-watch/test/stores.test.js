@@ -108,6 +108,22 @@ test('registry, Performity: a pinned brand is listed before the first read, so i
   assert.deepEqual(stores.list().map((s) => s.id), [B1]);
 }));
 
+test('Performity key never leaves for a URL we refuse (plain http, not localhost) or empty (SEC-1)', async () => {
+  const realFetch = global.fetch; let calls = 0;
+  global.fetch = async () => { calls++; return new Response('[]', { status: 200 }); };
+  try {
+    for (const vars of [{ PERFORMITY_POC_API_URL: 'http://poc.example.com', PERFORMITY_POC_API_KEY: 'k' }, { PERFORMITY_POC_API_URL: 'http://[::1]:5527', PERFORMITY_POC_API_KEY: 'k' }, { PERFORMITY_POC_API_URL: 'https://poc.example.com' }]) {
+      await withEnv(vars, async () => {
+        assert.equal(keys.status().ready, false);
+        await stores.refresh({ fresh: true });
+        assert.match(stores.info().lastError, /Missing Railway variables/);
+        await assert.rejects(keys.brands({ fresh: true }), /Missing Railway variables/);
+      })();
+    }
+    assert.equal(calls, 0, 'no request made');
+  } finally { global.fetch = realFetch; }
+});
+
 test('fresh token per store from the stand-in API: each brand its own token and shop; the shop is learned', async () => {
   const api = await standIn({ STAND_IN_BRANDS: '2', SHOPIFY_DEV_TOKEN: 'shpat_one', SHOP_DOMAIN: 'one.myshopify.com', SHOPIFY_DEV_TOKEN_2: 'shpat_two', SHOP_DOMAIN_2: 'two.myshopify.com' });
   try {
