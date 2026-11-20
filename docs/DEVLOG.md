@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · Sprint 3 · A-money
+stock-watch, branch `sprint3/A-money` (not merged, not deployed). SW-040 + SW-041, ADR-0016.
+- SW-040 suppliers: `suppliers.json` per store (side file, in backups/restore), `src/supplier-rules.js` (pure) + `src/suppliers.js` (store + routes `/api/suppliers`, `/map`, `/import`, `/api/export/suppliers.csv`; writes admin + same-site, logged). Engine: supplier lead time replaces the store's; qty up to MOQ then case pack, `packExtra` / `packExtraValue` (LOGIC §6c). Demo: invented vendors by product type + terms (demo VERSION sammsara-7). Reorder CSV `?supplier=` = one PO draft.
+- SW-041 budget: `src/budget.js` profit kept per ₹ on reorder rows, one cut line (LOGIC §6d, worked example); CSV `?budget=`.
+- UI (`public/money.js`, own script tag; small hooks in app.js): Reorder bar = Budget ₹ (per store, this browser) + List / By supplier + round-up ₹; cut line row, rows over budget dimmed, *Profit kept / ₹* column while a budget is on; By supplier = PO per supplier (terms, lines, pcs, ₹, Copy text, CSV); Data → Suppliers (terms, add supplier, set a SKU's supplier, CSV in/out). Mark ordered lands at today + the supplier's lead time.
+- Tests: `suppliers.test.js` (rules, store, routes incl. view 403 + cross-site 403), `budget.test.js` (rule, worked example, cut, `?budget=` route), `ui-money.test.js` (1440 + 390: cut line, dimmed rows, CSV link, Clear = same rows, PO drafts, 44 px targets, Data → Suppliers, no sideways scroll).
+- Checked: `npm test` green; ui-money 4/4 with Chrome. Open: `test/ui-money.test.js` to add to root `test:ui` (left out to avoid a package.json merge clash); budget not shared across the team.
+
 ## 2026-11-20 · final critic round 2 fixes
 stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, this entry; not pushed, not deployed).
 - L1 (P1): `planWithOrder` keeps the row's own status unless the PO covers the need (Ordered): 5/day, 10 in stock, 50 on order stayed Critical (was This week, off Order today). LOGIC §6b; onorder.test (fails on the old code).

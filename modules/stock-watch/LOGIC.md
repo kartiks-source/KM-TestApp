@@ -230,8 +230,8 @@ Settings: *Lead time* [7 days], *Cover after a reorder* [30 days], *Safety stock
 - **Order value** = order qty × **unit cost** (the cash you commit to the supplier). If a product has no unit cost, the average price paid is used instead, which overstates the cash.
 
 **When it can be wrong:**
-- **Lead time is one number for the whole store.** Products from slower suppliers need a manual top-up.
-- **Minimum order quantities and case packs aren't applied.** Round up to the supplier's pack size.
+- **Lead time is one number for the whole store** unless the product's supplier has its own (§6c, SW-040).
+- **Minimum order quantities and case packs** apply only when set for the supplier (§6c, SW-040).
 
 ---
 
@@ -272,6 +272,53 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 - **A short shipment of up to 10%** is treated as complete.
 - **One record per variant:** marking again replaces the previous order (add the quantities yourself if there are two open orders).
 - Overstock (§7c) doesn't count units on order.
+
+## 6c. Suppliers: lead time, minimum order, case pack (SW-040)
+
+Kept per store in `suppliers.json` (Data → Suppliers, admin only; CSV in and out). `src/supplier-rules.js`.
+
+**Which supplier a product has:** the SKU → supplier map when set (by SKU, else variant ID), else Shopify's product **vendor**. Names match whatever their case. No supplier = the store's lead time and no rounding.
+
+**Rule:**
+
+> lead time = the supplier's lead time when set, else the store's. It drives status, order qty, order-by date, "earliest" date, Pause list and excess stock for that product.
+> order qty = (the §6 qty, worked out with that lead time), then **up** to at least the MOQ, then **up** to whole case packs
+> extra pcs = rounded qty − the §6 qty; **extra cash** = extra pcs × unit cost (price when no cost)
+
+Example: the §6 qty is 7, MOQ 12, case pack 6 → 12 (at least 12, and 12 is 2 whole cases). Qty 13 → 18 (3 cases). At ₹450 a unit, 13 → 18 costs ₹2,250 more.
+
+Only an order that is due is rounded: a product with nothing to order is never pushed up to a minimum. "Mark ordered" lands on today + the supplier's lead time.
+
+**Why:** a supplier won't ship 7 when the case holds 6 or the minimum is 12; a PO that ignores this has to be fixed by hand every time. Rounding up (never down) keeps the stock-out protection; the bar under Reorder shows the cash the rounding adds ("₹X of the orders is minimum-order / case-pack round-up", `totals.packExtraValue`), and each PO draft shows its own.
+
+**What it costs:** extra cash tied up, at most one case (or up to the MOQ) per line. With slow sellers and a big MOQ that can be many days of stock: check the Order (pcs) number and the "+N" next to it.
+
+**By supplier (Reorder):** one PO draft per supplier from the rows in view with something to order (and inside the budget, §6d): lines, pcs, ₹ total at unit cost (Order cost), Copy (plain text, ready to paste in WhatsApp or email) and CSV (`/api/export/reorder.csv?supplier=<name>`, same columns as §15b). Rows with no supplier are grouped as "No supplier".
+
+**Demo:** invented vendors by product type, named after Indian craft towns, with invented terms (`src/demo.js`); they go when real data arrives unless an admin edited them.
+
+## 6d. Cash budget cut line (SW-041)
+
+On Reorder, optional **Budget ₹** (remembered per store, in this browser). Empty = the page exactly as before.
+
+**Rule** (`src/budget.js`, mirrored in `public/money.js`):
+
+> units short = min(order qty, max(0, sales/day × (lead time + days to last) − stock now − units on order that count))
+> profit kept = units short × (average price paid − unit cost)
+> profit kept per ₹ = profit kept ÷ order cost
+> rank the rows in view by profit kept per ₹ (high first; ties: more profit kept); add order costs top-down; the first row that doesn't fit and **every row after it** are over budget
+
+Unknown unit cost: margin = price × the store's average margin % (products with a cost), marked "est."; no product has a cost: price (₹ sales kept per ₹).
+
+**Worked example:** sells 2/day, lead 10 + lasts 20 days = 60 needed, 12 in stock → 48 short. Order 60 at ₹450 = ₹27,000. Price ₹1,000 → margin ₹550. Profit kept = 48 × 550 = ₹26,400 → **0.98 per ₹**. A product keeping ₹6,000 on a ₹3,000 order (2.00 per ₹) ranks above it.
+
+**On the page:** a *Profit kept / ₹* column, an amber line "Budget ₹X ends here · N below are over budget (₹Y)", rows below dimmed, and the bar: "N fit · ₹spent keeps ₹profit · M over budget (₹)". The CSV link carries `&budget=`, so the file (and each supplier's PO) has only the rows above the line. A column sort keeps rows dimmed but drops the line (the order is no longer the ranking).
+
+**Why:** cash is the limit for most D2C brands; when it can't cover the whole list, the order should buy the most profit per rupee first. One clear line (never "skip the big one, take a smaller one below") keeps it readable top-down; a buyer can still tick a row below the line.
+
+**Why safety days are left out of "units short":** the buffer is insurance, not expected sales; counting it would rank products with big buffers too high.
+
+**When it can be wrong:** the profit is for one cycle only (lead + days to last); it ignores that a stock-out of a best seller can also cost ad spend and ranking. Rows with nothing to order are not part of the cut.
 
 ## 7. Slow sellers
 
@@ -533,7 +580,7 @@ One plain sentence per row, the same text in the Reorder table, the phone card a
 
 `GET /api/export/reorder.csv?filter=today|week|ordered|all&q=…` gives the same rows the Reorder tab shows (tab + search on name and SKU), grouped by vendor A–Z (unknown vendor last), otherwise in page order. Columns: Vendor, Product, SKU, Variant ID, Order qty, Unit cost, Order value, Status (the page's labels: Order today / This week / Ordered), Why, Order by (date), Stock now, Sells per day, Days left, Sales lost (₹). The file name date is the store's date.
 
-- **Vendor** = Shopify `product.vendor`, read with the stock pull (newest stock row that has one; the catalog's when there is one). Blank for CSV, Sheet, Flow and demo data. Like type and cost, it updates when the variant's stock next changes (until the catalog snapshot, SW-002, is in).
+- **Vendor** = the product's supplier (§6c: SKU map, else Shopify `product.vendor`). `?supplier=<name>` = one supplier's lines to order; `?budget=<₹>` = only the rows above the cut line (§6d). Shopify vendor is read with the stock pull (newest stock row that has one; the catalog's when there is one). Blank for CSV, Sheet and Flow (demo data has invented vendors). Like type and cost, it updates when the variant's stock next changes (until the catalog snapshot, SW-002, is in).
 - **Unit cost** is blank when unknown; Order value then uses the average price paid (section 6), so check those lines.
 - Text cells starting with `= + - @`, tab or CR get a leading `'` so a spreadsheet never runs them.
 

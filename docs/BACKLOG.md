@@ -196,14 +196,26 @@ Goal: each role sees its one decision first, with less on screen than today. See
 
 ---
 
+## Sprint 3 · A-money
+
+**SW-040 · Supplier table + PO drafts by supplier** (M · builder)
+- Accept: per store suppliers (name, lead time, MOQ, case pack) + SKU → supplier (default Shopify vendor; demo has invented vendors); Data → Suppliers (admin) + CSV in/out; qty rounds up to MOQ then case pack (LOGIC §6c, extra cash shown); supplier lead time overrides the store's; Reorder → By supplier = one PO draft per supplier with Copy and CSV.
+- Status: Done (sprint3/A-money). Open: change a SKU's supplier from the product drawer (today: Data → Suppliers or CSV); one supplier per variant.
+- Source: product F2, idea "Supplier PO drafts".
+
+**SW-041 · Cash budget cut line** (M · product)
+- Accept: optional Budget ₹ on Reorder (per store); rows ranked by profit kept per ₹ (LOGIC §6d, worked example); one cut line, rows below dimmed and out of the PO CSV; empty budget = today's page.
+- Status: Done (sprint3/A-money). Open: the budget lives in this browser only (not shared with the team); no filling the leftover below the line (by design, ADR-0016).
+- Source: product F3.
+
+---
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
 
 | ID | Title | Size | Owner | Source |
 |---|---|---|---|---|
-| SW-040 | Supplier table (lead, MOQ, case pack) + PO drafts grouped by supplier | M | builder | product F2, idea "Supplier PO drafts" |
-| SW-041 | Cash budget cut line: rank by profit protected per ₹ | M | product | product F3 |
 | SW-042 | Stock-aware targets on groups + traffic lights | M | builder | DAWBU F5, product ideas |
 | SW-043 | Weekly review page with daily snapshots and tile deltas | M | product | product F5, idea "Weekly review" |
 | SW-044 | Paste-a-list lookup + saved lists | S | builder | DAWBU F9 |

@@ -100,7 +100,14 @@ UTF-8 with BOM, every cell quoted, text starting with `= + - @ tab CR` gets a le
 
 `Vendor, Product, SKU, Variant ID, Order qty, Unit cost, Order value, Status, Why, Order by, Stock now, Sells per day, Days left, Sales lost (₹)`
 
-*Order by* is a store date `YYYY-MM-DD`; *Unit cost* is blank when unknown; *Status* uses the page's labels.
+*Order by* is a store date `YYYY-MM-DD`; *Unit cost* is blank when unknown; *Status* uses the page's labels. *Vendor* = the product's supplier (SKU map, else Shopify vendor, SW-040). `?supplier=<name>` → file `po-<supplier>-<store>-YYYY-MM-DD.csv` with that supplier's lines to order only; `?budget=<₹>` keeps only the rows above the budget cut line (SW-041, LOGIC §6d).
+
+### Supplier CSVs (`GET /api/export/suppliers.csv`, `POST /api/suppliers/import`, SW-040)
+
+Same BOM and formula guard. Header names match whatever their case and spacing; `(…)` in a header is ignored.
+
+- Suppliers (`?kind=suppliers`): `Supplier, Lead time (days), MOQ (units), Case pack (units)`. Import also takes `Vendor`/`Name`, `Lead`/`Lead days`, `Minimum order`, `Pack`/`Case`/`Pack size`. Blank = not set. Rows merge into the table; a row with every term blank removes that supplier's terms. A bad term skips the row with a reason (line number).
+- Product → supplier (`?kind=map`): `SKU, Variant ID, Product, Supplier, From` (`From` = `set here` or `Shopify vendor`). Import needs `SKU` (or `Variant ID`) and `Supplier`; blank Supplier = back to the Shopify vendor.
 
 ### Browser-built CSVs (`public/app.js`, same BOM and formula guard)
 
@@ -118,6 +125,8 @@ Nothing here is a secret or a number; clearing site data only resets choices.
 | `sw-store` | `localStorage` | the same store id | the store picker; the page's default when the address has no `?store=` |
 | `sw-role` | `localStorage` | a role key (`ceo`, `ops`, …) or absent = All (the default) | the role list under the store pill, Data → Show me, `/?role=` (SW-020) |
 | `sw-cols-off` | `localStorage` | `{ reorder: ['outs', …], products: [...] }`: optional columns **unticked** (every optional column is on by default; replaces the old opt-in `sw-cols`, which is ignored) | Columns… on Reorder / Products |
+| `sw-budget:<store id>` | `localStorage` | a whole ₹ amount, or absent = no budget | Reorder → Budget ₹ (SW-041); per store, this browser only |
+| `sw-polens` | `localStorage` | `supplier`, or absent = List | Reorder → List / By supplier (SW-040) |
 | `sw-colw` | `localStorage` | `{ <table>: { <column>: px } }`: dragged column widths | dragging a header edge; double-click resets |
 
 ## Files in `DATA_DIR` (`/data` on Railway)
@@ -131,9 +140,10 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | `store.json.corrupt-<time>` | `src/store.js` | a copy of an unreadable store, left for a human | no |
 | `onorder.json` | `src/onorder.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ [variantId]: { qty, eta, at, by } }`: units on order, landing time (ms), when marked (ms), who (≤ 40 chars or null). Records due more than 60 days ago are dropped | yes, as `sideFiles['onorder.json']` (SW-005) |
 | `decisions.json` | `src/decide.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ [variantId]: { d: 'keep'\|'drop'\|'clear', base, at } }`: base = sales per day when decided | yes, as `sideFiles['decisions.json']` (SW-005) |
-| `onorder.json.bak`, `decisions.json.bak`, `….corrupt-<time>` | `src/sidefile.js` | the previous good save (used when the file can't be read), and a copy of an unreadable file left for a human; with neither good, the app refuses to start (critic r2 X1) | no |
+| `suppliers.json` | `src/suppliers.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ suppliers: { <name, lower case>: { name, leadDays, moq, pack, demo? } }, map: { <SKU or variant ID>: <supplier name> } }` (SW-040). Only suppliers with a term are stored; `demo: true` = seeded with the demo, dropped when real data arrives unless edited | yes, as `sideFiles['suppliers.json']` |
+| `onorder.json.bak`, `decisions.json.bak`, `suppliers.json.bak`, `….corrupt-<time>` | `src/sidefile.js` | the previous good save (used when the file can't be read), and a copy of an unreadable file left for a human; with neither good, the app refuses to start (critic r2 X1) | no |
 | `catalog.json` | `src/catalog.js` (temp + rename) | `{ collections: { [collectionId]: { title, productIds[] } }, collectionsAt, pending, lastError, variants, variantsAt }`: Shopify collections cache for Group by, re-read daily; `pending` = a resumable read in progress | no (rebuilt from Shopify within a day) |
-| `backups/store-YYYYMMDD.json`, `backups/store-YYYYMMDD-HHMMSS-<why>.json` | `src/backup.js` | copies of `store.json` plus `sideFiles: { 'onorder.json', 'decisions.json' }` (`why` = `before-clear`, `before-demo`, `before-restore`); newest 14 of each kind | — |
+| `backups/store-YYYYMMDD.json`, `backups/store-YYYYMMDD-HHMMSS-<why>.json` | `src/backup.js` | copies of `store.json` plus `sideFiles: { 'onorder.json', 'decisions.json', 'suppliers.json' }` (`why` = `before-clear`, `before-demo`, `before-restore`); newest 14 of each kind | — |
 | `restore.json` | a human | a `store.json` to put in place at the next start (`docs/RUNBOOK.md`) | — |
 | `.migrated-from-data-dir.json` | `src/migrate.js`, the home store only; its presence in any store folder means the move is done for good | `{ from: 'DATA_DIR', id, at, files: [{ path, sha256 }] }`: the old single-store files moved here, with their hashes (originals are deleted only while they still match) | no |
 | **top of `DATA_DIR`:** `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key, for every store | no (a new one signs everyone out) |

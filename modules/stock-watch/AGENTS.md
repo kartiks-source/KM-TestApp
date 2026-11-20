@@ -53,6 +53,10 @@ Google Sheet CSV / upload ───┘
 | `src/keys.js` | where the Shopify key comes from: Performity POC API, Azure Key Vault or Railway variables; `access(storeId)`, caches per store; Performity calls paced (≥ 2.1 s, token calls per brand ≥ 6.1 s) |
 | `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
+| `src/supplier-rules.js` | SW-040, pure: which supplier a variant has (SKU map, else Shopify vendor), `roundOrder` (up to MOQ, then case pack), supplier CSV in/out (LOGIC.md §6c) |
+| `src/suppliers.js` | SW-040: `suppliers.json` per store (side file, in backups), demo terms seeded / cleared, routes `/api/suppliers*`, `/api/export/suppliers.csv` |
+| `src/budget.js` | SW-041, pure: profit kept per ₹ on reorder rows (`annotate`, called by `helpers.enrich`), `rank` + one cut line `cut`; reorder CSV `?budget=` (LOGIC.md §6d) |
+| `public/money.js` | Sprint 3 A-money UI, own script tag: Data → Suppliers, Reorder List / By supplier (PO draft per supplier, Copy + CSV), Budget ₹ (cut line, rows over budget dimmed). Hooks in app.js: `SW_MONEY.init/rows/cols/bar/qs/poView/after/panel`. Browser test `test/ui-money.test.js` |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
 | `src/digest.js` | morning digest text per role, pure (SW-028) |
@@ -115,6 +119,8 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - 1.0.0-rc.1 (finish sprints, last gaps, DEVLOG 2026-11-20): version + SHA on `/health`, `/status`, footer (SW-056); `schemaVersion: 1` (SW-047); group-row sparks (SW-021); demo → live clears Mark ordered + decisions on every path, dead import checkbox gone (SW-007); digest settings in the change log (SW-029); ui-helpers at 360x740 too. CI: job `test` (npm test, Node 20/22) + job `ui` (npm run test:ui, smoke, roles smoke, screenshots artifact).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
+
+- Sprint 3 A-money (branch `sprint3/A-money`): SW-040 suppliers (terms, SKU map, MOQ / case-pack rounding, supplier lead time, By supplier PO drafts) and SW-041 Budget ₹ cut line. ADR-0016. `test/ui-money.test.js` is not yet in the root `test:ui` script (module `npm test` runs it, skipped without Playwright).
 
 ## Next
 
