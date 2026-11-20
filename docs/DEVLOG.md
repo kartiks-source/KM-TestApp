@@ -6,6 +6,9 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+<!-- devlog archive links (scripts/rotate-devlog.js) -->
+Older entries: [2026-11](devlog/2026-11.md)
+
 ## 2026-11-20 · roles off, brand switch only (1.1.2)
 stock-watch 1.1.2, on `main` (not pushed, not deployed). User: "remove roles, just keep it brand switch".
 - Store pill only switches brands (one brand: plain name, doesn't open); phone store bar the same. No role menu, no *Show me* on Data. Everyone sees everything.
@@ -13,6 +16,14 @@ stock-watch 1.1.2, on `main` (not pushed, not deployed). User: "remove roles, ju
 - Tests: role-only browser tests deleted (Marketing phone home, phone store bar with a role); mixed ones keep their non-role checks; new: `?role=ceo` + stale `sw-role` → everything shown, both dropped. `test/smoke/roles-smoke.js` deleted (root `test:smoke`, CI step).
 - Open: digest links still carry `?role=` (now just open the default view); digest content per role unchanged.
 - Tests: npm test 391 pass (36 browser skips); test:ui 36/36; smoke 30/30 (roles smoke gone).
+
+## 2026-11-20 · return % per product
+stock-watch, branch `feature/returns` (not pushed, not deployed). SW-064, LOGIC §9e.
+- Pull: order lines keep `ordered` (Shopify line `quantity`) beside `qty` (`currentQuantity`); fully refunded lines kept with qty 0 (engine leaves them out of sales; history check skips them). `shopify.orderFields` → one 60-day re-read, like the GST one.
+- Engine: per product `unitsOrdered`, `unitsReturned`, `returnPct` (null under 5 ordered), `refundValue` (₹ ex GST), by order date; `totals` same + `highReturns`. Demand, ₹ sold, ₹ lost unchanged.
+- Page: Products column Returns % (optional, amber 15%+, before Units sold so it shows at 1440), chip High returns (only when one qualifies), drawer line "Returned: x% (a of b) · ₹ refunded", phone cards "x% returned" at 15%+. Overview unchanged.
+- Demo: returns on its own random stream (sales unchanged), three busy products 25–80% of lines; VERSION sammsara-8.
+- Open: `test/ui-helpers.test.js` expects 6 Products chips, now 7 (not touched: another branch edits it); check against ShopifyQL `FROM sales SHOW quantity_ordered, quantity_returned` on the live store. Shared dev log page not updated from here.
 
 ## 2026-11-20 · UI + mobile fixes (1.1.1)
 stock-watch 1.1.1, on `main` (not pushed, not deployed). Fixes from the UI, simplicity and mobile critics, checked on a copy of the live Sammsara data at 1440 and 360.
@@ -127,19 +138,3 @@ stock-watch 1.0.0-rc.1, on `main` (cdcf303 + this entry; not pushed, not deploye
 - Tests: version (4), store schema (4) + demo→live per path (3), backup newer-schema, digest log (2 + route), groups spark (2), ui-helpers 390+360 loops, group sparks 1280/1440/1920/390/360, footer + no checkbox; docs: CHANGELOG top = package version.
 - Checked: `npm test` 250 pass / 20 skip (browser); `test:ui` 20/20 (`PLAYWRIGHT_CHANNEL=chrome`); `test:smoke` 30/30 + roles all pass.
 - Open: five critics not run on this cycle; shared dev log page row not added; git tag `v1.0.0-rc.1` at deploy (SW-056); Dockerfile `BUILD_SHA*` glob not built locally (no docker here). Group rose mark shows under most weeks for big groups (LOGIC §9a limit).
-
-## 2026-11-20 · multi-store critic round
-stock-watch, branch `feature/multistore` (92e6c02, a32cf51, 82ebbfe + this entry; not pushed, not deployed).
-- ISO-1 (P1): migration is once per `DATA_DIR` (a marker in any `stores/<id>/` = done for good) and goes to the store `SHOPIFY_STORE` / `PERFORMITY_BRAND_ID` names, else the first (`stores.home()`). A later top-level `restore.json` or a store-list change no longer moves files into another store or crash-loops the start.
-- SEC-1 (P1): `stores.refresh()` and `keys.pocCall()` make no call unless `keys.status().ready` (https or localhost URL, key set): the brand list had sent `X-Api-Key` over plain http / empty.
-- UI-1..UI-6: dot classes `s-*` (`.stale` banner clash); menu `max-height` + scroll; ellipsis on long names + pill title; range never shrinks, role name one line; phone store bar for one store, drawer names the store; picker re-reads `/api/stores` every minute. Smoke: sign-in waits for the first page (pre-existing flake: goto aborted its report call).
-- Checked: `npm test` 233 pass / 13 skip; `test:ui` 18/18; `smoke.js` 30/30 ×3; `roles-smoke.js` all pass.
-
-## 2026-11-20 · multi-store + show everything by default
-stock-watch, branch `feature/multistore` (5ce0981, 6d5454d, e8f6fba merge of main, e6714bc, 0c27383, d3bfab1 + this entry; not pushed, not deployed). Resumed after the first builder was killed mid-UI.
-- Kept from the killed run: server side (ADR-0015: registry, `scope.run`, per-store folders, crash-safe migration, `?store=` + `sw_store` cookie, 404 on bad ids, one pull queue, per-store alerts/digest/CSV names, `/status` totals) and the half-done UI (`public/stores.js`, app.js store calls). Fixed in it: a comment had swallowed `state.q` (every page threw on load); ARIA `menuitemradio` without a menu → plain buttons with `aria-current`; picker / store bar / dot CSS was missing; duplicate doc comment in `server.js` freshness.
-- Store picker: pill menu with ok / stale / error dot + one status line per store, phone store bar (44 px) under the top bar, keyboard (Enter, arrows, Esc back to the pill), `?store=` + localStorage `sw-store` + cookie, reload on the same page; one store = plain name. Test `test/ui-stores.test.js` (in `test:ui`).
-- Show everything by default (ADR-0006 amended): role All default, Reorder opens on All, optional columns on (`sw-cols-off` remembers unticks), the right-most optional columns step aside with a note when they don't fit (never a sideways scroll 1280–1920), every Overview panel. `ui-helpers` tests updated (Reorder default tab, columns test rewritten); `roles.test.js` ALL.
-- Docs: LOGIC §9 table fit, §16 default, §18 picker; README; module AGENTS (files, status); API, FORMATS (browser keys), SECURITY (`sw_store` row), RUNBOOK (picker, local two-store check); CHANGELOG 0.10.0; BACKLOG SW-062 (per-store access).
-- Checked: `npm test` 230 pass / 13 skip (browser); `test:ui` 13/13 (Playwright 1.65.1 from npx cache, `PLAYWRIGHT_CHANNEL=chrome`); `smoke.js` 30/30; `roles-smoke.js` all pass at 5 widths. Stand-in API with `STAND_IN_BRANDS=2`: two uuid stores, red dots with the reason ("no connected Shopify store"). Screenshots of the picker at 1440 and 390 (demo and stand-in) kept outside the repo.
-- Open: five critics not run on this branch; shared dev log page row not added from this worktree; merge to `main` after critics. On Railway the first start moves today's demo data into `sammsara-demo`.

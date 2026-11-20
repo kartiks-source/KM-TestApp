@@ -219,6 +219,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .plumv { color: var(--plum); font-weight: 600; }
 .more { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 10px 0 2px; font-size: 13px; }
 .dtiles { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+.dtiles .rtile { grid-column: 1 / -1; padding: 6px 14px; } .rtile span { font-size: 13px; color: var(--ink); } .rtile b { font-size: 13px; letter-spacing: 0; }   /* SW-064: one line, under the four tiles */
 .trc.big { gap: 12px; } .small { font-size: 12.5px; margin: 0; }
 .catm { color: var(--faint); font-size: 12px; }
 #view.calm .spark .sb { animation: none; }

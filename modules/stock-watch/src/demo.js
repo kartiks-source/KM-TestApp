@@ -16,7 +16,7 @@ const { HOUR, DAY } = require('./engine');
 const TZ = require('./tz');   // the demo brand is in India
 const CATALOG = require('./demo-catalog.json').items;
 
-const VERSION = 'sammsara-7';           // bump to make running servers rebuild their demo data (7: vendors, SW-040)
+const VERSION = 'sammsara-8';           // bump to make running servers rebuild their demo data (7: vendors, SW-040; 8: returns, SW-064)
 const STORE_NAME = 'Sammsara (demo)';
 /* the demo stores shown when no Shopify key is set (multi-store, ADR-0015): id, name, generate() options */
 const STORES = [
@@ -74,6 +74,19 @@ function pickStyle(r) { let x = r(); for (const [s, p] of STYLES) { if ((x -= p)
  * A second demo store (multi-store, ADR-0015): same public catalog, every `every`-th product left out, prices
  * × priceMix, its own seed, so its numbers clearly differ from the first. Defaults give the first demo, unchanged.
  */
+/* Returns (SW-064): every line gets `ordered`; some lines had a unit sent back (ordered = qty + 1, so sales stay as they
+ * were). Furniture comes back more than décor, and three well-selling products a lot (20–45%), so the Returns % column
+ * and the High returns chip have something to show. Its own random stream: the rest of the demo is unchanged. */
+function addReturns(items, orders, seed) {
+  const r = rng(seed + 101);
+  const units = new Map();
+  for (const o of orders) units.set(o.variantId, (units.get(o.variantId) || 0) + o.qty);
+  const rate = new Map(items.map((it) => [it.id, FURNITURE.test(it.type) ? 0.07 : 0.025]));
+  const busy = items.filter((it) => (units.get(it.id) || 0) >= 20).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (let k = 0; k < 3 && busy.length; k++) rate.set(busy.splice(Math.floor(r() * busy.length), 1)[0].id, [0.25, 0.4, 0.8][k]);
+  for (const o of orders) o.ordered = o.qty + (r() < (rate.get(o.variantId) || 0) ? 1 : 0);
+}
+
 function generate({ now = Date.now(), days = 60, seed = 11, priceMix = 1, every = 0 } = {}) {
   const r = rng(seed);
   const start = Math.floor((now - days * DAY) / HOUR) * HOUR;
@@ -144,6 +157,7 @@ function generate({ now = Date.now(), days = 60, seed = 11, priceMix = 1, every 
       }
     }
   }
+  addReturns(items, orders, seed);
   stock.sort((a, b) => a.t - b.t); orders.sort((a, b) => a.t - b.t);
   return { stock, orders };
 }

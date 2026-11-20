@@ -65,3 +65,18 @@ test('pull: orders read before 1.1.1 are read again once from the backfill, then
   assert.ok(sinces[1] > 12345, 'next pull: from the new cursor');
   assert.equal(scope.run('alpha', () => store.load().shopify.priceBasis), 'exTax');
 });
+
+/* SW-064: lines read before `ordered` existed: the 60-day backfill is read once more so history gets it. */
+test('pull: orders read before SW-064 (no orderFields) are read again once from the backfill', async () => {
+  const store = require('../src/store');
+  const sinces = [];
+  const prev = S.pullOrders;
+  S.pullOrders = async (since, opts) => { sinces.push(since); return prev(since, opts); };
+  scope.run('alpha', () => store.setShopify({ priceBasis: 'exTax', orderFields: undefined, ordersCursor: 12345 }));
+  await syncShopify('alpha');
+  await syncShopify('alpha');
+  S.pullOrders = prev;
+  assert.equal(sinces[0], null, 'first pull after the upgrade: full backfill');
+  assert.ok(sinces[1] > 12345, 'then incremental');
+  assert.equal(scope.run('alpha', () => store.load().shopify.orderFields), 'ordered');
+});

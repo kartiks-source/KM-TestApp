@@ -137,3 +137,14 @@ test('keys: client ID + secret are swapped for a 24-hour token, reused until nea
     await assert.rejects(K.access('brand'), /same Shopify organisation/);
   } finally { process.env = keep; global.fetch = realFetch; K.clear(); }
 });
+
+/* SW-064: each line keeps Shopify's original `quantity` as `ordered`; ordered − currentQuantity = units returned. */
+test('orders: lines keep `ordered`; a fully refunded line stays with qty 0 so its return counts', () => {
+  const o = { name: '#1002', createdAt: '2026-11-18T10:00:00Z', test: false, cancelledAt: null, taxesIncluded: true };
+  const line = (id, qty, cur) => ({ id: `gid://shopify/LineItem/${id}`, quantity: qty, currentQuantity: cur, sku: 'A', variant: { id: 'gid://shopify/ProductVariant/9' },
+    discountedUnitPriceAfterAllDiscountsSet: { shopMoney: { amount: '1180' } }, taxLines: [{ priceSet: { shopMoney: { amount: String(180 * qty) } } }] });
+  const rows = S.orderRows(o, [line(1, 3, 2), line(2, 1, 0)]);
+  assert.deepEqual(rows.map((r) => [r.line, r.qty, r.ordered, r.price]), [['1', 2, 3, 1000], ['2', 0, 1, 1000]]);   // price ex GST
+  assert.deepEqual(S.orderRows({ ...o, cancelledAt: '2026-11-19T00:00:00Z' }, [line(1, 3, 2)]), [], 'cancelled orders stay out');
+  assert.equal(S.ORDER_FIELDS, 'ordered');
+});

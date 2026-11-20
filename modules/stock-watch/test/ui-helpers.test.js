@@ -118,7 +118,7 @@ test('Products filters: no duplicate lists; overstock tile opens Push these (cri
   await pg.goto(base + '/#products'); await pg.waitForSelector('#f-more');
   const chips = await pg.$$eval('[data-filter-products]', (b) => b.map((x) => x.dataset.filterProducts));
   const more = await pg.$$eval('#f-more option', (o) => o.map((x) => x.value).filter(Boolean));
-  assert.equal(chips.length, 6); assert.equal(more.length, 6, `More… options ${more}`);
+  assert.equal(chips.length, 7);   // + High returns (SW-064) assert.equal(more.length, 6, `More… options ${more}`);
   assert.ok(!more.includes('over') && !more.includes('decide'), 'Overstock = Push these; Slow sellers = Slow sellers to decide');
   await pg.selectOption('#f-more', 'slow'); await pg.waitForSelector('.tbl.desk');
   assert.ok((await heads(pg)).includes('Decide'), 'Slow sellers carries the Decide column');

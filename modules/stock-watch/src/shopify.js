@@ -12,6 +12,8 @@
  *               What counts as a sale: not cancelled, not a test order, units net of refunds and
  *               removals (currentQuantity), price after line AND order-level discounts, without the tax
  *               (GST) inside it when the store's prices include tax (= Shopify's Net sales, LOGIC.md §5).
+ *               Each line also keeps `ordered` (Shopify's original `quantity`): ordered − currentQuantity = units
+ *               refunded, returned or removed (SW-064, LOGIC.md §9e). A fully refunded line is kept with qty 0.
  *
  * Paced by Shopify's own cost budget: waits whenever less than half of it is left,
  * so the store's other apps are never starved.
@@ -75,6 +77,8 @@ const STOCK_Q = `query Stock($after: String) {
 const LINE_FIELDS = 'id quantity currentQuantity sku variant { id } discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount } } taxLines { priceSet { shopMoney { amount } } }';
 /** Stored order prices are ex tax since 1.1.1. A store whose orders were read before (tax-inclusive) re-reads them once. */
 const PRICE_BASIS = 'exTax';
+/** Stored order lines carry `ordered` since SW-064. A store whose lines were read before re-reads them once (same as PRICE_BASIS). */
+const ORDER_FIELDS = 'ordered';
 const ORDERS_Q = `query Orders($after: String, $q: String) {
   orders(first: 40, after: $after, query: $q, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
@@ -140,14 +144,18 @@ function netUnitPrice(order, l) {
   return Math.max(0, Math.round((paid - tax / q) * 100) / 100);
 }
 
-/** An order → its sale lines. Cancelled and test orders have none; fully refunded lines drop out. */
+/** An order → its sale lines. Cancelled and test orders have none. qty = units kept (currentQuantity); ordered = units
+ *  first ordered (quantity), so ordered − qty = refunded / returned / removed (SW-064). A fully refunded line stays, qty 0,
+ *  so its return counts; the engine leaves qty-0 lines out of sales. */
 function orderRows(order, lines) {
   if (order.test || order.cancelledAt) return [];
   const t = Date.parse(order.createdAt);
-  return lines.filter((l) => l.variant?.id && l.currentQuantity > 0).map((l) => ({
-    t, order: order.name, line: String(l.id || '').replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '',
-    qty: l.currentQuantity, price: netUnitPrice(order, l),
-  }));
+  return lines.filter((l) => l.variant?.id && (l.currentQuantity > 0 || l.quantity > 0)).map((l) => {
+    const qty = Math.max(0, Number(l.currentQuantity) || 0);
+    const r = { t, order: order.name, line: String(l.id || '').replace(/^gid:\/\/shopify\/LineItem\//, ''), variantId: vid(l.variant.id), sku: l.sku || '', qty, price: netUnitPrice(order, l) };
+    if (Number(l.quantity) > 0) r.ordered = Math.max(qty, Number(l.quantity));
+    return r;
+  });
 }
 
 async function pullStock(lastQty, { q = gql, now = Date.now() } = {}) {
@@ -192,4 +200,4 @@ async function pullOrders(since, { q = gql, now = Date.now(), onPage = () => {} 
   return { total, cursor };
 }
 
-module.exports = { gql, assertReadOnly, diffStock, orderRows, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };
+module.exports = { gql, assertReadOnly, diffStock, orderRows, netUnitPrice, pullStock, pullOrders, API_VERSION, PRICE_BASIS, ORDER_FIELDS, SCOPES: ['read_products', 'read_inventory', 'read_orders'] };

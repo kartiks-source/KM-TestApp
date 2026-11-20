@@ -4,6 +4,8 @@ User-facing changes, newest first. Semver: minor when a number's rule changes or
 
 ## 1.1.2 · 2026-11-20
 
+- Products: Returns % per product (units refunded/returned ÷ ordered, by order date), High returns chip, drawer 'Returned' line; one-time 60-day order re-read to pick up units ordered.
+
 - Roles removed from the menu: the store pill only switches brands; everyone sees everything.
 
 ## 1.1.1 · 2026-11-20 · number validation fixes
