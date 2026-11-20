@@ -628,3 +628,12 @@ No number changes with the store count: every rule above runs on **one store's r
 - **`/status`** (uptime monitor): stale or failing when **any** store is; `ageMin` is the oldest store's; row counts and sizes are summed. No store names or ids.
 - Why one folder per store and not a store id on every row: a missed filter would mix two brands' numbers; a folder can't be mixed by a missed filter. Considered: one deployment per store (no picker, N passwords). Kept as the fallback for a store that outgrows ADR-0003.
 - When it can be wrong: with many brands a full round of pulls can take longer than 15 minutes, so the last store's data is older than the first's (its dot turns amber past 45 minutes). Renaming a brand in Performity changes the name here only if no name was set under Data & settings.
+
+### 18a. Per-store access (SW-062, ADR-0016, `src/people.js`)
+
+No number changes. Who can open which store:
+- **Owner** = `ADMIN_PASSWORD`: every store, everything, and the only one who sees Data → **People**. `VIEW_PASSWORD`: every store, read-only (§13). Both as before.
+- **A person** (made by the owner under People): name, **Admin** (sees and changes their stores: settings, Mark ordered, decisions, digest, imports, backup export) or **Viewer** (sees only, as `VIEW_PASSWORD`), and one or more stores. Their password is made by the app (29 characters), shown **once**, and kept only as a hash; **New password** replaces it, **Remove** deletes the person. Both sign them out at once; role and store changes apply on their next click.
+- A person's page: the picker lists only their stores; the store in the address must be one of theirs (else "This store isn’t open to your sign-in", 403); a store remembered on the browser that isn't theirs opens their first store instead. The digest, CSV and backup are per store, so the same rule covers them.
+- The change log (§13) names the person ("Meera"), not the role.
+- Why: one brand's people must not see another brand's sales (multi-store spec, 20 Nov). Considered: one password per store (no names, can't revoke one person), Performity SSO (SW-060, not available yet). Limits: no email or self-service reset (the owner hands out a new password); the morning digest webhooks are still per store and set on the server, not per person.

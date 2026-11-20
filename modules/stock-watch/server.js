@@ -40,6 +40,7 @@ const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
 const sheetFetch = require('./src/sheet-fetch');   // Sheet sync: fenced redirects, size cap, timeout (SW-052)
+const people = require('./src/people');   // per-store sign-ins made by the owner (SW-062, ADR-0016)
 const tokenScopes = require('./src/token-scopes');   // refuse our own apps' write scopes; note Performity's (SW-051)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
@@ -99,9 +100,11 @@ let sessionKey = null;
 const keyOf = () => sessionKey || (sessionKey = crypto.createHmac('sha256', loadSecret()).update('password|' + crypto.createHash('sha256').update(PASSWORD).digest('hex')).digest());
 const sign = (exp) => crypto.createHmac('sha256', keyOf()).update('session|' + exp).digest('base64url');
 const cookieOf = (req, name) => { const m = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`)); return m ? m[1] : ''; };
-const sessionRole = (req) => access.cookieRole(cookieOf(req, COOKIE), sign, safeEqual, { view: VIEW_PASSWORD });
-/** Who made a change, for the settings log: the role, plus "script" when it came with Basic auth. */
-const whoOf = (req, role) => (req.headers.authorization && !sessionRole(req) ? `${role} (script)` : role);
+const personRole = (p) => (p.role === 'admin' ? access.ADMIN : access.VIEW);   // SW-062: a person's sign-in sets req.person
+const personSession = (req) => { const p = people.fromCookie(cookieOf(req, COOKIE), sign, safeEqual); if (!p) return null; req.person = p; return personRole(p); };
+const sessionRole = (req) => access.cookieRole(cookieOf(req, COOKIE), sign, safeEqual, { view: VIEW_PASSWORD }) || personSession(req);
+/** Who made a change, for the settings log: the role (a person: their name), plus "script" when it came with Basic auth. */
+const whoOf = (req, role) => { const who = req.person ? req.person.name : role; return req.headers.authorization && !sessionRole(req) ? `${who} (script)` : who; };
 const secure = (req) => req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
 /** Client IP: the last X-Forwarded-For hop (added by Railway's proxy; earlier hops are whatever the client sent), else the socket. */
 const ipOf = (req) => { const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); return hops.length ? hops[hops.length - 1] : String(req.socket.remoteAddress || ''); };
@@ -142,6 +145,8 @@ function auth(req) {
   const pass = i >= 0 ? raw.slice(i + 1) : '';   // everything after the first ":" (passwords may contain ":")
   const role = access.roleForPassword(pass, PASSWORDS, safeEqual);
   if (role) { limiter.ok(ip); return role; }
+  const person = people.find(pass);   // SW-062
+  if (person) { limiter.ok(ip); req.person = person; return personRole(person); }
   limiter.fail(ip); return block ? 'limited' : 'bad';
 }
 const TOO_MANY = 'Too many wrong passwords. Wait 15 minutes.';
@@ -336,8 +341,8 @@ function storeState() {
   return { lastSync: d.shopify.lastSync || d.lastSync || null, lastError: err, stale: f.stale, running: pulls.has(scope.id()), source: d.source, state: err ? 'error' : f.stale ? 'stale' : 'ok' };
 }
 /** GET /api/stores: every store with its name and status (a store that can't be opened shows as an error). */
-function storeList() {
-  return stores.list().map((s) => {
+function storeList(only = () => true) {
+  return stores.list().filter((s) => only(s.id)).map((s) => {
     let status;
     try { status = inStore(s.id, storeState); } catch (e) { status = { lastSync: null, lastError: e.message, stale: false, running: false, source: null, state: 'error' }; }
     let name = s.name; try { name = inStore(s.id, () => storeName(s.id)); } catch { /* keep the registry's */ }
@@ -419,11 +424,16 @@ async function api(req, res, url) {
   if (!signedIn(a)) return send(res, 401, { ok: false, error: 'Login needed' });
   const role = a;
   if (stores.mode() === 'tokenapi' && !stores.list().length) await stores.refresh();   // first request before the first brand list
-  if (p === '/api/stores' && req.method === 'GET') {
-    const pk = stores.pick(asked, cookieOf(req, STORE_COOKIE));
-    return send(res, 200, { ok: true, stores: storeList(), current: pk.id || null, registry: stores.info() });
+  const person = req.person || null;   // SW-062: a person sees only their stores; the owner and VIEW_PASSWORD see every store
+  if (p === '/api/people' || p.startsWith('/api/people/')) {
+    const r = await people.handle(req, p, readBody, { owner: role === access.ADMIN && !person, signIn: !!PASSWORD, stores: () => storeList().map((s) => ({ id: s.id, name: s.name })) });
+    return send(res, r.code, r.body);
   }
-  const pk = stores.pick(asked, cookieOf(req, STORE_COOKIE));
+  if (p === '/api/stores' && req.method === 'GET') {
+    const pk = people.pick(stores, asked, cookieOf(req, STORE_COOKIE), person);
+    return send(res, 200, { ok: true, stores: storeList((sid) => people.allows(person, sid)), current: pk.id || null, registry: stores.info() });
+  }
+  const pk = people.pick(stores, asked, cookieOf(req, STORE_COOKIE), person);
   if (pk.error) return fail(res, pk.error, pk.message);
   return inStore(pk.id, () => storeApi(req, res, url, role, pk.id));
 }
@@ -593,13 +603,16 @@ const server = http.createServer(async (req, res) => {
       if (block === 'ip') return send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' });
       const pass = new URLSearchParams(await readBody(req, 4096)).get('password') || '';
       const role = access.roleForPassword(pass, PASSWORDS, safeEqual);
-      if (!role) {
+      const person = role ? null : people.find(pass);   // SW-062: a person's own password
+      if (!role && !person) {
         limiter.fail(ip);
         return block ? send(res, 429, loginPage(TOO_MANY), 'text/html; charset=utf-8', { 'retry-after': '900' }) : send(res, 401, loginPage('Wrong password.'), 'text/html; charset=utf-8');
       }
       limiter.ok(ip);
       const exp = Date.now() + SESSION_DAYS * 864e5;
-      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${access.cookieValue(exp, role, sign, VIEW_PASSWORD)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
+      if (person) people.touch(person);
+      const value = person ? people.cookieValue(exp, person, sign) : access.cookieValue(exp, role, sign, VIEW_PASSWORD);
+      return send(res, 303, '', 'text/plain', { location: '/', 'set-cookie': `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure(req)}` });
     }
     if (url.pathname === '/logout') {   // POST only, so a link or image elsewhere can't sign people out
       if (req.method !== 'POST') return send(res, 303, '', 'text/plain', { location: '/' });

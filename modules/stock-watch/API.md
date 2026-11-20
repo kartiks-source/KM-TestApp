@@ -6,6 +6,7 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 
 - **Auth** column: **open** (no login), **key** (ingest key header), **view** (any signed-in role: admin or view-only), **admin** (admin only).
 - Sign in with the `sw_session` cookie from `POST /login`, or HTTP Basic auth with any user name and the password. With no `ADMIN_PASSWORD` set (local only), every request is admin.
+- **People** (SW-062): a person's own password (Data → People) signs in the same ways, as admin or view, for their stores only: `?store=` outside their list → **403** `This store isn’t open to your sign-in` (also for unknown ids); `GET /api/stores` lists only theirs. `ADMIN_PASSWORD` (the owner) and `VIEW_PASSWORD` open every store.
 - A view-only session gets **403** `View-only sign-in: ask an admin to make this change` on every `POST/PUT/PATCH/DELETE /api/*`, before the route runs.
 - JSON answers are `{ "ok": true, … }` or `{ "ok": false, "error": "<plain sentence>" }`, with `cache-control: no-store`.
 - Writes marked ⚠ change or wipe stored data (also listed in `SECURITY.md` §Endpoints that change or wipe data).
@@ -78,6 +79,18 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 | `POST /api/shopify/sync` | none | `{ ok, stock, orders }` when the pull ends within 25 s, else 202 `{ ok, running: true }` (it carries on; poll `/api/settings`) | 400 Shopify isn't connected; 502 the pull failed |
 | ⚠ `POST /api/demo` | none | `{ ok, stock, orders }`: demo data loaded, decisions forgotten (backup first) | 409 Shopify connected; 409 the store holds real data (Clear first) |
 | ⚠ `POST /api/clear` | none | `{ ok }`: every row, Mark ordered record and decision gone (backup first, with `sideFiles`) | 409 a pull is running |
+
+## People (owner only, SW-062)
+
+Only the owner (`ADMIN_PASSWORD`, not a person) may call these; everyone else gets 403 `Only the owner (main admin password) can manage people`. Not store-scoped. Writes need `ADMIN_PASSWORD` set (else 409). Bodies: JSON ≤ 8 KB. A person: `{ id, name, role: 'admin'|'view', stores[], createdAt, updatedAt, lastSignInAt }` (never the hash).
+
+| Method · path | Auth | Params / body | Answer | Errors |
+|---|---|---|---|---|
+| `GET /api/people` | owner | none | `{ ok, people[], stores[{ id, name }], signIn }` | 403 |
+| ⚠ `POST /api/people` | owner | `{ name (≤ 60), role, stores[] (≥ 1, listed ids) }` | 201 `{ ok, person, password }`: the only time the password is sent | 400 no name / bad role / no or unknown store / not JSON; 400 over 200 people; 409 no `ADMIN_PASSWORD` or `access.json` unreadable |
+| ⚠ `PUT /api/people/<id>` | owner | any of `name`, `role`, `stores` | `{ ok, person }`; applies on their next request | 400 as above; 404 no such person |
+| ⚠ `POST /api/people/<id>/reset` | owner | none | `{ ok, person, password }`; the old password and its sessions stop working | 404 |
+| ⚠ `DELETE /api/people/<id>` | owner | none | `{ ok }`; their sessions end | 404 |
 
 ## Morning digest
 

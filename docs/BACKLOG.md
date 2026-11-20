@@ -208,6 +208,11 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: SEC-9.
 - Status: Done (`src/sheet-fetch.js`; `test/sheet-fetch.test.js`).
 
+**SW-062 · Per-store access** (M · security)
+- Accept: owner (`ADMIN_PASSWORD`) makes people in Data → People: name, admin or viewer, one or more stores, generated password (16+ chars) shown once or reset; scrypt hashes in `DATA_DIR/access.json`; a person's session carries their id; every route enforces their stores (`?store=` outside → 403, `/api/stores` filtered, picker shows only theirs, digest / exports scoped); remove ends their sessions; change log names them. ADR-0016. Owner and `VIEW_PASSWORD` as before.
+- Source: multi-store spec 20 Nov.
+- Status: Done (`src/people.js`, `public/people.js`; `test/people.test.js`, `test/ui-people.test.js`). Open: no self-service reset or email; `access.json` is not in the per-store backups (volume backups cover it; `.bak` keeps the previous copy).
+
 ---
 
 ## Later
@@ -236,4 +241,3 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |
 | SW-061 | Ads link: live spend on out-of-stock SKUs (needs Performity data) | M | product | product idea |
-| SW-062 | Per-store access: a brand's people see only their store (today every sign-in opens every store, ADR-0015) | M | security | multi-store spec 20 Nov |

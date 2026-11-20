@@ -3,6 +3,14 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · Sprint 3 · C-access
+stock-watch, branch `sprint3/C-access` (not merged, not deployed).
+- SW-051: `src/gql-guard.js` GraphQL tokeniser replaces the regex guard (comments, strings, block strings skipped; every operation `query` or shorthand). `src/token-scopes.js` reads `accessScopes` once per pull: own apps (vault / variables) with `write_*` refused; Performity token noted on Data ("Token also allows writes; this app only reads"), logged once.
+- SW-052: `src/sheet-fetch.js` Sheet sync: manual redirects (≤ 3) only to https docs.google.com / *.googleusercontent.com, 20 MB cap, 20 s timeout; the link never in errors.
+- SW-062: per-store people (ADR-0016). Owner makes people in Data → People (`public/people.js`): name, Admin / Viewer, stores; generated 29-char password shown once; scrypt hashes in `DATA_DIR/access.json`. Person cookie `exp.p.<id>.<gen>.sig`; `people.pick` → 403 outside their stores, `/api/stores` filtered; reset / remove end sessions; change log names the person. Owner and VIEW_PASSWORD unchanged.
+- Docs: LOGIC §18a, API (People), FORMATS (`access.json`), SECURITY, RUNBOOK, module AGENTS, BACKLOG, ADR-0016. Tests: `people.test.js` (unit + server), `ui-people.test.js` (browser, in `test:ui`), `sheet-fetch.test.js`, `gql-guard.test.js`, `token-scopes.test.js`.
+- Speed mode: one look at 1440 and 390 (0 px sideways); critics not run. Open: `access.json` not in per-store backups (volume backups); no self-service reset; shared dev log page row not added.
+
 ## 2026-11-20 · final critic round 2 fixes
 stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, this entry; not pushed, not deployed).
 - L1 (P1): `planWithOrder` keeps the row's own status unless the PO covers the need (Ordered): 5/day, 10 in stock, 50 on order stayed Critical (was This week, off Order today). LOGIC §6b; onorder.test (fails on the old code).

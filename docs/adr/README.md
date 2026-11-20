@@ -19,3 +19,4 @@ One file per decision, Nygard format (`0000-template.md`). Number in order; neve
 | 0013 | Performity look and feel | Accepted |
 | 0014 | Shopify access through the Performity POC API (option A) | Accepted |
 | 0015 | Several stores in one app: a folder per store, picked from the top bar | Accepted |
+| 0016 | Per-store access: people made by the owner, scrypt hashes in DATA_DIR/access.json | Accepted |
