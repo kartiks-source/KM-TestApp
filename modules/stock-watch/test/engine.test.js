@@ -479,3 +479,58 @@ test('order at the last 2 weeks’ pace when sales are falling', () => {
   const flat = []; for (let i = 0; i < 28; i++) flat.push({ t: now - 28 * DAY + i * DAY, order: `#f${i}`, variantId: 'c', qty: 4, price: 1000 });
   assert.equal(E.report(stock, flat, {}, { days: 30, now }).products[0].paceQty, undefined);
 });
+
+/* 1.1.1 UI fixes (M1, UI-2/M2, UI-1, SIMP-2, M4) */
+test('a sale inside a stock-out moves its start to that sale (M1: Aspen out 49 d but sold 2 on 31 Oct)', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [{ t: now - 60 * DAY, variantId: 'a', before: null, now: 1, price: 6000 }, { t: now - 49 * DAY, variantId: 'a', before: 1, now: 0, price: 6000 }];
+  const orders = [{ t: now - 49 * DAY + 10 * 60e3, order: '#1', variantId: 'a', qty: 1, price: 6000 },   // the sale that emptied it: first hour, ignored
+    { t: now - 20 * DAY, order: '#2', variantId: 'a', qty: 2, price: 6000 }];
+  const r = E.report(stock, orders, {}, { days: 30, now });
+  const s = r.stockouts.find((x) => x.id === 'a');
+  assert.equal(s.start, now - 20 * DAY, 'out from the last sale inside it, not 49 days ago');
+  assert.equal(s.open, true);
+  assert.equal(Math.round(s.hours / 24), 20);
+  /* pure helper: a line in the first hour or outside the spell changes nothing */
+  const eps = [{ start: 0, end: 10 * H, open: false, topUp: 5 }];
+  assert.deepEqual(E.afterLastSale(eps, [{ t: 30 * 60e3, qty: 1 }, { t: 11 * H, qty: 1 }]), eps);
+  assert.equal(E.afterLastSale(eps, [{ t: 3 * H, qty: 1 }, { t: 5 * H, qty: 1 }])[0].start, 5 * H);
+});
+
+test('stock-outs total leaves out not-selling episodes (UI-2/M2: tile 94 vs page 52); flagged on the episode', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [
+    { t: now - 20 * DAY, variantId: 'sells', before: null, now: 5, price: 100 }, { t: now - 2 * DAY, variantId: 'sells', before: 5, now: 0, price: 100 },
+    { t: now - 20 * DAY, variantId: 'dead', before: null, now: 0, price: 100 },
+  ];
+  const orders = [5, 6, 7, 8, 9].map((i) => ({ t: now - i * DAY, order: `#${i}`, variantId: 'sells', qty: 1, price: 100 }));
+  const r = E.report(stock, orders, {}, { days: 7, now });
+  assert.equal(r.totals.stockouts, 1);
+  assert.equal(r.totals.stockoutsNotSelling, 1);
+  assert.equal(r.stockouts.find((s) => s.id === 'dead').notSelling, true);
+  assert.equal(r.stockouts.find((s) => s.id === 'sells').notSelling, undefined);
+});
+
+test('historyFrom = the first stock record; a free gift is flagged (UI-1, M4)', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [{ t: now - 2 * DAY, variantId: 'g', before: null, now: 500, price: 899 }, { t: now - 40 * DAY, variantId: 'p', before: null, now: 50, price: 1000 }];
+  const orders = [];
+  for (let i = 1; i <= 20; i++) orders.push({ t: now - i * DAY, order: `#g${i}`, variantId: 'g', qty: 1, price: i === 1 ? 20 : 0 });   // ₹1 average
+  for (let i = 1; i <= 20; i++) orders.push({ t: now - i * DAY, order: `#p${i}`, variantId: 'p', qty: 1, price: 1000 });
+  const cat = { g: { product: 'Gift', price: 899, stock: 500, active: true }, p: { product: 'P', price: 1000, stock: 50, active: true } };
+  const r = E.report(stock, orders, {}, { days: 30, now, catalog: cat });
+  const g = r.products.find((p) => p.id === 'g'), p = r.products.find((x) => x.id === 'p');
+  assert.equal(g.historyFrom, now - 2 * DAY); assert.equal(p.historyFrom, now - 40 * DAY);
+  assert.equal(g.gift, true); assert.equal(p.gift, undefined);
+});
+
+test('Order today rows: biggest ₹ of sales a day first, not every Out now before Critical (SIMP-2)', () => {
+  const DAY = 864e5, now = Date.UTC(2026, 10, 20, 12);
+  const stock = [{ t: now - 40 * DAY, variantId: 'slowout', before: null, now: 30, price: 1000 }, { t: now - 10 * DAY, variantId: 'slowout', before: 1, now: 0, price: 1000 },
+    { t: now - 40 * DAY, variantId: 'star', before: null, now: 8, price: 5000 }];
+  const orders = [];
+  for (let i = 11; i <= 38; i++) orders.push({ t: now - i * DAY, order: `#s${i}`, variantId: 'slowout', qty: 1, price: 1000 });   // 1 a day, ₹1,000 a day
+  for (let i = 1; i <= 28; i++) orders.push({ t: now - i * DAY, order: `#t${i}`, variantId: 'star', qty: 4, price: 5000 });
+  const r = E.report(stock, orders, {}, { days: 30, now });
+  assert.deepEqual(r.reorder.map((p) => [p.id, p.status]), [['star', 'Critical'], ['slowout', 'Out now']]);
+});

@@ -62,7 +62,9 @@ function why(p, S, now, outSince = null, outLost = null) {
     res.outSince = outSince;
     res.costPerDay = Math.round((+p.perDay || 0) * (+p.price || 0));
     const h = outSince != null ? Math.max(0, now - outSince) / HOUR : null;
-    const len = h == null ? '' : Math.round(h) < 24 ? ` ${Math.max(1, Math.round(h))} h` : ` ${Math.round(h / 24)} d`;
+    /* SIMP-6: out at the first stock record we have → it was out before then too; we don't know how long */
+    const len = h == null ? '' : p.historyFrom != null && outSince <= p.historyFrom ? ` since before ${dateShort(p.historyFrom, off)}`
+      : Math.round(h) < 24 ? ` ${Math.max(1, Math.round(h))} h` : ` ${Math.round(h / 24)} d`;
     res.why = `Out${len}${outLost > 0 ? ` · lost ${money(outLost)} this stock-out` : ''}`;
     return res;
   }

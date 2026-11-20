@@ -45,7 +45,7 @@ const orderToday = (r) => r.reorder.filter((p) => TODAY.includes(p.status));
 const L = {
   order(r) {
     const t = r.totals;
-    return t.orderToday ? `Order today: ${money(t.orderValueNow)} across ${plural(t.orderToday, 'product')}${t.bestAtRisk ? ` (${inr.format(t.bestAtRisk)} of them best sellers)` : ''}.` : 'Nothing needs ordering today.';
+    return t.orderToday ? `Order today: ${money(t.orderValueNow)}${t.hasCost ? '' : ' at selling price'} across ${plural(t.orderToday, 'product')}${t.bestAtRisk ? ` (${inr.format(t.bestAtRisk)} of them best sellers)` : ''}.` : 'Nothing needs ordering today.';
   },
   stillOut(r) {
     const n = r.totals.stillOut;
@@ -57,7 +57,7 @@ const L = {
   },
   overstock(r) {
     const t = r.totals;
-    return t.excessValue ? `Cash stuck in overstock: ${money(t.excessValue)} in ${plural(t.overstocked, 'product')}.` : 'No overstock.';
+    return t.excessValue ? `${t.hasCost ? 'Cash stuck in overstock' : 'Overstock at selling price'}: ${money(t.excessValue)} in ${plural(t.overstocked, 'product')}.` : 'No overstock.';   // SIMP-1: no unit costs → not "cash"
   },
   lostPeriod(r, prev) {
     const t = r.totals;

@@ -101,6 +101,21 @@ function cutBySpells(eps, spells) {
   return out;
 }
 
+/**
+ * A sale proves there was stock (M1, LOGIC.md §2): an out spell starts no earlier than the last order line inside it.
+ * Lines in the spell's first hour don't count (the sale that emptied the shelf, or a stock row stamped late).
+ * Rebuilt history can miss a refill (Aspen: 1 → 0 on 2 Oct, then 2 sold on 31 Oct); "sell when out of stock" lets a
+ * product sell at 0 or below. Either way nobody was turned away before that sale.
+ */
+function afterLastSale(eps, lines) {
+  if (!lines.length || !eps.length) return eps;
+  return eps.map((e) => {
+    let last = null;
+    for (const o of lines) if (o.t > e.start + HOUR && o.t < e.end && num(o.qty) > 0 && (last == null || o.t > last)) last = o.t;
+    return last == null ? e : { ...e, start: last, soldInside: true };
+  });
+}
+
 /** Stock-outs and inactive spells merged into one sorted list of times it couldn't be sold (for the sales rate). */
 function unsellable(eps, spells, now) {
   const all = eps.map((e) => ({ start: e.start, end: e.end })).concat(spells.filter((s) => s.from < now).map((s) => ({ start: s.from, end: Math.min(now, s.to) })))
@@ -236,7 +251,10 @@ function trendCall(pct, base) {
 
 /** Bumped whenever a rule that changes a number changes (LOGIC.md): saved daily snapshots made under another value
  *  are worked out again (src/weekly.js), so the weekly panel never mixes old and new maths. */
-const CALC_VERSION = '1.1.1';
+const CALC_VERSION = '1.1.1';   // 1.1.1 also: sale inside a stock-out moves its start (afterLastSale); not deployed before
+
+/** Order today rows (Out now, Critical, Order now) are one group, biggest ₹ of sales a day first (SIMP-2) */
+const TODAY_STATUS = ['Out now', 'Critical', 'Order now'];
 
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered', 'OK'];
 /** Reorder status and quantity for one product. */
@@ -363,7 +381,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     const spells = (p.spells || []).slice();
     if (p.inactive) spells.push({ from: Math.min(now, Math.max(p.inactiveSince, p.changes.length ? p.changes[p.changes.length - 1].t : 0)), to: Infinity });
     spells.sort((a, b) => a.from - b.from);
-    const eps = cutBySpells(episodes(p.changes, now), spells);
+    const eps = afterLastSale(cutBySpells(episodes(p.changes, now), spells), p.lines);
     if (p.inactive) for (const e of eps) if (e.open) { e.open = false; e.inactive = true; }
     const pFirst = Number.isFinite(p.first) ? p.first : demandFrom;
     const pFrom = Math.max(demandFrom, pFirst);   // a new launch isn't diluted by days before it existed
@@ -424,6 +442,10 @@ function report(stock, orders, settings = {}, opts = {}) {
       type: p.type || '', onOrder: oo,
     };
     if (lowData) row.lowData = true;
+    /* the product's first stock record (UI-1): before it there's no stock history, so ₹ lost there is unknown, not 0 */
+    row.historyFrom = p.changes.length ? p.changes[0].t : null;
+    /* mostly given away (M4): average paid under 10% of the list price and no unit cost → a free gift? kept out of the budget rank */
+    if (!p.cost && units > 0 && num(p.price) > 0 && price < 0.1 * num(p.price)) row.gift = true;
     Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0), lead, oo, sup, stock: p.stock }, enumerable: false });
     if (sup) { row.supplier = sup.name; if (sup.leadDays != null) row.leadDays = lead; }
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
@@ -498,8 +520,9 @@ function report(stock, orders, settings = {}, opts = {}) {
     if (raw != null && p.orderQty > raw) { p.packExtra = p.orderQty - raw; p.packExtraValue = Math.round(p.packExtra * p._plan.unitValue); }
   }
 
-  const rank = (s) => STATUS.indexOf(s);
-  reorder.sort((a, b) => rank(a.status) - rank(b.status) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
+  const rank = (s) => (TODAY_STATUS.includes(s) ? 0 : STATUS.indexOf(s));
+  const perDayValue = (p) => (rank(p.status) === 0 ? p._plan.demand : 0);   // ₹ of sales a day at stake, Order today rows only
+  reorder.sort((a, b) => rank(a.status) - rank(b.status) || perDayValue(b) - perDayValue(a) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
   stockouts.sort((a, b) => b.lost - a.lost);
   products.sort((a, b) => b.lost - a.lost || b.sold - a.sold);
 
@@ -512,7 +535,8 @@ function report(stock, orders, settings = {}, opts = {}) {
   /* out but not selling (LOGIC.md §1c): no units, no sales and no sales lost in the period; counted apart from "still out" */
   const rowOf = new Map(products.map((p) => [String(p.id), p]));
   const notSelling = (id) => { const p = rowOf.get(String(id)); return !!p && !p.unitsSold && !p.sold && !p.lost; };
-  const openOuts = stockouts.filter((s) => s.open);
+  for (const s of stockouts) if (notSelling(s.id)) s.notSelling = true;
+  const selling = stockouts.filter((s) => !s.notSelling), openOuts = selling.filter((s) => s.open);
 
   return {
     generatedAt: now, days, from, settings: S,
@@ -523,12 +547,13 @@ function report(stock, orders, settings = {}, opts = {}) {
       ordered: products.filter((p) => p.status === 'Ordered').length,
       orderNow: products.filter((p) => ['Critical', 'Order now'].includes(p.status)).length,
       orderToday: products.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
-      stillOut: openOuts.filter((s) => !notSelling(s.id)).length,
-      outNotSelling: openOuts.filter((s) => notSelling(s.id)).length,
+      stillOut: openOuts.length,
+      outNotSelling: stockouts.filter((s) => s.open && s.notSelling).length,
       orderWeek: products.filter((p) => p.status === 'Order this week').length,
-      stockouts: stockouts.length,
-      smallTopUps: stockouts.filter((s) => s.small).length,
-      repeats: stockouts.filter((s) => s.repeat).length,
+      stockouts: selling.length,   // M2/UI-2: the Stock-outs page's count; out-but-not-selling episodes apart
+      stockoutsNotSelling: stockouts.length - selling.length,
+      smallTopUps: selling.filter((s) => s.small).length,
+      repeats: selling.filter((s) => s.repeat).length,
       products: products.length,
       lostProfit: products.some((p) => p.lostProfit != null) ? products.reduce((s, p) => s + (p.lostProfit || 0), 0) : null,
       hasCost: products.some((p) => p.cost != null),
@@ -582,4 +607,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  CALC_VERSION, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  CALC_VERSION, TODAY_STATUS, afterLastSale, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

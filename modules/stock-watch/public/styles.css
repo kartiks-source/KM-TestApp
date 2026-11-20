@@ -751,7 +751,7 @@ div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 6
 .sup-csv select { width: auto; }
 .sup-map, .sup-csv { display: flex; flex-direction: column; gap: 6px; }
 @media (max-width: 760px) {
-  .mbar .bud { flex: 1 1 160px; } .mbar .bud input { width: 100%; min-height: 42px; }
+  .mbar .bud { flex: 1 1 160px; } .mbar .bud input { width: 100%; min-height: 44px; }   /* M5: 44 px */
   .seg button { min-height: 44px; padding: 0 12px; }
   .podraft > summary { grid-template-columns: minmax(0, 1fr) auto; }
   .po-a { grid-column: 1 / -1; } .po-a .btn { min-height: 44px; flex: 1; justify-content: center; }
@@ -818,4 +818,30 @@ div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 6
   .wrap > .toolbar .mbar-tg { display: inline-flex; flex: none; min-height: 44px; padding: 0 10px; white-space: nowrap; }
   .wrap > .toolbar .mbar-tg[aria-expanded="true"] { background: var(--brand-wash); color: var(--brand); }
   .mbar:not(.open) { display: none; }
+}
+
+/* 1.1.1 UI fixes (UI-1, SIMP-1, M3, M9): headline ₹ under the count when there are no unit costs; no-history band */
+.headline h1 .hsub { font-size: 14px; font-weight: 500; color: var(--soft); letter-spacing: 0; white-space: nowrap; }
+#slow-lost { margin: 6px 0 0; }
+#slow-lost a { color: var(--soft); }
+#nohist-list > summary { cursor: pointer; }
+#nohist-list .bars { margin-top: 6px; max-height: 260px; overflow-y: auto; }
+.trl { display: inline-flex; gap: 4px; align-items: baseline; color: var(--soft); }
+.tr-none { font-weight: 500; }
+/* phones, 1.1.1 mobile fixes (M6–M10). Inside ≤760 px only: desktop untouched. */
+@media (max-width: 760px) {
+  /* M6: the Suppliers CSV file picker is a 44 px target */
+  .sup-csv input[type=file] { min-height: 44px; padding: 10px 0; }
+  .sup-csv input[type=file]::file-selector-button { min-height: 40px; }
+  /* M7: once the drawer scrolls, the × sits on an opaque strip across the drawer, so it never covers an input or a tile */
+  .drawer-card.scrolled > .x { box-shadow: 0 1px 0 var(--line); }
+  .drawer-card.scrolled > .x::before { content: ''; position: absolute; top: -6px; bottom: -6px; right: -8px; width: 100vw; background: var(--page); box-shadow: 0 1px 0 var(--line); z-index: -1; }
+  /* M8: nothing under 12 px on phones (drawer week dates 11 px with tight spacing to fit 8 columns at 360) */
+  .rail a { font-size: 12px; }
+  .rail em { font-size: 12px; height: 20px; line-height: 20px; }
+  .tr, .best { font-size: 12px; }
+  .wknums small { font-size: 11px; letter-spacing: -.02em; }
+  .po-lines small, .sup-name small, .kv .mono, #history-line .mono { font-size: 12px; }
+  /* M10: weekly "Sales lost changed most" names wrap to two lines instead of cutting off */
+  .wk-row .name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }

@@ -46,7 +46,9 @@
   /** Extra Reorder column while a budget is on. */
   function cols() {
     if (budget() == null) return [];
-    return [{ k: 'perRupee', label: 'Profit kept / ₹', r: 1, tip: 'Profit you’d lose over lead time + days to last without this order, ÷ its cost (LOGIC §6d). “est.” = no unit cost, store’s average margin used', f: (p) => (p.perRupee == null ? '–' : `${A.esc(p.perRupee.toFixed(2))}${p.protectEst ? ' <small class="muted">est.</small>' : ''}`), val: (p) => p.perRupee ?? -1 }];
+    /* UI-4: no product has a cost → it ranks sales kept per ₹ at selling price; say so, no "profit", no "est." */
+    const hasCost = !!A.state.report.totals.hasCost;
+    return [{ k: 'perRupee', label: hasCost ? 'Profit kept / ₹' : 'Sales kept / ₹', r: 1, tip: hasCost ? 'Profit you’d lose over lead time + days to last without this order, ÷ its cost (LOGIC §6d). “est.” = no unit cost, store’s average margin used' : 'Sales you’d lose over lead time + days to last without this order, ÷ its value; no unit costs in Shopify, so both are at selling price (LOGIC §6d)', f: (p) => (p.gift ? '<small class="muted" title="Mostly sold at ₹0 (average paid under 10% of the list price): left out of the budget rank">free gift?</small>' : p.perRupee == null ? '–' : `${A.esc(p.perRupee.toFixed(2))}${hasCost && p.protectEst ? ' <small class="muted">est.</small>' : ''}`), val: (p) => p.perRupee ?? -1 }];
   }
   /** ?budget= for the CSV link, so the file holds the rows above the line. */
   const qs = () => (budget() != null ? `&budget=${budget()}` : '');
@@ -63,9 +65,9 @@
     const B = budget(), r = A.state.report, extra = r.totals.packExtraValue || 0, { money, esc, inr } = A;
     const sum = B == null
       ? (extra ? `<span class="muted" title="Order quantities rounded up to suppliers’ minimum order and whole case packs (LOGIC §6c)">${money(extra)} of the orders is minimum-order / case-pack round-up</span>` : '')
-      : `<span><b>${inr.format(last ? last.fit.size : 0)}</b> fit · ${money(last ? last.spent : 0)} keeps <b class="okv">${money(last ? last.protect : 0)}</b> profit${last && last.over ? ` · <span class="lost">${inr.format(last.over)} over budget (${money(last.overValue)})</span>` : ''}</span>`;
+      : `<span><b>${inr.format(last ? last.fit.size : 0)}</b> fit · ${money(last ? last.spent : 0)} keeps <b class="okv">${money(last ? last.protect : 0)}</b> ${r.totals.hasCost ? 'profit' : 'sales'}${last && last.over ? ` · <span class="lost">${inr.format(last.over)} over budget (${money(last.overValue)})</span>` : ''}</span>`;
     return `<div class="mbar${barOpen() ? ' open' : ''}" id="mbar">
-      <label class="bud" title="Cash you can spend on this order. Rows are ranked by profit kept per ₹; the ones that fit stay, the rest are dimmed and left out of the CSV. Remembered for this store in this browser.">
+      <label class="bud" title="${r.totals.hasCost ? 'Cash you can spend on this order. Rows are ranked by profit kept per ₹' : 'What you can spend on this order, at selling price (no unit costs in Shopify). Rows are ranked by sales kept per ₹'}; the ones that fit stay, the rest are dimmed and left out of the CSV. Remembered for this store in this browser.">
         <span>Budget ₹</span><input id="budget-in" inputmode="numeric" autocomplete="off" placeholder="No limit" value="${B == null ? '' : esc(inr.format(B))}" aria-label="Budget in rupees"></label>
       ${B != null ? '<button class="btn ghost xs" id="budget-clear" aria-label="Clear budget">Clear</button>' : ''}
       <div class="seg" role="group" aria-label="Show"><button class="${lens() === 'list' ? 'on' : ''}" data-polens="list">List</button><button class="${lens() === 'supplier' ? 'on' : ''}" data-polens="supplier">By supplier</button></div>
@@ -99,8 +101,8 @@
         <summary><span class="po-n"><b>${esc(g.name || NONE)}</b><small class="muted">${esc(termsText(termsOf(g.name)) || (g.name ? 'store lead time, no rounding' : 'set one in Data → Suppliers'))}</small></span>
           <span class="po-t"><b>${money(g.value)}</b><small class="muted">${inr.format(g.lines.length)} lines · ${inr.format(g.pcs)} pcs</small></span>
           <span class="po-a"><button class="btn ghost xs" data-pocopy="${i}" title="Copy this PO as text">Copy</button><a class="btn ghost xs" href="${esc(csvHref(g))}" title="Download this supplier’s PO as CSV">CSV</a></span></summary>
-        <table class="po-lines"><thead><tr><th>Product</th><th class="r">Pcs</th><th class="r">Unit cost</th><th class="r">Line</th></tr></thead><tbody>
-        ${g.lines.map((p) => `<tr data-id="${esc(p.id)}" tabindex="0"><td><b>${esc(p.name)}</b> <small class="muted">${esc(p.sku || '')}</small></td><td class="r"><b>${inr.format(p.orderQty)}</b>${p.packExtra ? `<small class="muted" title="${inr.format(p.packExtra)} pcs (${money(p.packExtraValue)}) added to reach the minimum order / whole cases"> +${inr.format(p.packExtra)}</small>` : ''}</td><td class="r">${p.cost != null ? money(p.cost) : '<small class="muted" title="No unit cost: line uses the average price paid">price</small>'}</td><td class="r">${money(p.orderValue)}</td></tr>`).join('')}
+        <table class="po-lines"><thead><tr><th>Product</th><th class="r">Pcs</th><th class="r">${A.state.report.totals.hasCost ? 'Unit cost' : 'Unit price'}</th><th class="r">Line</th></tr></thead><tbody>
+        ${g.lines.map((p) => `<tr data-id="${esc(p.id)}" tabindex="0"><td><b>${esc(p.name)}</b> <small class="muted">${esc(p.sku || '')}</small></td><td class="r"><b>${inr.format(p.orderQty)}</b>${p.packExtra ? `<small class="muted" title="${inr.format(p.packExtra)} pcs (${money(p.packExtraValue)}) added to reach the minimum order / whole cases"> +${inr.format(p.packExtra)}</small>` : ''}</td><td class="r">${p.cost != null ? money(p.cost) : A.state.report.totals.hasCost ? '<small class="muted" title="No unit cost: line uses the average price paid">price</small>' : money(p.price)}${p.gift ? ' <small class="muted" title="Mostly sold at ₹0: average paid under 10% of the list price">free gift?</small>' : ''}</td><td class="r">${money(p.orderValue)}</td></tr>`).join('')}
         </tbody></table>${g.extra ? `<p class="muted small">${money(g.extra)} of this is round-up to the minimum order / whole cases.</p>` : ''}
       </details>`).join('')}</div>`;
   }

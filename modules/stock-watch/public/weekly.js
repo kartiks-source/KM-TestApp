@@ -45,7 +45,9 @@
   function html(s) {
     if (!s || !s.ready) return '';
     const a = s.thisWeek, b = s.lastWeek;
-    const shown = s.metrics.filter((m) => a[m.k] != null);
+    /* SIMP-4 / UI-3: flows only (added up over the week). The end-of-week states (still out, overstock, to reorder, order
+       today) repeated the headline's labels with an older day's numbers, so they're left to the headline and tiles. */
+    const shown = s.metrics.filter((m) => m.sum !== false && a[m.k] != null);
     const cells = shown.map((m) => {
       const [label, isMoney, tip] = LABEL[m.k], v = a[m.k], w = b ? b[m.k] : null;
       const pct = v != null && w ? ` (${v >= w ? '+' : '−'}${inr.format(Math.round(Math.abs(v - w) / w * 100))}%)` : '';

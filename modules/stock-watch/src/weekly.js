@@ -88,7 +88,7 @@ function compute(d, key, oo = {}, at = Date.now()) {
   const t = r.totals;
   const lostBy = Object.fromEntries(r.products.filter((p) => p.lost > 0).sort((a, b) => b.lost - a.lost).slice(0, TOP_LOST).map((p) => [String(p.id), p.lost]));
   return {
-    at, src: 'day', sold: t.sold, lost: t.lost, lostProfit: t.lostProfit, ranOut: r.stockouts.filter((s) => s.start >= t0 && s.start < t1).length,
+    at, src: 'day', sold: t.sold, lost: t.lost, lostProfit: t.lostProfit, ranOut: r.stockouts.filter((s) => !s.notSelling && s.start >= t0 && s.start < t1).length,
     stillOut: t.stillOut, excessValue: t.excessValue, toReorder: t.orderToday + t.orderWeek, orderToday: t.orderToday,
     orderTodayValue: r.reorder.filter((p) => TODAY.includes(p.status)).reduce((s, p) => s + p.orderValue, 0), lostBy,
   };

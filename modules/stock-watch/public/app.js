@@ -244,7 +244,7 @@
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Weekly units, last 8 weeks">${bars}</svg>`;
   }
   function trendChip(p) {
-    if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="In stock but no sales in the 14 days before; 3 or more sold since">New</span>' : '<span class="tr low" title="Not enough sales yet to call a trend">–</span>';
+    if (p.trendPct == null) return p.trendNew ? '<span class="tr new" title="In stock but no sales in the 14 days before; 3 or more sold since">New</span>' : (narrow() ? '<span class="muted small tr-none">too few sales for a trend</span>' : '<span class="tr low" title="Not enough sales yet to call a trend">–</span>');
     /* colour = the engine's call (LOGIC.md §7d): green / red only when the product's own % points that way and it is
        10+ points off the typical product; text = this product's own change. The tooltip says how it compares. */
     const v = p.trendPct, cls = p.trendCall || 'flat', base = state.report.totals.storeTrendPct;
@@ -324,14 +324,16 @@
   }
   function niceStep(x) { const p = 10 ** Math.floor(Math.log10(Math.max(1, x))); const m = x / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
 
-  function stockChart(tl, from, to) {
+  /* hFrom = the product's first stock record (engine row.historyFrom): before it, hatched grey and named, never blank (UI-1, M3) */
+  const noHistory = (p, from) => (p && p.historyFrom != null && p.historyFrom > from + 864e5 ? p.historyFrom : null);
+  function stockChart(tl, from, to, hFrom = null) {
     if (tl.length < 2) return '<p class="muted">No stock changes recorded in this period.</p>';
     const W = narrow() ? 340 : 680, H = narrow() ? 200 : 220, L = 40, R = narrow() ? 24 : 26, T = 10, B = 28;   // M8: room for the last date label
     const max = Math.max(1, ...tl.map((p) => p.stock));
     const top = Math.ceil(max / niceStep(max / 4)) * niceStep(max / 4);
     const x = (t) => L + (W - L - R) * ((t - from) / (to - from));
     const y = (v) => T + (H - T - B) * (1 - Math.max(0, v) / top);
-    let path = `M${x(tl[0].t)},${y(tl[0].stock)}`, bands = '';
+    let path = `M${x(tl[0].t)},${y(tl[0].stock)}`, bands = hFrom ? `<defs><pattern id="nohist" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#F1F3F7"/><line x1="0" y1="0" x2="0" y2="6" stroke="#D9DEE7" stroke-width="2"/></pattern></defs><rect class="nohist" x="${L}" y="${T}" width="${Math.max(0, x(Math.min(hFrom, to)) - L)}" height="${H - T - B}" fill="url(#nohist)"><title>No stock record before ${dateShort(hFrom)}</title></rect>` : '';
     for (let i = 1; i < tl.length; i++) {
       path += ` H${x(tl[i].t)} V${y(tl[i].stock)}`;
       if (tl[i - 1].stock <= 0) bands += `<rect x="${x(tl[i - 1].t)}" y="${T}" width="${Math.max(1, x(tl[i].t) - x(tl[i - 1].t))}" height="${H - T - B}" fill="#FCE9ED"/>`;
@@ -414,7 +416,7 @@
   const soldTip = () => ((state.shopify || {}).priceBasis === 'exTax' ? 'Net sales: price paid after discounts, before GST, refunds netted on the order’s day (Shopify’s Net sales by order date)' : 'Price paid × units, as your data sends it');
   function summaryText() {
     const r = state.report, t = r.totals;
-    const prods = new Set(r.stockouts.map((s) => s.id)).size;
+    const prods = new Set(r.stockouts.filter((s) => !s.notSelling).map((s) => s.id)).size;   // same count as the Stock-outs page (UI-2)
     return t.stockouts
       ? `${inPeriod(r).replace(/^./, (c) => c.toUpperCase())}, ${prods} products ran out of stock ${t.stockouts} times. That cost about ${moneyFull(t.lost)} in sales (${t.lostPct}% of demand)${t.hasCost ? ` and ${moneyFull(t.lostProfit)} in profit` : ''}. ${t.orderToday} products need ordering today (${moneyFull(t.orderValueNow)} ${atCost()})${t.excessValue ? `, and ${moneyFull(t.excessValue)} sits in overstock` : ''}.`
       : `No product ran out of stock ${inPeriod(r)}.`;
@@ -430,10 +432,14 @@
     const r = state.report, t = r.totals;
     const today = r.reorder.filter((p) => TODAY.includes(p.status));
     const week = r.reorder.filter((p) => p.status === 'Order this week').length, weekValue = Math.max(0, t.orderValueAll - t.orderValueNow);
-    const top = r.products.filter((p) => p.lost > 0).slice(0, 5), maxLost = Math.max(1, ...top.map((p) => p.lost));
+    /* SIMP-5: a slow seller (not reordered) never sits in Biggest losses; its ₹ is one line that opens the Decide list */
+    const lossy = r.products.filter((p) => p.lost > 0), slowLost = lossy.filter((p) => p.status === 'Slow seller');
+    const top = lossy.filter((p) => p.status !== 'Slow seller').slice(0, 5), maxLost = Math.max(1, ...top.map((p) => p.lost));
+    /* SIMP-2: the biggest orders first, ₹ shown (the panel is short; Reorder has the rest) */
+    const big = today.slice().sort((a, b) => b.orderValue - a.orderValue).slice(0, 5);
     return `
       <section class="headline">
-        <h1><span class="h-order">Order <span class="amberv">${money(t.orderValueNow)}</span> today · </span><span class="h-lost"><span class="lost">${money(t.lost)}</span> sales lost ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</span></h1>
+        <h1><span class="h-order">${t.hasCost ? `Order <span class="amberv">${money(t.orderValueNow)}</span> today` : `Order <span class="amberv">${inr.format(t.orderToday)} products</span> today <small class="hsub" title="No unit costs in Shopify: quantity × average price paid">${money(t.orderValueNow)} at selling price</small>`} · </span><span class="h-lost"><span class="lost">${money(t.lost)}</span> sales lost ${r.period === 'month' ? 'this month' : `in ${r.days} days`}</span></h1>
         ${window.SW_DIGEST ? SW_DIGEST.shareMenu() : '<button class="btn ghost hbtn" id="copy-summary" title="Copy a plain-language summary for the client">Copy summary</button>'}
         ${ydayStrip(r.yesterday)}
       </section>
@@ -441,16 +447,17 @@
         ${t.hasCost
     ? `<button class="tile lost" data-go="stockouts" data-filter="all" title="Profit on the ${money(t.lost)} of sales lost while products were out of stock: units lost × (price paid − unit cost)${t.costed < t.active ? `. Only ${t.costed} of ${t.active} products have a cost, so it is a minimum` : ''}"><b>${money(t.lostProfit)}</b><span>profit lost · ${n1(t.lostPct)}% of demand${t.costed < t.active ? ` (${t.costed}/${t.active} costed)` : ''}</span></button>`
     : `<button class="tile lost" data-go="stockouts" data-filter="all" title="Sales lost ÷ (sold + sales lost)"><b>${n1(t.lostPct)}%</b><span>of demand lost · ${inr.format(t.stockouts)} stock-outs</span></button>`}
-        <button class="tile amber" data-go="reorder" data-filter="week" title="Cash to commit ${atCost()}${t.hasCost ? ' (selling price where a product has none)' : ' (no unit costs in Shopify)'} for what needs ordering this week, after today’s order"><b>${money(weekValue)}</b><span>more to order this week · ${week} products</span></button>
+        <button class="tile amber" data-go="reorder" data-filter="week" title="${t.hasCost ? 'Cash to commit at cost (selling price where a product has none)' : 'Order value at selling price (no unit costs in Shopify)'} for what needs ordering this week, after today’s order"><b>${money(weekValue)}</b><span>more to order this week · ${week} products</span></button>
         <button class="tile ${t.bestAtRisk ? 'lost' : 'sold'}" data-go="products" data-filter="bestrisk" title="Best sellers (top 80% of sales) that need ordering today"><b>${t.bestAtRisk}<small> of ${t.bestsellers}</small></b><span>best sellers at risk</span></button>
         <button class="tile plum" data-go="products" data-filter="push" title="Stock beyond what lead time + days to last + buffer need, for overstocked products, ${atCost()}: discount, bundle, or stop reordering"><b>${money(t.excessValue)}</b><span>stuck in overstock · ${t.overstocked} products</span></button>
       </section>${t.hasCost ? '' : '<p class="muted small" id="nocost-note">No unit costs in Shopify, so ₹ to order and overstock are at selling price. Fill <b>Cost per item</b> in Shopify for cash at cost.</p>'}
       <section class="grid2 grid3">
         <div class="panel"><div class="panel-head"><h2>Order today</h2><a href="#reorder" data-go="reorder" data-filter="today">All ${t.orderToday}</a></div>
-          ${today.length ? `<div class="bars">${today.slice(0, 10).map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="num" style="font-weight:700">${inr.format(p.orderQty)} pcs</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
+          ${big.length ? `<div class="bars">${big.map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button" style="grid-template-columns:minmax(0,1fr) auto auto auto"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="muted num" title="Days of stock left">${p.stock <= 0 ? 'out' : `${n1(p.daysLeft)} d`}</span><span class="muted num">${inr.format(p.orderQty)} pcs</span><span class="num" style="font-weight:700" title="Order value ${atCost()}">${money(p.orderValue)}</span></div>`).join('')}</div>` : '<p class="muted">Nothing needs ordering today.</p>'}
         </div>
         <div class="panel"><div class="panel-head"><h2>Biggest losses</h2><a href="#products" data-go="products" data-filter="lost">All</a></div>
           ${top.length ? `<div class="bars">${top.map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button"><span class="name">${outDot(p)}${esc(p.name)}</span><span class="val">${money(p.lost)}</span><span class="track"><i style="width:${(p.lost / maxLost) * 100}%"></i></span></div>`).join('')}</div>` : '<p class="muted">Nothing lost in this period.</p>'}
+          ${slowLost.length ? `<p class="muted small" id="slow-lost"><a href="#products" data-go="products" data-filter="slow" title="Sell under ${esc(String(r.settings.minPerDay))} a day, so they aren’t on Reorder: keep or stop reordering each">+${money(slowLost.reduce((a, p) => a + p.lost, 0))} on ${inr.format(slowLost.length)} slow sellers: decide</a></p>` : ''}
         </div>
         ${moving()}
       </section>
@@ -501,7 +508,7 @@
       ...(f === 'all' ? [{ k: 'status', label: 'Status', f: status, val: (p) => -['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered'].indexOf(p.status) }] : []),   // SW-024: a tab of one status needs no Status column
       { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: (p) => whyCell(p, true), val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
-      { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
+      { k: 'orderValue', label: t.hasCost ? 'Order cost' : 'Order value', r: 1, tip: t.hasCost ? 'Order quantity × unit cost (× average price paid if cost is unknown)' : 'Order quantity × average price paid: no unit costs in Shopify, so this is at selling price, not cash out', f: (p) => money(p.orderValue) },
       ...(window.SW_MONEY ? SW_MONEY.cols() : []),   // SW-041
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
@@ -517,8 +524,8 @@
     const head = ordered
       ? `<h1>${open.length ? `${inr.format(open.length)} on order · ${inr.format(soon)} due this week${late ? ` · <span class="lost">${inr.format(late)} late</span>` : ''}` : 'Nothing on order'}</h1>
         ${due.length ? `<p class="exp">Next lands ${dateShort(due[0].onOrder.eta)}. Late = past its date with less than 90% received: chase the supplier.</p>` : ''}`
-      : `<h1>Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products${f === 'all' && week ? ` <span class="nw">· ${money(Math.max(0, t.orderValueAll - t.orderValueNow))} more this week (${week})</span>` : ''}</h1>
-        <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate.</p>`;
+      : `<h1>${t.hasCost ? `Order <span class="amberv">${money(t.orderValueNow)}</span> today across ${t.orderToday} products` : `Order <span class="amberv">${inr.format(t.orderToday)} products</span> today <small class="hsub">${money(t.orderValueNow)} at selling price</small>`}${f === 'all' && week ? ` <span class="nw">· ${money(Math.max(0, t.orderValueAll - t.orderValueNow))} more this week (${week})</span>` : ''}</h1>
+        <p class="exp">Each order covers lead time + days the stock should last + buffer, at the product’s in-stock sales rate. Biggest sales a day first.${t.hasCost ? '' : ' <span id="nocost-reorder">No unit costs in Shopify: ₹ are at selling price.</span>'}</p>`;
     return `
       <section class="headline">${head}</section>
       ${planBar()}
@@ -552,7 +559,7 @@
     const groups = [['all', 'All', all.length], ['open', 'Still out', stillOut], ['small', 'Refilled too little', all.filter((a) => a.small).length], ['again', 'Ran out again', all.filter((a) => a.repeat).length], ...(dead.length ? [['dead', 'Out but not selling', dead.length]] : [])];
     const rows = (f === 'dead' ? dead : all).filter((a) => (f === 'all' || f === 'dead' || (f === 'open' ? a.open : f === 'small' ? a.small : a.repeat)) && (!q || `${a.name} ${a.sku}`.toLowerCase().includes(q)));
     const h = (state.shopify || {}).history;
-    const extra = `${dead.length ? `<p class="muted small" id="dead-note" title="No sales and no sales lost ${inPeriod()}: nothing was lost while they were out">${dead.length} out but not selling, not counted above</p>` : ''}${h && h.ok && h.kept && r.from < h.until ? `<p class="muted small" id="rebuilt-note" title="Shopify keeps no past stock levels; these come from its stock change log, to the hour (LOGIC §1c)">Before ${esc(dt(h.until).slice(0, 6))}: rebuilt from Shopify’s change log</p>` : ''}`;
+    const extra = `${dead.length ? `<p class="muted small" id="dead-note" title="No sales and no sales lost ${inPeriod()}: nothing was lost while they were out">${dead.length} out but not selling, not counted above</p>` : ''}${h && h.ok && h.kept && r.from < h.until ? `<p class="muted small" id="rebuilt-note" title="Shopify keeps no past stock levels; these come from its stock change log, to the hour (LOGIC §1c). The others have no stock record before then, so their sales lost before it are unknown (Data lists them)">Before ${esc(dt(h.until).slice(0, 6))}: rebuilt from Shopify’s change log for ${inr.format(h.kept)} of ${inr.format(h.total)} products</p>` : ''}`;
     const pattern = (a) => [a.small ? `<span class="st small" title="Refilled with less than ${state.report.settings.smallTopUpDays} days of sales, ${a.small}×">Refilled too little</span>` : '', a.repeat ? `<span class="st again" title="Ran out again within a week, ${a.repeat}×">Ran out again</span>` : ''].join(' ') || '–';
     const cols = [
       { k: 'name', label: 'Product', f: (a) => `<span class="pname" title="${esc(a.name)}">${esc(a.name)}</span>` },
@@ -637,7 +644,7 @@
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
     { k: 'outs', label: 'Times out', r: 1, opt: 1 },
-    { k: 'excessValue', label: 'Overstock ₹', r: 1, opt: 1, tip: 'Cash in stock beyond what lead time + days to last + buffer need (at unit cost when known)', f: (p) => (p.excessValue ? `<span class="${p.overstock ? 'plumv' : 'muted'}">${money(p.excessValue)}</span>` : '–') },
+    { k: 'excessValue', label: 'Overstock ₹', r: 1, opt: 1, tip: `Stock beyond what lead time + days to last + buffer need, ${atCost()}${state.report.totals.hasCost ? ' (selling price where a product has none)' : ''}`, f: (p) => (p.excessValue ? `<span class="${p.overstock ? 'plumv' : 'muted'}">${money(p.excessValue)}</span>` : '–') },
     ...(state.report.totals.hasCost ? [
       { k: 'lostProfit', label: 'Profit lost', r: 1, opt: 1, tip: 'Units lost × (price paid − unit cost)', f: (p) => (p.lostProfit ? `<span class="lostv">${money(p.lostProfit)}</span>` : '–') },
       { k: 'margin', label: 'Margin', r: 1, opt: 1, tip: '(price paid − unit cost) ÷ price paid', f: (p) => (p.margin == null ? '–' : `${n1(p.margin)}%`) },
@@ -712,8 +719,8 @@
     { k: 'sold', label: 'Sold', r: 1, tip: `₹ sold in the last ${state.days} days`, f: (g) => money(g.sold) },
     { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs in the last ${state.days} days`, f: (g) => (g.lost ? `<span class="lostv">${money(g.lost)}</span>` : '–') },
     ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
-    { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
-    { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
+    { k: 'orderValue', label: 'Order ₹', r: 1, tip: `To order today for this group, ${atCost()}`, f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
+    { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: `Stock beyond need, overstocked products only, ${atCost()}`, f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
     ...(window.SW_TARGETS ? [SW_TARGETS.col(lens, { canEdit: !viewOnly(), rerender: () => { if (state.view === 'products' && state.lens === lens) render(); } })] : []),   // SW-042
     { k: 'trendPct', label: 'Trend', tip: 'Units sold per week by the group’s products, last 8 weeks (rose = one or more of them out part of that week); % = the group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendCell, val: (g) => g.trendPct ?? -999 },
   ];
@@ -735,7 +742,7 @@
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
         <header><h3><span class="pname">${esc(g.label)}</span></h3>${mspark(g)}<div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
-        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>${window.SW_TARGETS ? SW_TARGETS.card(g) : ''}`)}</div>
+        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${g.trendPct != null ? `<span class="trl">Trend ${trendOnly(g)}</span>` : ''}</div>${window.SW_TARGETS ? SW_TARGETS.card(g) : ''}`)}</div>
       <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
   }
   function openGroup(key) {
@@ -773,6 +780,14 @@
     const fail = h && h.ok && h.note ? ` · last try: ${h.note}` : '';
     return `<p class="muted small" id="history-line">${esc(txt + fail)}${btn}</p>`;
   }
+  /* UI-1: products with no stock record before part of the period (the rebuild left them out, or they're new to the data):
+     named, with units sold, so "N left out" isn't a mystery and their ₹0 lost isn't read as a fact */
+  function noHistList() {
+    const r = state.report, list = r.products.filter((p) => p.status !== 'Inactive' && noHistory(p, r.from)).sort((a, b) => (b.unitsSold || 0) - (a.unitsSold || 0) || b.sold - a.sold);
+    if (!list.length) return '';
+    return `<details class="fold" id="nohist-list"><summary class="muted small">${inr.format(list.length)} products have no stock record for part of the period: their sales lost before it is unknown</summary>
+      <div class="bars">${list.map((p) => `<div class="bar-row" data-product="${esc(p.id)}" tabindex="0" role="button" style="grid-template-columns:minmax(0,1fr) auto auto"><span class="name">${esc(p.name)}</span><span class="muted num">from ${esc(dateShort(p.historyFrom))}</span><span class="num">${inr.format(p.unitsSold || 0)} sold</span></div>`).join('')}</div></details>`;
+  }
   function dataView() {
     const s = state.settings, d = state.report.data, src = state.source, sh = state.shopify || {};
     const base = location.origin;
@@ -782,7 +797,7 @@
     return `
       <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. The main passwords open every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${historyLine(sh)}${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${historyLine(sh)}${noHistList()}${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
 
       ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
@@ -839,7 +854,7 @@
     body.innerHTML = '<p class="muted">Loading…</p>'; dr.hidden = false;
     try {
       const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
-      const p = d.product, now = state.report.generatedAt, from = state.report.from;
+      const p = d.product, now = state.report.generatedAt, from = state.report.from, gap = noHistory(p, from);
       body.innerHTML = `
         ${manyStores() ? `<p class="dstore">${esc(SW_STORES.name())}</p>` : ''}<h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
@@ -848,12 +863,13 @@
           <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)} ${atCost()}` : ''}${p?.paceQty != null ? `<br><small id="pace-qty" title="Sales are falling (${p.trendPct ?? '–'}% this product, ${state.report.totals.storeTrendPct ?? '–'}% the typical product): the same order at the last 14 days’ in-stock pace, ${n1(p.pacePerDay)} a day">${inr.format(p.paceQty)} pcs at last 2 weeks’ pace</small>` : ''}</span></div>
           <div class="tile ${p?.daysLeft != null && p.daysLeft <= 3 ? 'lost' : ''}"><b>${p?.daysLeft == null ? (p?.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b><span>days left · ${p?.stock ?? '–'} in stock</span></div>
           <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
-          <div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>
+          ${gap ? `<div class="tile" id="lost-unknown" title="No stock record before ${esc(dateShort(gap))}, so stock-outs before then can’t be seen (Shopify’s change log didn’t add up for it)"><b>${p.lost ? money(p.lost) : 'Unknown'}</b><span>sales lost${p.lost ? ` since ${esc(dateShort(gap))}` : ''} · before ${esc(dateShort(gap))}: unknown</span></div>`
+    : `<div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>`}
         </section>
         ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>
           <p class="muted small">Units sold per week, week starting on the date shown; rose = out of stock part of that week.</p>` : ''}</div>
-        <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now)}<span class="muted" style="font-size:13px">Shaded = out of stock.</span></div>
+        <div class="panel chart"><h2>Stock level</h2>${stockChart(d.timeline, from, now, gap)}<span class="muted" style="font-size:13px">${gap ? `<span id="nohist-note">Hatched = no stock history before ${esc(dateShort(gap))}: Shopify’s change log didn’t add up for it. </span>` : ''}Shaded = out of stock.</span></div>
         <details class="panel fold"><summary><b>More</b> <span class="muted">units per day, every stock-out</span></summary>
         <div class="chart"><h2>Units sold per day</h2>${unitsChart(d.dailyUnits)}</div>
         <div><h2>Stock-outs</h2>${d.stockouts.length ? `<div>${d.stockouts.map((s) => `<div class="ep"><span>${dt(s.start)} → ${s.open ? '<span class="st open">still out</span>' : dt(s.end)}</span><span class="muted">${dur(s.hours)}</span><b style="color:#E0506E">${money(s.lost)}</b>${s.topUp != null ? `<span>refilled ${s.topUp} pcs</span>` : ''}${s.small ? '<span class="st small">Small top-up</span>' : ''}${s.repeat ? '<span class="st again">Out again</span>' : ''}</div>`).join('')}</div>` : '<p class="muted">None in this period.</p>'}</div></details>`;
@@ -1105,6 +1121,8 @@
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('div[data-product]')) { e.preventDefault(); lastRow = e.target; openProduct(e.target.dataset.product); }   // Overview rows (critic UI-3)
   });
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
+  /* M7: phones get an opaque strip behind the sticky × once the drawer scrolls (styles.css .scrolled) */
+  $('.drawer-card').addEventListener('scroll', (e) => { e.currentTarget.classList.toggle('scrolled', e.currentTarget.scrollTop > 8); }, { passive: true });
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', (e) => { if (!$('#drawer').hidden && !e.state?.drawer) closeDrawer(); });
   document.addEventListener('scroll', (e) => { if (e.target.classList && e.target.classList.contains('chips')) chipEdges(e.target); }, true);   // final r2 M1

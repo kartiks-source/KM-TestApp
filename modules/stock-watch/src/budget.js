@@ -22,14 +22,15 @@ function parse(x) {
  *   units short = min(order qty, max(0, sales/day × (lead + cover) − stock now − units on order that count))
  *   margin per unit = average price paid − unit cost; unknown cost → price × the store's average margin %
  *   (products with a cost); no product has a cost → price (then it ranks ₹ sales kept per ₹, protectEst true)
- * perRupee = protect ÷ order cost (2 decimals). Rows with nothing to order get protect 0, perRupee null.
+ * perRupee = protect ÷ order cost (2 decimals). Rows with nothing to order, and free gifts (engine row.gift: average
+ * paid under 10% of the list price, no cost), get protect 0, perRupee null: ranked last, never "fits" first.
  */
 function annotate(r) {
   const S = r.settings || {};
   const costed = (r.products || []).filter((p) => p.cost > 0 && p.price > 0);
   const avgPct = costed.length ? costed.reduce((s, p) => s + Math.max(0, p.price - p.cost) / p.price, 0) / costed.length : 1;
   for (const p of r.reorder || []) {
-    if (!(p.orderQty > 0) || !(p.orderValue > 0)) { p.protect = 0; p.perRupee = null; continue; }
+    if (!(p.orderQty > 0) || !(p.orderValue > 0) || p.gift) { p.protect = 0; p.perRupee = null; continue; }   // gift (M4): mostly sold at ₹0, never ranked
     const lead = +(p.leadDays ?? S.leadDays) || 0, cover = +S.coverDays || 0;
     const coming = p.onOrder && p.onOrder.counts ? +p.onOrder.remaining || 0 : 0;
     const short = Math.min(p.orderQty, Math.max(0, (+p.perDay || 0) * (lead + cover) - Math.max(0, +p.stock || 0) - coming));

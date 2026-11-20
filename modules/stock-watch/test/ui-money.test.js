@@ -43,6 +43,7 @@ for (const [w, h] of [[1440, 900], [390, 844]]) {
     if (w <= 760) {   // phones: the bar is folded behind "₹ Budget" so the first card stays near the top (ui-helpers M8)
       assert.equal(await pg.isVisible('.mbar'), false, 'folded by default on a phone');
       await pg.click('#mbar-tg'); await pg.waitForSelector('.mbar #budget-in');
+      assert.ok((await pg.$eval('#budget-in', (e) => e.getBoundingClientRect().height)) >= 44, 'M5: budget box is a 44 px target');
     }
     const before = await pg.$$eval('#view tr[data-id]', (r) => r.map((x) => x.dataset.id));
     assert.equal(await pg.$('.cutline'), null, 'no budget: no line');

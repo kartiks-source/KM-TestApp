@@ -191,3 +191,10 @@ test('SW-025 CSV cells: formula guard on text, numbers untouched, BOM', () => {
   assert.equal(H.csvCell('He said "hi"'), '"He said ""hi"""');
   assert.equal(H.csvText([['a', 1]]), '﻿"a","1"');
 });
+
+test('why: out at the first stock record → "Out since before <date>" (SIMP-6), not "Out 60 d"', () => {
+  const now = Date.UTC(2026, 10, 20, 12), first = Date.UTC(2026, 8, 21, 12);
+  const p = { stock: 0, perDay: 0.3, price: 3000, status: 'Out now', historyFrom: first };
+  assert.equal(H.why(p, { leadDays: 7, safetyDays: 3 }, now, first).why, 'Out since before 21 Sep');
+  assert.match(H.why(p, { leadDays: 7, safetyDays: 3 }, now, first + 86400e3).why, /^Out 59 d/);
+});

@@ -87,3 +87,10 @@ test('routes: report rows carry profit kept per ₹; ?budget= keeps only the row
   assert.ok(cut.reduce((a, l) => a + +l.split('","')[6], 0) <= budget, 'the file fits the budget');
   assert.ok(cut.every((l) => c.fit.has(l.split('","')[3])), 'the same rows as the page');
 });
+
+test('a free gift (engine row.gift) is never ranked first by the budget (M4: Mystery Gift 460 pcs for ₹361)', () => {
+  const r = { settings: { leadDays: 7, coverDays: 30 }, products: [], reorder: [row('gift', { price: 1, cost: null, orderQty: 460, orderValue: 361, perDay: 18, gift: true }), row('x', { cost: null })] };
+  B.annotate(r);
+  assert.equal(r.reorder[0].perRupee, null);
+  assert.deepEqual(B.cut(r.reorder, 1e5).rows.map((p) => p.id), ['x', 'gift']);
+});

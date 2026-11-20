@@ -41,7 +41,10 @@ for (const [w, h] of [[1440, 900], [390, 844]]) {
   test(`${w}: weekly panel on Overview; a target on a category row; a pasted list filters Products, saved for the team`, opts, async () => {
     const pg = await open(w, h, '/#overview');
     await pg.waitForSelector('#weekly:not([hidden]) .wk-c');
-    assert.equal(await pg.$$eval('#weekly .wk-c', (c) => c.length) >= 5, true, 'headline numbers with deltas');
+    /* SIMP-4 (1.1.1): flows only (sales lost, profit lost when costed, stock-outs); end-of-week states left to the headline */
+    const labels = await pg.$$eval('#weekly .wk-c > span', (c) => c.map((x) => x.textContent));
+    assert.ok(labels.length >= 2 && labels.length <= 3, `flows with deltas: ${labels}`);
+    assert.ok(!labels.some((l) => /Still out|Overstock|To reorder|Order today/.test(l)), `no end-of-week states: ${labels}`);
     assert.ok(await pg.$$eval('#weekly .wk-row', (r) => r.length) <= 5, 'top 5 movers at most');
     assert.equal(await sideways(pg), 0);
 

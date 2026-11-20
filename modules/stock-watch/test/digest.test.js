@@ -260,3 +260,12 @@ test('CEO "7 days before" ends a stock-out at archive time: a variant archived w
     d.stock.splice(d.stock.length - rowsS.length); d.orders.splice(d.orders.length - rowsO.length); delete d.catalog[id];
   }
 });
+
+test('no unit costs: the digest says "at selling price", never "cash" (SIMP-1)', () => {
+  const r = ctx.report({ days: 30, now });
+  r.totals = { ...r.totals, hasCost: false, orderToday: 3, orderValueNow: 12345, excessValue: 5000, overstocked: 2 };
+  const d = D.build({ report: r, yesterday: r.yesterday, role: 'founder', storeName: 'S', now });
+  assert.match(d.text, /Order today: ₹12,345 at selling price across 3 products/);
+  assert.match(d.text, /Overstock at selling price: ₹5,000 in 2 products/);
+  assert.doesNotMatch(d.text, /Cash/);
+});

@@ -105,8 +105,10 @@ const bad = (error) => ({ code: 400, body: { ok: false, error } });
 async function handle(req, url, readBody, ctx) {
   const p = url.pathname, m = req.method;
   if (p === '/api/suppliers' && m === 'GET') {
-    const res = ctx.resolved(), list = R.usage(res, all());
-    const n = ctx.products().length, assigned = Object.keys(res).length;
+    /* M11: count only the products the page lists (active, tracked), not every archived / draft variant in the catalog */
+    const ids = new Set(ctx.products().map((x) => String(x.id)));
+    const res = Object.fromEntries(Object.entries(ctx.resolved()).filter(([id]) => ids.has(String(id)))), list = R.usage(res, all());
+    const n = ids.size, assigned = Object.keys(res).length;
     return { code: 200, body: { ok: true, suppliers: list, mapped: Object.keys(all().map).length, products: n, unassigned: Math.max(0, n - assigned), limits: R.LIMITS } };
   }
   if (p === '/api/suppliers' && m === 'PUT') {
