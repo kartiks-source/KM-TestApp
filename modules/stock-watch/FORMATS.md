@@ -137,6 +137,7 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | `restore.json` | a human | a `store.json` to put in place at the next start (`docs/RUNBOOK.md`) | — |
 | `.migrated-from-data-dir.json` | `src/migrate.js`, the home store only; its presence in any store folder means the move is done for good | `{ from: 'DATA_DIR', id, at, files: [{ path, sha256 }] }`: the old single-store files moved here, with their hashes (originals are deleted only while they still match) | no |
 | **top of `DATA_DIR`:** `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key, for every store | no (a new one signs everyone out) |
+| **top of `DATA_DIR`:** `instance.lock` | `src/lock.js` (SW-055) | `{ id, pid, host, startedAt, beatAt }`: the copy that writes; refreshed every 30 s, removed on a clean stop, taken over after 2 minutes without a refresh | no |
 | **top of `DATA_DIR`:** `stores.json` | `src/stores.js` (Performity only) | `{ list: [{ id, name, shop }], at }`: the last good brand list, used while the API is down | no (re-read every 10 minutes) |
 | **top of `DATA_DIR`:** `stores/.migrating-<id>/` | `src/migrate.js` | a half-done copy left by a crash during the move; thrown away and redone on the next start | no |
 

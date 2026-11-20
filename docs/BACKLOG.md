@@ -206,6 +206,10 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: one-line JSON logs (time, level, msg, store, fields); a request line per API call without query string or cookies; one boot line naming set variables, never values; tokens scrubbed in every line.
 - Status: Done. `src/log.js`; `server.js` captures `console.*`, so every module's lines are JSON and scrubbed; `test/log.test.js`. RUNBOOK and SECURITY.md updated.
 
+**SW-055 · One copy writes; KEEP_DAYS; capacity warnings** (S · ops)
+- Accept: lock file in `DATA_DIR` (stale after 2 min without heartbeat is taken over; a second copy refuses to write and says why); `KEEP_DAYS` env for backups (default 14); warnings on `/status` and Data at 25 MB, 150k rows, disk 80%.
+- Status: Done. `src/lock.js`, `src/capacity.js`, `public/ops.js`; ADR-0012 updated; LOGIC §14a; `test/ops.test.js`. Limit: the read-only copy still runs the one-time store migration and a pending restore at start (both already done by the first copy in practice).
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -225,7 +229,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |
-| SW-055 | Single-instance lock file; KEEP_DAYS env; capacity warnings | S | ops | SRE ideas |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
 | SW-057 | Trial input keeps raw text while typing | S | builder | QA F10 |
 | SW-058 | Agent token savings: doc routing table, DEVLOG rotation, `test:agent` dot reporter, `.ignore`, LOGIC index, critic reports saved to `docs/reviews/` | S | builder | tokens T2–T11, process ideas |

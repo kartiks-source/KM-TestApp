@@ -74,7 +74,7 @@
   async function load() {
     if (window.SW_STORES) await SW_STORES.ready;
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
-    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
+    state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {}; state.ops = set.ops || null;   // SW-055: capacity + read-only notice on Data
     state.runs = set.runs || [];   // SW-030
     state.role = set.role || 'admin'; state.changes = set.changes || []; state.lastPlanChange = set.lastPlanChange || null;   // SW-029
     header();
@@ -757,6 +757,7 @@
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
         <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
+      ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>
       <details class="panel fold"><summary><b>Google Sheet</b> <span class="muted">from the Stock Watch sheet</span></summary>

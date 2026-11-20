@@ -79,6 +79,8 @@ Roll back: Railway dashboard → Deployments → the previous deployment → Red
 | `backups/store-YYYYMMDD-HHMMSS-before-demo.json` | just before demo data replaces real data | newest 14 |
 | `backups/store-YYYYMMDD-HHMMSS-before-restore.json` | just before a restore (below) | newest 14 |
 
+**How many:** `KEEP_DAYS` (Railway variable, 1–365, default 14) of each kind; for the dailies that is the number of days back. Raise it only with disk to spare (each file is a full copy; the Data page warns at 80% full).
+
 An empty store and demo data are never backed up (nothing to lose; demo reloads would push real snapshots out). Each file is a full copy of `store.json` **plus `sideFiles`: the Mark-ordered records (`onorder.json`) and slow-seller decisions (`decisions.json`)**, which live next to it on the volume (critic r2 X1: lost PO marks put ordered lines back in Order today, the duplicate PO SW-012 exists to stop). The export below carries them too. So 28 files × the store's size must fit on the volume: at 50 MB (ADR-0003's move trigger) that is 1.4 GB.
 
 **2. Railway volume backups (whole volume, owner sets up once).** Railway dashboard → project `stock-watch` → service `web` → the `/data` volume → Backups → schedule **Daily**, keep **at least 7**. These survive a deleted or corrupted volume, which app backups (on the same volume) don't. Status: not yet confirmed on (see DEVLOG).
@@ -139,6 +141,8 @@ From a Railway volume backup all of these come back together. From an app backup
 | Numbers look empty after a deploy | Data page row counts; `ls -l /data` | Volume not attached at `/data`, or Clear was pressed: restore (above) |
 | Shopify data stale | Data page: last pull, last error; logs `shopify pull failed:` | Key expired or scopes missing: see SECURITY.md (rotate Shopify key). Press Sync now on the Data page |
 | Flow rows not arriving | Flow run history in Shopify; Data page last row time | Ingest key rotated → update the `X-Ingest-Key` header in both Flows |
+| Data page "Read-only" / writes get 503 "Another copy of the app" | `/status` `writing`; Railway: two deployments running? `cat /data/instance.lock` | Wait: the new copy takes over when the old one stops (at once) or goes quiet (2 min). Stuck: stop the old deployment. Never delete the lock while two copies run |
+| Data page "Running out of room" | `/status` `warnings` | Over 25 MB or 1,50,000 rows: plan SW-046 (ADR-0003). Disk over 80%: lower `KEEP_DAYS`, delete `*.rejected-*` / `*.corrupt-*` files, or grow the volume |
 | Disk full | Railway volume usage; `du -sh /data/*` | Delete old `restore.json.rejected-*` files; grow the volume; review ADR-0003 triggers |
 | `Refusing to start: onorder.json can't be read` (or `decisions.json`) | `ls -l /data/stores/*/` for `onorder.json.corrupt-*` | The file is damaged and there is no good `.bak`. Nothing was overwritten. Restore the newest backup of that store (above: its `sideFiles` bring the marks back), or move the bad file aside (`mv /data/stores/<id>/onorder.json /data/stores/<id>/onorder.json.bad`) to start with no marks, then re-mark open POs |
 | Restore did nothing | Logs for `restore:` lines; `ls /data/stores/<id>` | File in the wrong place (must be `/data/stores/<id>/restore.json`; the top-level `/data/restore.json` is ignored) or rejected (`restore.json.rejected-*`): check it's a store export |

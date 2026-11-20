@@ -501,6 +501,19 @@ Code: `src/access.js`, `src/audit.js` (SW-029, ADR-0011). Tests: `test/access.te
 
 **Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords. A viewer sees the "Sync issue" pill without its link (no Data page), so the error text is only its hover tooltip, which phones don't show.
 
+## 14a. Capacity warnings and the data folder lock (SW-055, `src/capacity.js`, `src/lock.js`)
+
+**Rule.** A warning shows on Data (this store) and in `/status` `warnings` (every store) when:
+- `store.json` is over **25 MB**, or
+- a store keeps over **1,50,000 rows** (stock changes + order lines), or
+- the data volume is over **80% full**.
+
+The first two are half of ADR-0003's move trigger (50 MB, 300k rows), so there is time to plan the storage move before pages slow down. Warnings never turn `/status` red: they are notice, not an outage.
+
+**One copy writes.** The copy of the app that holds `DATA_DIR/instance.lock` writes; it refreshes the lock every 30 s. Another copy on the same folder only reads: every write gets **503** with the reason, Data shows it, `/status` `writing: false`, and it starts no pulls, backups or digests. It takes over when the lock is removed (a clean stop) or has had no heartbeat for **2 minutes**.
+
+**Why.** Two copies writing one JSON file lose each other's changes (ADR-0012). **Considered:** refusing to start (a redeploy where the old copy hangs would crash-loop); OS file locks (not on every volume type). **Can be wrong:** a copy frozen for over 2 minutes that wakes up writes once more before it sees the takeover.
+
 ## 14. Sync progress and run history
 
 Code: `src/runs.js`, counts from `syncShopify` / `syncSheet` in `server.js` (SW-030). Tests: `test/runs.test.js`.

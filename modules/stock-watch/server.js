@@ -41,6 +41,8 @@ const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
 const TZ = require('./src/tz');             // the store's time zone (SW-049): every store-time day, hour and stamp
 const log = require('./src/log');           // one-line JSON logs, tokens scrubbed (SW-054)
+const lock = require('./src/lock');         // one app per data folder (SW-055)
+const capacity = require('./src/capacity'); // size, rows and disk warnings (SW-055)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -351,7 +353,7 @@ function statusBody() {
   const app = version.current();
   const out = { ok: true, version: app.version, sha: app.short, stale: false, ageMin: null, lastPull: null, shopify: !!keys.status().source, running: pulls.size > 0, pullFailing: false,
     saveOk: true, source: null, storeBytes: 0, stockRows: 0, orderRows: 0, variants: 0, stores: 0, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) };
-  const sources = new Set();
+  const sources = new Set(), warn = [];
   for (const s of stores.list()) {
     out.stores++;
     try {
@@ -362,13 +364,17 @@ function statusBody() {
         if (f.pullFailing) out.pullFailing = true;
         if (f.ageMin != null) out.ageMin = Math.max(out.ageMin ?? 0, f.ageMin);
         if (f.lastPull) out.lastPull = out.lastPull == null ? f.lastPull : Math.min(out.lastPull, f.lastPull);   // the oldest store's
-        try { out.storeBytes += fs.statSync(store.file()).size; } catch { /* not written yet */ }
+        let bytes = 0; try { bytes = fs.statSync(store.file()).size; } catch { /* not written yet */ }
+        out.storeBytes += bytes;
         out.stockRows += d.stock.length; out.orderRows += d.orders.length; out.variants += Object.keys(d.catalog || {}).length;
+        for (const w of capacity.warnings({ storeBytes: bytes, rows: d.stock.length + d.orders.length })) if (!warn.some((x) => x.code === w.code)) warn.push(w);
         sources.add(d.source);
       });
     } catch { out.saveOk = false; }
   }
   out.source = sources.size === 1 ? [...sources][0] : sources.size ? 'mixed' : null;
+  out.warnings = [...warn, ...capacity.warnings({ disk: capacity.diskUsed(DATA_DIR) })];   // SW-055: early notice, never fails the check
+  out.writing = !readOnly();   // false: another copy holds the data folder (SW-055)
   out.ok = out.saveOk && !out.stale && out.stores > 0;
   return { code: out.ok ? 200 : 503, body: out };
 }
@@ -490,7 +496,7 @@ async function storeApi(req, res, url, role, id) {
     const r = engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts());
     return send(res, 200, { ok: true, ...groups.build(r.products, cat, lens, { showAll: url.searchParams.get('all') === '1' }), catalog: catalog.info(cat) });
   }
-  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, store: here, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus() });
+  if (p === '/api/settings' && req.method === 'GET') return send(res, 200, { ok: true, store: here, settings: publicSettings(d.settings, role), role, changes: role === access.ADMIN ? audit.recent(d, 50) : [], lastPlanChange: audit.lastOf(d, PLAN_KEYS), runs: runs.list(d), source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), ops: opsState(d) });
   if (p === '/api/shopify/sync' && req.method === 'POST') {
     if (!keys.status().source) return fail(res, 400, 'Shopify isn’t connected');
     const run = syncShopify(id);
@@ -593,6 +599,7 @@ const server = http.createServer(async (req, res) => {
     if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
       return fail(res, 403, 'Cross-site request refused');
     }
+    if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ingest/')) && readOnly()) return fail(res, 503, readOnly());   // SW-055
     if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
     if (url.pathname === '/health') { const h = healthBody(); return send(res, h.code, h.body); }
     if (url.pathname === '/login' && req.method === 'GET') {
@@ -630,6 +637,14 @@ const server = http.createServer(async (req, res) => {
 
 /* ---------- start and stop ---------- */
 const timers = [];
+let instance = null;   // the data folder lock (SW-055)
+/** Why this copy doesn't write (plain words), or null when it holds the lock. */
+const readOnly = () => (instance && !instance.held() ? instance.reason() : null);
+/** Data page: this store's capacity warnings and the read-only reason (SW-055). */
+function opsState(d) {
+  let bytes = 0; try { bytes = fs.statSync(store.file()).size; } catch { /* not written yet */ }
+  return { warnings: capacity.warnings({ storeBytes: bytes, rows: d.stock.length + d.orders.length, disk: capacity.diskUsed(DATA_DIR) }), readOnly: readOnly() };
+}
 let stopping = false;
 /** SIGTERM / SIGINT (Railway redeploy, Ctrl-C): stop the timers, let a running pull finish (up to
  *  25 s), write the store, then close. A pull cut short resumes from its saved cursor next time. */
@@ -638,7 +653,8 @@ async function shutdown(signal) {
   console.log(`${signal}: stopping`);
   timers.forEach((t) => clearInterval(t));
   if (pulls.size) await Promise.race([Promise.allSettled([...pulls.values()]), new Promise((r) => setTimeout(r, Number(process.env.STOP_WAIT_MS) || 25000))]);
-  const saved = store.saveAll();
+  const saved = readOnly() ? true : store.saveAll();   // a read-only copy never writes (SW-055)
+  if (instance) instance.release();
   if (!saved) console.error('Stopped without saving the latest changes:', store.healthAll().problems.join('; '));
   const code = saved ? 0 : 1;
   server.close(() => process.exit(code));
@@ -651,7 +667,7 @@ const BOOT_VARS = ['NODE_ENV', 'DATA_DIR', 'ADMIN_PASSWORD', 'VIEW_PASSWORD', 'P
   'AZURE_KEY_VAULT_URL', 'SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'ALERT_WEBHOOK_URL', 'DIGEST_WEBHOOK_URL', 'PUBLIC_URL', 'KEEP_DAYS'];
 function bootLine(list) {
   const app = version.current(), k = keys.status();
-  log.info('boot', { version: app.version, sha: app.short || null, node: process.version, source: k.source || 'none', ready: k.source ? !!k.ready : null, stores: list.length, set: log.setVars(BOOT_VARS) });
+  log.info('boot', { version: app.version, sha: app.short || null, node: process.version, source: k.source || 'none', ready: k.source ? !!k.ready : null, stores: list.length, writing: !!(instance && instance.held()), keepDays: backup.KEEP, set: log.setVars(BOOT_VARS) });
 }
 
 async function main() {
@@ -666,6 +682,8 @@ async function main() {
   }
   const accessProblem = access.configProblem(PASSWORDS);
   if (accessProblem) { console.error('Refusing to start: ' + accessProblem); process.exit(1); }
+  instance = lock.make(DATA_DIR);
+  if (!instance.acquire()) log.warn('read-only', { why: instance.reason() });
   await stores.refresh();   // Performity: the brand list (the last good one when the API is down)
   const list = stores.list();
   if (!list.length) console.warn(`No store yet (${stores.info().lastError || 'empty brand list'}); retried every 15 minutes.`);
@@ -675,6 +693,8 @@ async function main() {
     try { openStore(s.id); } catch (e) { console.error(`Refusing to start: ${e.message}`); process.exit(1); }
   }
   if (fs.existsSync(path.join(DATA_DIR, 'restore.json'))) console.warn('DATA_DIR/restore.json is not read: put it in DATA_DIR/stores/<id>/restore.json (docs/RUNBOOK.md).');
+  /* SW-055: only the copy holding the data folder lock writes; a read-only one starts this when it takes the lock over */
+  const work = () => {
   backup.start({ each: (fn) => eachStore(fn) });   // before-replace snapshots; daily backups, every store, hourly
   /* demo only on a store that has never held real data (SW-007) */
   if (!keys.status().source) {
@@ -693,6 +713,14 @@ async function main() {
   if (keys.status().source) timers.push(setTimeout(loop, 5000));
   timers.push(digests.schedule(digestCtx, (fn) => eachStore(fn)));   // SW-028: every minute, each store; sends at its set hour
   timers.forEach((t) => t.unref());
+  };
+  if (instance.held()) work();
+  const beat = setInterval(() => {
+    const was = instance.held(), now = instance.beat();
+    if (!was && now) { log.info('took over the data folder lock'); work(); }
+    if (was && !now) { log.error('lost the data folder lock: another copy took over; this one stops writing', { why: instance.reason() }); timers.forEach((t) => clearInterval(t)); }
+  }, lock.BEAT_MS);
+  beat.unref(); timers.push(beat);
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
   bootLine(list);
   const app = version.current();

@@ -17,3 +17,7 @@ One replica, volume at `/data`, `/health` as the Railway health check. Until Git
 - No horizontal scale; acceptable for one store per deploy.
 - Graceful shutdown (SW-004) and backups (SW-005) are required, not optional.
 - Revisit with ADR-0003's Postgres trigger or a second store.
+
+## Update 2026-11-20 (SW-055)
+
+One replica is now also enforced in code: `DATA_DIR/instance.lock` (heartbeat 30 s, stale after 2 min). A second copy on the same volume serves reads and refuses writes with 503 and the reason, and takes over when the first stops or goes quiet. Chosen over refusing to start, so a slow-stopping old deployment can't crash-loop the new one.

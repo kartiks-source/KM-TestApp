@@ -33,7 +33,9 @@ const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
 const dir = () => path.join(scope.dir(), 'backups');
 const storeFile = () => path.join(scope.dir(), 'store.json');
 const restoreFile = () => path.join(scope.dir(), 'restore.json');
-const KEEP = 14;
+/** KEEP_DAYS env (SW-055): how many of each kind to keep, 1–365, default 14 (dailies: one per day, so that many days back). */
+const keepFrom = (v) => (/^\d+$/.test(String(v ?? '').trim()) ? Math.min(365, Math.max(1, Number(v))) : 14);
+const KEEP = keepFrom(process.env.KEEP_DAYS);
 const DAILY = /^store-\d{8}\.json$/;
 const EVENT = /^store-\d{8}-\d{6}-[a-z0-9-]+\.json$/;
 
@@ -177,4 +179,4 @@ function route(req, res, url) {
   return true;
 }
 
-module.exports = { start, prepare, route, snapshot, daily, rotate, restorePending, text, dir, KEEP, SIDES };
+module.exports = { start, prepare, route, snapshot, daily, rotate, restorePending, text, dir, KEEP, keepFrom, SIDES };

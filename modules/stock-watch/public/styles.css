@@ -677,3 +677,9 @@ table.fixed td:first-child { max-width: none; }
   .panel-head a { min-width: 44px; text-align: center; display: inline-block; }
   .wrap > .toolbar .colpick > summary.btn { min-width: 44px; justify-content: center; }
 }
+
+/* sprint3 D-ops */
+/* SW-055: Data page notice (capacity, read-only copy) */
+.ops-warn { background: var(--amber-soft); border: 1px solid var(--amber); color: var(--ink); border-radius: var(--r); padding: 10px 14px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.ops-warn b { color: var(--amber); font-size: 14px; }
+.ops-warn p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
