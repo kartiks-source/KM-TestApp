@@ -9,6 +9,9 @@ Older entries: [2026-11](devlog/2026-11.md)
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+
+## 2026-11-20 · 1.1.4 · reversal labels
+stock-watch. External check of 30-day rates: 9/12 match Shopify's reversed-quantity rate; 3 differ by dating (order date vs reversal date). Renamed Returns % → Cancel/refund % (not physical returns only), "Losses for" → "Period". LOGIC §9e notes the check.
 ## 2026-11-20 · returns from refunds, sales checked vs Shopify (1.1.3)
 stock-watch 1.1.3, on `main` (not pushed, not deployed). Fixes the SW-064 live check (app 5 units returned vs Shopify 259, 60 d).
 - Cause (found live, read-only): Shopify's *Returns* = cancelled orders (refund lines, restock CANCEL / RETURN), which we left out; Sammsara had no post-delivery refunds in 60 d. Also a refund need not lower `currentQuantity`.

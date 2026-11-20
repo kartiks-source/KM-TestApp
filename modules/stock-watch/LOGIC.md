@@ -643,6 +643,8 @@ Products → View: Categories / Collections / Tags / Parent products shows a **T
 
 ## 9e. Returns % per product (SW-064, 1.1.3, `src/engine.js` `returnsOf`, `src/shopify.js` `orderRows`)
 
+**Name on the page (1.1.4): "Cancel/refund %".** It measures reversals (cancellations, refunds, order edits that remove items), not physical returns alone, so it isn't called "Returns". External check, 30 days to 20 Nov (store time): 9 of 12 products match Shopify's reversed-quantity rate to one decimal; Cascade 4.7% vs 5.4%, Casablanca 11.3% vs 11.4%, Evelyn Flamingo 10.1% vs 10.8%. The gap is dating: we count by order date (reversals of orders placed in the period, whenever they happened); Shopify counts by the day of the reversal (including orders placed before the period). Order date is kept because it answers "of what we sold, how much came back"; Shopify's mixes older orders into the period.
+
 **Rule:** for orders placed in the selected period (by order date, the same orders as ₹ sold), **cancelled orders included**:
 - units ordered = Σ `ordered` (Shopify's line `quantity`), = Shopify's `quantity_ordered`
 - units returned = Σ `returned`: the units on the order's **refunds** (`order.refunds.refundLineItems.quantity`, any restock type), and every unit of a cancelled order

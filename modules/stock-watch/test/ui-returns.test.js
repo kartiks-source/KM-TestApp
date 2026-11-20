@@ -45,7 +45,7 @@ test('1440: Returns % column (amber at 15%+), High returns chip, drawer line', o
   assert.ok(cells.length > 0 && cells.every((c) => parseFloat(c) >= 15), `every row 15%+: ${cells.join(' ')}`);
   await pg.click('#view table tbody tr');
   await pg.waitForSelector('#returns-tile');
-  assert.match(await pg.textContent('#returns-tile'), /^Returned: [\d.]+% \([\d,]+ of [\d,]+(, [\d,]+ cancelled)?\) · ₹.+ refunded$/);
+  assert.match(await pg.textContent('#returns-tile'), /^Cancelled or refunded: [\d.]+% \([\d,]+ of [\d,]+(, [\d,]+ cancelled)?\) · ₹.+ refunded$/);
   assert.equal(await sideways(pg), 0);
   assert.deepEqual(pg.errors, []);
 });
@@ -54,7 +54,7 @@ test('390: chip there, high-return cards say so, no sideways scroll', opts, asyn
   const pg = await open(390, 844, '/?store=sammsara-demo#products', '[data-filter-products="returns"]');
   await pg.click('[data-filter-products="returns"]');
   await pg.waitForSelector('[data-filter-products="returns"].on');
-  assert.match(await pg.textContent('.mcard .mfacts'), /% returned/);
+  assert.match(await pg.textContent('.mcard .mfacts'), /% cancelled\/refunded/);
   assert.equal(await sideways(pg), 0);
   assert.deepEqual(pg.errors, []);
 });

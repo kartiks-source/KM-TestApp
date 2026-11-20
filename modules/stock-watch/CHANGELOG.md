@@ -2,6 +2,11 @@
 
 User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
 
+## 1.1.4 · 2026-11-20 · plain labels for reversals
+
+- "Returns %" is now "Cancel/refund %" (chip "High cancels/refunds", drawer "Cancelled or refunded"): it counts units cancelled, refunded or removed, not only physical returns (Sammsara had none after delivery in the last 60 days). By order date; Shopify's Returns report counts the same units on the day they're reversed, so a product can differ a little (e.g. 30 d Cascade 4.7% vs 5.4%).
+- The period buttons are labelled "Period" (was "Losses for"): they set every number on the page, sales, losses and cancellations.
+
 ## 1.1.3 · 2026-11-20
 
 - Returns % now matches Shopify's Returns: read from each order's refunds, and cancelled orders count (Shopify counts a cancellation as a return). Sammsara, 60 days: 185 of 4,461 units returned or cancelled (was 5), ₹7.61 L; Shopify says 259 / ₹10.13 L because it books a return on its own day, and 52 orders from early September were cancelled on 30 Sep. The drawer says how many were cancelled before shipping. Orders of the last 60 days are read again once after the update.

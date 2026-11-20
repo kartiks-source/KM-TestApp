@@ -597,9 +597,9 @@
   const PRODUCT_TABS = [['all', 'All'], ['bestrisk', 'Best sellers at risk'], ['today', 'Order today'], ['pause', 'Pause promotion'], ['push', 'Push these'], ['lost', 'Losing sales']];
   /* SW-064: "High returns" (15%+ of units ordered came back, 5+ ordered) only when some product qualifies */
   const HIGH_RETURN = 15;
-  const productTabs = (f) => (state.report.totals.highReturns || f === 'returns' ? [...PRODUCT_TABS, ['returns', 'High returns']] : PRODUCT_TABS);
-  const RETURNS_TIP = 'Units returned or cancelled ÷ units ordered, orders placed in the period, cancelled orders included as in Shopify’s Returns (– under 5 units ordered); ₹ refunded ex GST';
-  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} units came back${p.unitsCancelled ? ` (${inr.format(p.unitsCancelled)} cancelled before shipping)` : ''} · ${esc(money(p.refundValue))} refunded">${n1(p.returnPct)}%</span>`);
+  const productTabs = (f) => (state.report.totals.highReturns || f === 'returns' ? [...PRODUCT_TABS, ['returns', 'High cancels/refunds']] : PRODUCT_TABS);
+  const RETURNS_TIP = 'Units cancelled, refunded or removed ÷ units ordered, for orders placed in the period (by order date). Not only physical returns. Shopify’s Returns report counts the same units on the day they’re reversed, so a product can differ a little. – under 5 units ordered; ₹ ex GST';
+  const returnsCell = (p) => (p.returnPct == null ? '–' : `<span class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}" title="${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)} units cancelled or refunded${p.unitsCancelled ? ` (${inr.format(p.unitsCancelled)} cancelled before shipping)` : ''} · ${esc(money(p.refundValue))} refunded">${n1(p.returnPct)}%</span>`);
   const PRODUCT_MORE = [['best', 'Best sellers'], ['week', 'Order this week'], ['ok', 'OK'], ['slow', 'Slow sellers to decide'], ['rising', 'Selling faster'], ['falling', 'Selling slower']];
   const PRODUCT_ALIAS = { over: 'push', decide: 'slow' };   // old links and saved filters
   const pFilter = () => (state.filter.products = PRODUCT_ALIAS[state.filter.products] || state.filter.products);
@@ -655,7 +655,7 @@
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
     { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
     { k: 'perDay', label: 'Sells', r: 1, opt: 1, tip: 'How fast it sells while in stock (exact rate per in-stock day used in the maths)', f: (p) => `<span title="${n1(p.perDay)} per in-stock day">${rate(p.perDay)}</span>` },
-    ...(state.report.totals.unitsOrdered ? [{ k: 'returnPct', label: 'Returns %', r: 1, opt: 1, tip: RETURNS_TIP, f: returnsCell, val: (p) => p.returnPct ?? -1, csv: (p) => p.returnPct ?? '' }] : []),   // SW-064: only when lines carry units ordered
+    ...(state.report.totals.unitsOrdered ? [{ k: 'returnPct', label: 'Cancel/refund %', r: 1, opt: 1, tip: RETURNS_TIP, f: returnsCell, val: (p) => p.returnPct ?? -1, csv: (p) => p.returnPct ?? '' }] : []),   // SW-064: only when lines carry units ordered
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
     { k: 'outs', label: 'Times out', r: 1, opt: 1 },
@@ -691,7 +691,7 @@
       ${window.SW_LISTS ? SW_LISTS.bar(state.q.products, r.products) : ''}
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
         <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week bk">${esc(p.backIn || '–')}</span>` : lossSort ? `<div class="mq"><b class="${p.lost ? 'lostv' : 'muted'}">${p.lost ? money(p.lost) : '–'}</b><small>sales lost</small></div>` : status(p)}</header>
-        <div class="mfacts">${lossSort ? status(p) : ''}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost && !lossSort ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.returnPct >= HIGH_RETURN ? `<span class="amberv">${n1(p.returnPct)}% returned</span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
+        <div class="mfacts">${lossSort ? status(p) : ''}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost && !lossSort ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${p.returnPct >= HIGH_RETURN ? `<span class="amberv">${n1(p.returnPct)}% cancelled/refunded</span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
       ${f === 'slow' ? decidedNote() : ''}`;
   }
   /* SW-032: decided items are hidden until their sales change by more than half; listed here so a decision can be undone */
@@ -879,7 +879,7 @@
           <div class="tile"><b title="${n1(p?.perDay)} per in-stock day">${rate(p?.perDay)}</b><span>sells while in stock${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
           ${gap ? `<div class="tile" id="lost-unknown" title="No stock record before ${esc(dateShort(gap))}, so stock-outs before then can’t be seen (Shopify’s change log didn’t add up for it)"><b>${p.lost ? money(p.lost) : 'Unknown'}</b><span>sales lost${p.lost ? ` since ${esc(dateShort(gap))}` : ''} · before ${esc(dateShort(gap))}: unknown</span></div>`
     : `<div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>`}
-          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Returned: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)}${p.unitsCancelled ? `, ${inr.format(p.unitsCancelled)} cancelled` : ''}) · ${money(p.refundValue)} refunded</span></div>` : ''}
+          ${p?.returnPct != null ? `<div class="tile rtile" id="returns-tile" title="${esc(RETURNS_TIP)}"><span>Cancelled or refunded: <b class="${p.returnPct >= HIGH_RETURN ? 'amberv' : ''}">${n1(p.returnPct)}%</b> (${inr.format(p.unitsReturned)} of ${inr.format(p.unitsOrdered)}${p.unitsCancelled ? `, ${inr.format(p.unitsCancelled)} cancelled` : ''}) · ${money(p.refundValue)} refunded</span></div>` : ''}
         </section>
         ${p && (viewOnly() ? p.onOrder : p.orderQty > 0 || p.onOrder) ? orderForm(p) : ''}
         <div class="panel"><div class="panel-head"><h2>Trend</h2>${p ? trendChip(p) : ''}</div>${p ? `<div class="wk">${spark(p, 320, 44)}<div class="wknums">${(p.weeks || []).map((w, i) => `<span title="${esc(weekTip(w, i))}" class="${w.outDays ? 'wo' : ''}"><b>${w.units == null ? '–' : inr.format(w.units)}</b><small>${dateShort(weekStart(i))}</small></span>`).join('')}</div></div>
