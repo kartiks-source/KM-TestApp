@@ -10,7 +10,7 @@ The code is in `src/engine.js`, which has no inputs or outputs of its own, so ev
 
 If you change a rule, change this file in the same commit and add a line to `docs/DEVLOG.md`.
 
-**Index** (find the section, read only that): §0a store time zone · §1 what goes in (rows, catalog, §1a CSV/Sheet/Flow, what counts as a sale) · §2 stock-out episodes · §3 sales per day · §4 ₹ lost (§4a hour profile, §4b example) · §5 Overview totals (§5a This month, Yesterday) · §6 reorder status and qty (§6a assumptions + typing, §6b Mark ordered) · §7 slow sellers (§7a A/B/C, §7b profit, §7c overstock, §7d trend) · §8 restocking · §9 Products columns (§9a/§9b Group by) · §10 demo · §11 known limits · §12 Google Sheet differences · §13 view-only + change log · §14 sync runs (§14a capacity + data folder lock) · §15 decision helpers (§15a–d) · §16 role views · §17 morning digest · §18 several stores.
+**Index** (find the section, read only that): §0a store time zone · §1 what goes in (rows, catalog, §1a CSV/Sheet/Flow, §1c stock history rebuilt from Shopify, what counts as a sale) · §2 stock-out episodes · §3 sales per day · §4 ₹ lost (§4a hour profile, §4b example) · §5 Overview totals (§5a This month, Yesterday) · §6 reorder status and qty (§6a assumptions + typing, §6b Mark ordered) · §7 slow sellers (§7a A/B/C, §7b profit, §7c overstock, §7d trend) · §8 restocking · §9 Products columns (§9a/§9b Group by) · §10 demo · §11 known limits · §12 Google Sheet differences · §13 view-only + change log · §14 sync runs (§14a capacity + data folder lock) · §15 decision helpers (§15a–d) · §16 role views · §17 morning digest · §18 several stores.
 
 ---
 
@@ -104,6 +104,40 @@ Data → Upload a CSV shows, before anything is stored, what kind of file it is,
 **Worked example** (test/fixtures/shopify-orders.csv): #1042 line 1 = 2 × ₹14,999 with ₹2,000 line discount → 2 sold at ₹13,999 = ₹27,998; #1044 voided and #1045 refunded are left out; #1046 gift wrap has no SKU → skipped. 8 rows → 5 read, 3 skipped.
 
 **When it can be wrong:** a products export imported once is one count per variant: stock-outs and restocks show only between two imports (import a fresh export daily, or use Shopify / Flow). Two products sharing one SKU become one row.
+
+### 1c. Stock history rebuilt from Shopify's change log (SW-063, `src/history.js`)
+
+**Problem:** ₹ lost needs past stock-outs, but Shopify has no API for past stock levels, so we only see stock from our first pull on. A store connected today showed about ₹16 lost.
+
+**Rule:** once per store, after its first good pull (and again from Data → *Rebuild stock history*, admin only), the app reads Shopify's stock change log with ShopifyQL (Admin API 2025-10, scope `read_reports`):
+
+> `FROM inventory_adjustment_history SHOW inventory_adjustment_change WHERE inventory_state = 'available' GROUP BY hour, product_variant_id SINCE -Nd UNTIL today`
+
+and walks it backwards from the stock we saw on the first pull:
+
+> stock at hour t = stock at our first read − the sum of 'available' changes after t (up to that read)
+
+- **60 days back** from the first read (the same as the order backfill), for every variant in that first read (active, tracked).
+- The result is ordinary stock rows (one at the start with the stock then, then one per hour the stock changed), marked `src: 'rebuilt'` and only for times **before** the first read. Stock-outs and ₹ lost (§2–§4) treat them like any other rows; nothing in the engine changed.
+- **Dropped:** a variant whose rebuilt stock goes below 0 at any hour. With "sell when out of stock" off that can't happen, so the log is incomplete for it; it keeps only live rows, and Data says how many were left out.
+- **Paging:** ShopifyQL returns at most 1,000 rows a query. We ask a week at a time; a week that returns 1,000 is split in half, down to one day; a day still at 1,000 is read by day instead of by hour; still 1,000 → no rebuild (note on Data).
+- **Never fails a pull.** No `read_reports` permission, a query Shopify won't accept, or any other error → no rebuild, a plain note on Data, and stock-outs count from the first read on. A failed re-run keeps the earlier rebuild.
+- **Stock-outs page:** "Before <first read>: rebuilt from Shopify's change log" when the period reaches back past it.
+
+**Why 'available' only:** Shopify's `inventoryQuantity` (what the pull reads) is the *available* stock. The log also has `committed` (held for unfulfilled orders); adding it double-counts every order (checked by hand on Sammsara: summing both was wrong, available alone matched).
+
+**Validation (Sammsara, 20 Nov 2026, read-only):** 245 of 257 active variants rebuild with stock never below 0 (12 dropped). Last 30 days: 94 products out ≥ 1 day, about ₹2.05 L lost, in line with a sales-gap check (sales of those products while in stock vs while out).
+
+**Considered:** order-based guessing (no sales for N days = out: misses slow sellers and stock-outs on busy days); asking the brand for a stock export (one point in time, not history); waiting 30 days for our own history (the brand wants the number on day one).
+
+**When it can be wrong:**
+- **Hour granularity:** a change counts at the start of its hour; a stock-out that started and ended inside one hour is missed. A capped day is read by day (start of day).
+- **The first read's own hour:** a change in the same clock hour as the first read is counted as before it.
+- **Several locations:** the change is the variant's total across locations, like the pull (§1); a transfer between locations nets to 0.
+- **Drafts and archived products are left out:** only variants active at the first read are rebuilt; a variant created in the last 60 days that started at 0 reads as out from the start (it sold nothing then, so it shows under *Out but not selling*, below, not in ₹ lost).
+- **Times without a zone** in the log are read in the store's time zone (§0a); set it to the shop's.
+
+**Out but not selling (Stock-outs page):** a product that was out but had no sales and no sales lost in the period lost nothing, so it isn't counted in the headline ("N products ran out", "N still out") or the menu badge; it has its own chip, *Out but not selling*, and one line under the headline. *Why:* rebuilt history brings in old dead items sitting at 0, which made the count look worse than the money says. A product out for the whole period that sold before it is **not** in this group: its rate looks further back (§3), so it has sales lost.
 
 ### What counts as a sale
 
@@ -596,6 +630,7 @@ The demo exists to show the screens with realistic shape. Its numbers say nothin
 - The rate follows the last 28 days, so it lags a sudden season or campaign (section 3). After a long stock-out it uses older sales, which over-orders if demand fell meanwhile.
 - One time zone per store (§0a); a store selling across zones still sees its own clock only.
 - Group by: collection membership can be up to 24 hours old; tag and collection rows overlap, so they have no grand total (section 9a).
+- Stock before the first Shopify read is rebuilt from Shopify's change log, to the hour, 60 days back; variants whose log doesn't add up are left out (§1c).
 
 **By source** (what counts as a sale is in section 1):
 

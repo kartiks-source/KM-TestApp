@@ -183,7 +183,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
     "ingestKey": "<32 hex>", "ingestKeyAt": 0, "sheetStockCsv": "", "sheetOrderCsv": "", "demoVersion": 0
   },
   "stock":  [ { "t": 0, "variantId": "", "sku": "", "product": "", "variant": "", "before": 0, "now": 0, "price": 0,
-                "type": "?", "cost": "?", "vendor": "?", "src": "shopify|flow|sheet|csv|demo" } ],
+                "type": "?", "cost": "?", "vendor": "?", "src": "shopify|flow|sheet|csv|demo|rebuilt" } ],
   "orders": [ { "t": 0, "order": "#1001", "line": "?", "variantId": "", "sku": "", "qty": 1, "price": 0, "src": "…" } ],
   "catalog": { "<variantId>": { "productId": "", "product": "", "variant": "", "sku": "", "type": "", "vendor": "", "tags": [],
                 "price": 0, "cost": null, "status": "ACTIVE|ARCHIVED|DRAFT|UNTRACKED|DELETED", "tracked": true, "active": true,
@@ -191,7 +191,8 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
                 "spells": "?[ { from: 0, to: 0, status: 'DRAFT' } ]" } },
   "source": "empty|demo|live", "everLive": true,
   "lastSync": null, "lastSyncError": null,
-  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null, "writeScopes": "?['write_products']" },
+  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null, "writeScopes": "?['write_products']",
+               "historyRebuiltAt": "?0", "history": "?{ at, ok, kept, total, changed, flat, dropped, from, until, rows, calls, note }" },
   "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)|server (env)", "key": "leadDays|…|digest.hour|digest.roles|digest.paused|digest.webhook", "old": 7, "new": 10 } ],
   "syncRuns":    [ { "kind": "shopify|sheet", "start": 0, "ms": 0, "stock": 0, "orders": 0, "lines": 0, "error": null, "notes": [] } ],
   "digest": { "hour": 9, "roles": ["ceo", "founder", "ops", "marketing", "finance"], "paused": false, "webhookSeen": "?everyone → host; ceo → host",
@@ -204,5 +205,6 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 - `catalog` is Shopify only, replaced whole on every stock pull; a variant that disappears stays as `DELETED` until it is 120 days gone. `spells` (optional) are the variant's past inactive spells, added when it turns active again (from = `inactiveSince`, to = the pull that saw it active); at most 20, each dropped 120 days after it ends (LOGIC §1). Older files without it load as before.
 - `settingsLog` keeps 200 entries, newest first; the ingest key shows as `(old key)` → `(new key)`. `syncRuns` keeps 20. `digest.log` keeps 50.
 - `shopify.writeScopes` (optional, SW-051): the `write_*` scopes the last pull's token had; only ever non-empty for Performity's token (our own apps with one are refused), shown on Data as "Token also allows writes; this app only reads". Older files without it load as `[]`.
+- `src: 'rebuilt'` stock rows (SW-063, LOGIC §1c): stock before the store's first Shopify read, rebuilt from Shopify's change log; same fields as a pulled row, only times before the first live row; replaced whole on each rebuild (`store.setRebuilt`). `shopify.historyRebuiltAt` (optional) = when the rebuild last ran (set even when it was skipped, so it runs once per store; reset with the rest of `shopify` by Clear / demo); `shopify.history` = its outcome (`kept` of `total` variants, `dropped` = rebuilt stock below 0, `from`/`until` = rebuilt span, `note` = why it was skipped or the last re-run failed). Older files without them load as before; no schema bump.
 - Keys starting with `_` are in-memory indexes and never written.
 - A file is accepted as a store when it is a JSON object with `stock` and `orders` arrays (restore also needs `settings`).

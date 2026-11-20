@@ -26,31 +26,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The read-only guard: only query documents, never a mutation or subscription (a tokeniser, SW-051: src/gql-guard.js). */
 const { assertReadOnly } = require('./gql-guard');
 
-/** One GraphQL query. Retries throttling and a rejected (rotated) token once. */
-async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {
+/** One GraphQL query. Retries throttling and a rejected (rotated) token once. `version` = another Admin API version (ShopifyQL, src/history.js). */
+async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0, version = API_VERSION } = {}) {
   assertReadOnly(doc);
   const { shop, token } = await keys.access();
-  const r = await fetchImpl(`https://${shop}.myshopify.com/admin/api/${API_VERSION}/graphql.json`, {
+  const r = await fetchImpl(`https://${shop}.myshopify.com/admin/api/${version}/graphql.json`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60000),
     headers: { 'content-type': 'application/json', 'x-shopify-access-token': token },
     body: JSON.stringify({ query: doc, variables }),
   });
   if (r.status === 401 || r.status === 403) {
     keys.clear();
-    if (tries < 1) return gql(doc, variables, { fetchImpl, tries: tries + 1 });
+    if (tries < 1) return gql(doc, variables, { fetchImpl, tries: tries + 1, version });
     throw new Error(r.status === 401 ? 'Shopify rejected the token' : 'The token lacks a read permission (needs read_products, read_inventory, read_orders)');
   }
   if (r.status === 429 || r.status >= 500) {
     if (tries >= 5) throw new Error(`Shopify: HTTP ${r.status}`);
     await sleep(2000 * (tries + 1));
-    return gql(doc, variables, { fetchImpl, tries: tries + 1 });
+    return gql(doc, variables, { fetchImpl, tries: tries + 1, version });
   }
   if (r.status === 404) throw new Error('Store not found: check SHOPIFY_STORE (the part before .myshopify.com)');
   if (!r.ok) throw new Error(`Shopify: HTTP ${r.status}`);
   const j = await r.json();
   if (j.errors?.some((e) => e.extensions?.code === 'THROTTLED')) {
     if (tries >= 8) throw new Error('Shopify kept throttling');
-    await sleep(3000); return gql(doc, variables, { fetchImpl, tries: tries + 1 });
+    await sleep(3000); return gql(doc, variables, { fetchImpl, tries: tries + 1, version });
   }
   if (j.errors?.length) {
     const msg = j.errors.map((e) => e.message).join('; ');

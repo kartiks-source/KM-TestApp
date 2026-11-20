@@ -203,8 +203,8 @@ function healthAll() {
   return { ok: !problems.length, problems };
 }
 
-/** Where a row came from (SW-006): shopify, flow, sheet, csv or demo. Stored on every row as `src`. */
-const SOURCES = ['shopify', 'flow', 'sheet', 'csv', 'demo'];
+/** Where a row came from (SW-006): shopify, flow, sheet, csv, demo or rebuilt (SW-063). Stored on every row as `src`. */
+const SOURCES = ['shopify', 'flow', 'sheet', 'csv', 'demo', 'rebuilt'];   // rebuilt = Shopify's change log, SW-063
 const stamp = (rows, src) => { if (src) for (const r of rows) if (!r.src) r.src = src; return rows; };
 
 /** Add rows from `src`, skipping ones already stored. Returns how many were new. */
@@ -286,6 +286,19 @@ function setCatalog(next, now = Date.now()) {
   return out;
 }
 
+/*
+ * Stock history rebuilt from Shopify's change log (SW-063, src/history.js): replaces any earlier rebuilt rows. They
+ * carry src 'rebuilt' and only cover times before the first live read, so they never overlap pulled rows.
+ */
+function setRebuilt(rows) {
+  const d = load();
+  stamp(rows, 'rebuilt');
+  d.stock = d.stock.filter((r) => r.src !== 'rebuilt').concat(rows);
+  d._stockKeys = new Set(d.stock.map(stockKey));
+  save();
+  return rows.length;
+}
+
 /** Replace every line of these orders with `rows` (a cancelled or fully refunded order ends up with none). */
 function replaceOrders(names, rows, src = 'shopify') {
   const d = load(); const set = new Set(names);
@@ -319,4 +332,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { SCHEMA_VERSION, migrate, SOURCES, load, add, endDemo, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };
+module.exports = { SCHEMA_VERSION, migrate, SOURCES, load, add, endDemo, setCatalog, setRebuilt, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };
