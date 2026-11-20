@@ -5,6 +5,14 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
 
 
+## 2026-11-20 · finish sprints · W1-docs
+stock-watch + stock-watch-sheets docs, branch `finish/W1-docs` (c20b56a, 7a1fb2f, 1206843, d2a9561, 64e60e0, c33758d, b1987e0, 49d650e; not pushed, not deployed). Docs only, no code changed. `npm test` 199 pass, 6 skip (browser), 0 fail.
+- SW-015: `SECURITY.md` adds `PERFORMITY_POC_API_URL/KEY/BRAND_ID`, `ALERT_WEBHOOK_URL`, `DIGEST_WEBHOOK_URL[_<ROLE>]`, `VIEW_PASSWORD`, `DATA_DIR/secret`; auth model brought up to SW-008/016/018; write routes `/api/onorder`, `/api/decide`, `/api/digest/settings`, `/api/digest/send` in the destructive table; Clear also wipes Mark ordered + decisions. Dropped `?replaceDemo=1` (server never reads it; the store clears demo itself).
+- DoD files: `modules/stock-watch/CHANGELOG.md` (0.1.0–0.9.0 rebuilt from this log) + `package.json` 0.9.0 (pre-production); `API.md` (every route: auth, params, answer, errors); `FORMATS.md` (stock/order columns + aliases, Flow templates + JSON keys, PO/Pause/Push CSV columns, `store.json` and sidecar shapes, schema 1); `.env.example` lists every variable the code reads; `modules/stock-watch-sheets/README.md`.
+- SW-019 / SW-005: `docs/RUNBOOK.md` uptime monitor on `/health` + `/status` (UptimeRobot / Better Stack), monthly Railway volume backup check, which sidecar files a restore needs (`onorder.json`, `decisions.json` yes; `catalog.json`, `secret` no) and a hand copy until W2 backs them up.
+- `docs/BACKLOG.md`: a Status line per Sprint 1/2 item. SW-012 AC amended to tick + bulk bar, SW-021 to baseline in the Trend header/tooltip, both accepted departures; SW-020 (no first-open picker) and SW-005 (repo-level RUNBOOK) noted as departures too.
+- Open: `store.json` has no `schemaVersion` (SW-047); `/status` shows no version (SW-056); onorder/decisions not in app backups (W2); Playwright smoke not in CI and no 360×740 / kept screenshots (SW-014, SW-023); uptime monitor and volume backups not yet set up by the owner; module `AGENTS.md` files table and root `AGENTS.md` layout don't list the new docs yet (outside this stream's files); shared dev log page row not added (no publishing from this step).
+
 ## 2026-11-20 · critic round 2 fixes
 stock-watch, on `main` (not pushed, not deployed). Verified P1 findings from critic round 2 (`Stock-Watch-r2-findings.json`), each checked against the code first.
 Fixed:
