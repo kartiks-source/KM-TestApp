@@ -447,11 +447,11 @@
         </div>
         ${moving()}
       </section>
-      ${window.SW_WEEKLY ? SW_WEEKLY.panel() : ''}
       <section class="panel chart" id="daily-chart">
         <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
         ${dailyChart(r.daily)}
-      </section>`;
+      </section>
+      ${window.SW_WEEKLY ? SW_WEEKLY.panel() : ''}`;
   }
 
   /* Overview "Moving" (SW-021): top 3 up and down by ₹ effect = change in daily rate × avg price × 30 (LOGIC.md §7d) */

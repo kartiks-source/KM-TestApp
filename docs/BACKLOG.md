@@ -194,6 +194,20 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: product F9.
 - Status: Done (96bbc9d).
 
+## Sprint 3 · B-review (branch `sprint3/B-review`)
+
+**SW-043 · Weekly review: daily snapshots, this week vs last week** (M · product)
+- Accept: one snapshot per store day (₹ lost, profit lost, stock-outs, still out, overstock ₹, to reorder, order today ₹, ₹ lost per product) in `snapshots.json`, 400 days, in backups; "This week vs last week" panel on the Overview (no new page) with change + arrow per number and the top 5 movers; one digest line. LOGIC §5b.
+- Status: Done. Open: the CEO / Finance Monday digests keep their own 7-day comparison (re-worked from rows), not the snapshots.
+
+**SW-042 · Stock-aware targets on groups + traffic lights** (M · builder)
+- Accept: admin sets a monthly ₹ target per group (category, collection, tag, parent product); group rows show month-to-date vs target, run-rate forecast with and without stock-outs, "₹X is stock-outs", green / amber (within 10%) / red. LOGIC §9c.
+- Status: Done. Open: one target for every month (no per-month targets or seasonality); no store-level target.
+
+**SW-044 · Paste-a-list lookup + saved lists** (S · builder)
+- Accept: the Products search takes a pasted list (new lines, commas, tabs); table filters to it, "N not found" listed; lists saved by name per store on the server (admin saves / deletes, view reads), picked from a menu. LOGIC §9d.
+- Status: Done. Open: lists only on Products (not Reorder / Stock-outs).
+
 ---
 
 ## Later
@@ -204,9 +218,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 |---|---|---|---|---|
 | SW-040 | Supplier table (lead, MOQ, case pack) + PO drafts grouped by supplier | M | builder | product F2, idea "Supplier PO drafts" |
 | SW-041 | Cash budget cut line: rank by profit protected per ₹ | M | product | product F3 |
-| SW-042 | Stock-aware targets on groups + traffic lights | M | builder | DAWBU F5, product ideas |
-| SW-043 | Weekly review page with daily snapshots and tile deltas | M | product | product F5, idea "Weekly review" |
-| SW-044 | Paste-a-list lookup + saved lists | S | builder | DAWBU F9 |
 | SW-045 | Import preview with column mapping; accept Shopify export columns | M | builder | QA idea |
 | SW-046 | Storage move per ADR-0003 (node:sqlite) + cached report + gzip | L | builder | architect A6, SRE-10 |
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |

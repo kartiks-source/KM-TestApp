@@ -247,7 +247,7 @@ function loadDemo() {
   const g = demo.generate({ now: Date.now(), ...own.opts });
   store.replaceAll(g.stock, g.orders, 'demo');
   decide.clear();   // SW-032: decisions belong to the data they were made on
-  weekly.clear();   // SW-043: so are the daily snapshots
+  weekly.clear(); setImmediate(() => weekly.catchUp());   // SW-043: so are the daily snapshots; the demo's are taken now, in the background
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(isDemoName(s.storeName) ? { storeName: own.name } : {}) });
   return g;
