@@ -4,7 +4,7 @@
  * <store folder>/snapshots.json (src/sidefile.js: atomic, .bak, never read as empty), so "this week vs last week"
  * compares what the page said then, not today's maths re-run on old rows.
  *
- *   snapshots.json = { basis: 'demo' | 'live', days: { 'YYYY-MM-DD': snapshot } }
+ *   snapshots.json = { basis: 'demo' | 'live', calc: '<engine rules>|<stock history at>|<order price basis>', days: { 'YYYY-MM-DD': snapshot } }
  *   snapshot = { at, src: 'day' | 'backfill', sold, lost, lostProfit, ranOut,          ← that store day (00:00–24:00)
  *                stillOut, excessValue, toReorder, orderToday, orderTodayValue,     ← at the end of that day
  *                lostBy: { variantId: ₹ } }                                         ← top 100 products by ₹ lost that day
@@ -15,6 +15,8 @@
  * now), on the first report or pull after that; the last 14 days are filled in when missing (first run, downtime).
  * Snapshots never mix demo and real data: a basis change (demo → live) starts them again; Clear and a demo load
  * forget them (server.js). Kept 400 days.
+ * When the maths or the data under them change (calc: engine.CALC_VERSION, a new stock history rebuild, order prices
+ * read again ex GST), the last 14 days are worked out again, so the panel and the daily chart agree (1.1.1, L2).
  */
 const store = require('./store');
 const engine = require('./engine');
@@ -51,6 +53,17 @@ function file() {
   return f;
 }
 const dayKey = (t, zone) => engine.dayKey(t, zone);
+/** What the snapshots were worked out on: engine rules, the stock history rebuild, the order price basis. */
+const calcOf = (d) => [engine.CALC_VERSION, (d.shopify && d.shopify.history && d.shopify.history.at) || '', (d.shopify && d.shopify.priceBasis) || ''].join('|');
+/** Calc changed → forget the last BACKFILL_DAYS days (whatever took them) so missing() takes them again. True if changed. */
+function rebase(f, d, now = Date.now()) {
+  const c = calcOf(d);
+  if (f.calc === c) return false;
+  const from = addDays(dayKey(now, TZ.zoneOf(d.settings)), -BACKFILL_DAYS);
+  for (const k of Object.keys(f.days)) if (k >= from) delete f.days[k];
+  f.calc = c;
+  return true;
+}
 /** Store-day key → its start (UTC ms) in the store's zone (a 23- or 25-hour day at a daylight saving change). */
 const startOf = (key, zone) => TZ.fromLocal(Date.parse(`${key}T00:00:00Z`), zone);
 const endOf = (key, zone) => startOf(addDays(key, 1), zone);
@@ -115,13 +128,14 @@ function catchUp(now = Date.now()) {
     try {
       const d = store.load(), f = file();
       if (!f.basis) return taken;
+      if (rebase(f, d, now)) box.write(f);
       const want = missing(d, f, now);
       if (!want.length) return taken;
       const yesterday = addDays(dayKey(now, TZ.zoneOf(d.settings)), -1);
       for (const key of want) {
         if (taken.length) await new Promise((ok) => setImmediate(ok));
         const cur = store.load(), ff = file();
-        if (ff.basis !== f.basis || ff.days[key]) continue;   // data changed meanwhile, or taken
+        if (ff.basis !== f.basis || ff.calc !== f.calc || ff.days[key]) continue;   // data changed meanwhile, or taken
         ff.days[key] = { ...compute(cur, key, onorder.all(), Date.now()), src: key === yesterday ? 'day' : 'backfill' };
         prune(ff, dayKey(now, TZ.zoneOf(cur.settings)));
         box.write(ff);
@@ -215,5 +229,5 @@ async function handle(req, url) {
   return { code: 200, body: { ok: true, ...current() } };
 }
 
-module.exports = { compute, missing, catchUp, clear, summary, current, digestLine, handle, catalogAt, nameMap, METRICS, KEEP_DAYS, BACKFILL_DAYS,
+module.exports = { compute, missing, catchUp, calcOf, rebase, clear, summary, current, digestLine, handle, catalogAt, nameMap, METRICS, KEEP_DAYS, BACKFILL_DAYS,
   FILE_NAME: box.name, all: () => box.read(), reset: box.reset };

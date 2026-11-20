@@ -153,3 +153,22 @@ test('backups carry snapshots.json', async () => {
   const ex = JSON.parse(backup.text());
   assert.ok(ex.sideFiles['snapshots.json'].days['2026-11-19']);
 });
+
+/* L2 (validation 20 Nov 2026): all 8 snapshots were taken at the rebuild, before the 7-day rate floor, and never
+ * redone: the panel said ₹2,58,406 lost this week vs ₹1,81,970 from the daily chart. Now a change of engine rules,
+ * stock history or order price basis takes the last 14 days again. */
+test('snapshots are worked out again when the rules, the stock history or the order prices change', async () => {
+  reset();
+  const first = await W.catchUp(now);
+  assert.ok(first.length >= 7, `taken: ${first.length}`);
+  assert.deepEqual(await W.catchUp(now), [], 'nothing changed: nothing taken again');
+  assert.equal(W.all().calc, W.calcOf(store.load()));
+  store.setShopify({ history: { at: now - 36e5, ok: true } });   // a stock history rebuild
+  assert.deepEqual(await W.catchUp(now), first, 'every recent day again');
+  store.setShopify({ priceBasis: 'exTax' });                     // order prices read again ex GST
+  assert.deepEqual(await W.catchUp(now), first);
+  /* a day older than 14 days is left as it was */
+  const f = { calc: 'old', days: { '2026-10-01': { lost: 5 }, '2026-11-19': { lost: 7 } } };
+  assert.equal(W.rebase(f, store.load(), now), true);
+  assert.deepEqual(Object.keys(f.days), ['2026-10-01']);
+});

@@ -234,6 +234,10 @@ function trendCall(pct, base) {
   return d >= TREND_BAND && pct > 0 ? 'up' : d <= -TREND_BAND && pct < 0 ? 'down' : 'flat';
 }
 
+/** Bumped whenever a rule that changes a number changes (LOGIC.md): saved daily snapshots made under another value
+ *  are worked out again (src/weekly.js), so the weekly panel never mixes old and new maths. */
+const CALC_VERSION = '1.1.1';
+
 const STATUS = ['Out now', 'Critical', 'Order now', 'Order this week', 'Ordered', 'OK'];
 /** Reorder status and quantity for one product. */
 function plan({ stock, perDay, lead, cover, safety }) {
@@ -578,4 +582,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  CALC_VERSION, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
