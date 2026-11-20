@@ -7,10 +7,21 @@ What to do when something breaks, and how to get data back. For secrets and who 
 | What | Where |
 |---|---|
 | App | Railway project `stock-watch`, service `web`, one replica: https://web-production-6dd42b8d.up.railway.app |
-| Data | Railway volume at `/data`: `store.json` (everything: rows, settings, ingest key, Shopify cursor) |
+| Data | Railway volume at `/data`: `store.json` (rows, settings, ingest key, Shopify cursor, catalog, change log, digest settings) plus sidecar files `onorder.json` (Mark ordered), `decisions.json` (Decide), `catalog.json` (collections cache), `secret` (session key). Shapes: `modules/stock-watch/FORMATS.md` |
 | App backups | `/data/backups/` (below) |
-| Health | `GET /health` → `{"ok":true}` (no login) |
+| Health | `GET /health` → `{"ok":true}`, 503 when the store can't be read or saved; `GET /status` → freshness and row counts, 503 when Shopify data is over 45 min old or saving fails (both no login) |
 | Logs | Railway dashboard → service → Deployments → View logs (lines start `backup:`, `restore:`, `shopify:`) |
+
+## Uptime monitor (SW-019)
+
+Railway's health check only restarts a dead deploy; nobody is told. Set up one external monitor (owner, once; free tiers are enough):
+
+1. UptimeRobot (or Better Stack) → new **HTTP(s)** monitor `https://web-production-6dd42b8d.up.railway.app/health`, every 5 minutes, alert when the status is not 200 (UptimeRobot: keyword monitor for `"ok":true` also catches a wrong page). This one means "the app is down or can't save".
+2. A second monitor on `/status`, every 5 minutes, alert when not 200 for 2 checks in a row (one 15-minute pull can run late). This one means "the numbers are stale": the Shopify pull is failing or stuck. Without Shopify connected `/status` stays 200 unless saving fails.
+3. Alert contacts: the owner's phone/email and the team channel. `ALERT_WEBHOOK_URL` already posts pull failures from inside the app; the monitor covers the case where the app itself is down.
+4. Record the monitor's name and who gets alerts in `docs/DEVLOG.md`. Status: not yet set up.
+
+Both routes are open by design and return no names, keys or error details (`SECURITY.md`), so a third-party monitor sees nothing sensitive.
 
 ## Connect the first store (option A: Performity POC API)
 
@@ -46,6 +57,10 @@ An empty store and demo data are never backed up (nothing to lose; demo reloads 
 
 **2. Railway volume backups (whole volume, owner sets up once).** Railway dashboard → project `stock-watch` → service `web` → the `/data` volume → Backups → schedule **Daily**, keep **at least 7**. These survive a deleted or corrupted volume, which app backups (on the same volume) don't. Status: not yet confirmed on (see DEVLOG).
 
+**Check volume backups (monthly, and before any risky change).** Dashboard → service `web` → the `/data` volume → Backups: the newest one is under 26 hours old, the schedule is Daily, and at least 7 are kept. Write the date checked and the newest backup's time in `docs/DEVLOG.md`. If none is recent, take a manual backup there before going on.
+
+**What the app backups cover.** `store.json` plus `onorder.json` (Mark ordered records) and `decisions.json` (Decide choices) as `sideFiles` (SW-005). `catalog.json` refills from Shopify within a day and `secret` only signs people out when lost, so neither needs a backup.
+
 **3. Download now (any time, login needed).** `GET /api/export/backup.json` returns the whole store as a file:
 
 ```bash
@@ -70,12 +85,25 @@ The app restores on start: if `/data/restore.json` exists and looks like a store
 
 **Locally:** stop the app, `cp <backup> $DATA_DIR/restore.json`, start it.
 
+**Which files a full restore needs.** `restore.json` replaces `store.json` and, from its `sideFiles`, `onorder.json` and `decisions.json` (a backup from before 20 Nov 2026 has no `sideFiles`: put those two back by hand, with the app stopped or straight before the restart):
+
+| File | Needed? | If missing |
+|---|---|---|
+| `store.json` (via `restore.json`) | yes | everything is lost |
+| `onorder.json` | yes, if anyone used Mark ordered | ordered rows go back to Order today; people must mark them again (risk of a duplicate PO) |
+| `decisions.json` | yes, if anyone used Decide | slow sellers come back into Decide |
+| `catalog.json` | no | collections are re-read from Shopify within a day (Group by → Collections empty until then) |
+| `secret` | no | everyone signs in again |
+
+From a Railway volume backup all of these come back together. From an app backup or a download, `store.json`, `onorder.json` and `decisions.json` do (`sideFiles`). After a Clear, the `before-clear` backup brings back the rows, Mark ordered and decisions.
+
 **Drill:** do one restore on a local copy each sprint and log it in `docs/DEVLOG.md` (last: 19 Nov 2026, SW-005).
 
 ## When something is wrong
 
 | Symptom | Check | Fix |
 |---|---|---|
+| Uptime monitor: `/status` 503 | Data page: last pull, last error; `ALERT_WEBHOOK_URL` channel | Same as "Shopify data stale" below; `saveOk: false` → same as "Disk full" |
 | Page down / 502 | `/health`; Railway logs for a crash on start | `Refusing to start: … ADMIN_PASSWORD` → set the variable. Otherwise roll back to the last good deployment |
 | "Login needed" everywhere | `ADMIN_PASSWORD` changed? | Sign in again (changing it signs everyone out) |
 | Numbers look empty after a deploy | Data page row counts; `ls -l /data` | Volume not attached at `/data`, or Clear was pressed: restore (above) |
