@@ -218,6 +218,10 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: Advanced planning rules and Reorder what-ifs keep the typed text (no reformat, no caret jump); read on blur / Enter; invalid shows a hint.
 - Status: Done. `public/trial-input.js`; LOGIC §6a; browser test `test/ui-trial.test.js` (in `npm run test:ui`); smoke presses Enter after typing.
 
+**SW-058 · Agent token savings** (S · builder)
+- Accept: doc routing table at the top of AGENTS.md; DEVLOG rotation (older than the newest 15 → `docs/devlog/2026-11.md`, linked); `npm run test:agent` (dot reporter); `.ignore`; LOGIC index; `docs/reviews/` README.
+- Status: Done. `scripts/rotate-devlog.js` (`npm run devlog:rotate`, tested in `test/devlog.test.js`). After the Sprint 3 merge DEVLOG will hold more than 15 entries again: the integrator runs `npm run devlog:rotate` once.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -237,7 +241,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
-| SW-058 | Agent token savings: doc routing table, DEVLOG rotation, `test:agent` dot reporter, `.ignore`, LOGIC index, critic reports saved to `docs/reviews/` | S | builder | tokens T2–T11, process ideas |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |
 | SW-061 | Ads link: live spend on out-of-stock SKUs (needs Performity data) | M | product | product idea |

@@ -1,0 +1,11 @@
+# Search ignore for agents and ripgrep (SW-058): never read these when looking for code.
+node_modules/
+data/
+**/data/
+screens/
+**/screens/
+smoke-out/
+.playwright-cli/
+*.png
+package-lock.json
+docs/devlog/

@@ -10,6 +10,8 @@ The code is in `src/engine.js`, which has no inputs or outputs of its own, so ev
 
 If you change a rule, change this file in the same commit and add a line to `docs/DEVLOG.md`.
 
+**Index** (find the section, read only that): §0a store time zone · §1 what goes in (rows, catalog, §1a CSV/Sheet/Flow, what counts as a sale) · §2 stock-out episodes · §3 sales per day · §4 ₹ lost (§4a hour profile, §4b example) · §5 Overview totals (§5a This month, Yesterday) · §6 reorder status and qty (§6a assumptions + typing, §6b Mark ordered) · §7 slow sellers (§7a A/B/C, §7b profit, §7c overstock, §7d trend) · §8 restocking · §9 Products columns (§9a/§9b Group by) · §10 demo · §11 known limits · §12 Google Sheet differences · §13 view-only + change log · §14 sync runs (§14a capacity + data folder lock) · §15 decision helpers (§15a–d) · §16 role views · §17 morning digest · §18 several stores.
+
 ---
 
 ## 0a. Store time (SW-049, `public/tz.js` via `src/tz.js`)
@@ -503,19 +505,6 @@ Code: `src/access.js`, `src/audit.js` (SW-029, ADR-0011). Tests: `test/access.te
 
 **Limits.** Two shared passwords, so "who" is a role, not a person. The log covers settings only, not data actions (import, clear). Wrong-password limits are shared by both passwords. A viewer sees the "Sync issue" pill without its link (no Data page), so the error text is only its hover tooltip, which phones don't show.
 
-## 14a. Capacity warnings and the data folder lock (SW-055, `src/capacity.js`, `src/lock.js`)
-
-**Rule.** A warning shows on Data (this store) and in `/status` `warnings` (every store) when:
-- `store.json` is over **25 MB**, or
-- a store keeps over **1,50,000 rows** (stock changes + order lines), or
-- the data volume is over **80% full**.
-
-The first two are half of ADR-0003's move trigger (50 MB, 300k rows), so there is time to plan the storage move before pages slow down. Warnings never turn `/status` red: they are notice, not an outage.
-
-**One copy writes.** The copy of the app that holds `DATA_DIR/instance.lock` writes; it refreshes the lock every 30 s. Another copy on the same folder only reads: every write gets **503** with the reason, Data shows it, `/status` `writing: false`, and it starts no pulls, backups or digests. It takes over when the lock is removed (a clean stop) or has had no heartbeat for **2 minutes**.
-
-**Why.** Two copies writing one JSON file lose each other's changes (ADR-0012). **Considered:** refusing to start (a redeploy where the old copy hangs would crash-loop); OS file locks (not on every volume type). **Can be wrong:** a copy frozen for over 2 minutes that wakes up writes once more before it sees the takeover.
-
 ## 14. Sync progress and run history
 
 Code: `src/runs.js`, counts from `syncShopify` / `syncSheet` in `server.js` (SW-030). Tests: `test/runs.test.js`.
@@ -532,6 +521,19 @@ Code: `src/runs.js`, counts from `syncShopify` / `syncSheet` in `server.js` (SW-
 **Considered.** A percentage bar: Shopify doesn't say how many orders are left, so any % would be a guess. Logging every page: too much; one line per run is enough to spot a pattern.
 
 **Limits.** Order lines "read" count lines re-read when an order changed (refunds, edits) as well as new ones. Progress lives in memory: after a restart mid-pull the pill shows nothing until the next pull starts.
+
+## 14a. Capacity warnings and the data folder lock (SW-055, `src/capacity.js`, `src/lock.js`)
+
+**Rule.** A warning shows on Data (this store) and in `/status` `warnings` (every store) when:
+- `store.json` is over **25 MB**, or
+- a store keeps over **1,50,000 rows** (stock changes + order lines), or
+- the data volume is over **80% full**.
+
+The first two are half of ADR-0003's move trigger (50 MB, 300k rows), so there is time to plan the storage move before pages slow down. Warnings never turn `/status` red: they are notice, not an outage.
+
+**One copy writes.** The copy of the app that holds `DATA_DIR/instance.lock` writes; it refreshes the lock every 30 s. Another copy on the same folder only reads: every write gets **503** with the reason, Data shows it, `/status` `writing: false`, and it starts no pulls, backups or digests. It takes over when the lock is removed (a clean stop) or has had no heartbeat for **2 minutes**.
+
+**Why.** Two copies writing one JSON file lose each other's changes (ADR-0012). **Considered:** refusing to start (a redeploy where the old copy hangs would crash-loop); OS file locks (not on every volume type). **Can be wrong:** a copy frozen for over 2 minutes that wakes up writes once more before it sees the takeover.
 
 ## 15. Decision helpers (Sprint 2: SW-024, SW-025, SW-026, SW-032)
 
