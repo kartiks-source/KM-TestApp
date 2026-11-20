@@ -776,7 +776,7 @@
       const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
       const p = d.product, now = state.report.generatedAt, from = state.report.from;
       body.innerHTML = `
-        <h2 id="drawer-title">${esc(p?.name || id)}</h2>
+        ${manyStores() ? `<p class="dstore">${esc(SW_STORES.name())}</p>` : ''}<h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
         ${p?.why ? `<p class="dwhy">${whyCell(p)}</p>` : ''}
         <section class="tiles dtiles">

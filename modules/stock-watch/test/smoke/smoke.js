@@ -90,6 +90,7 @@ async function signIn(page, base) {
   if (!page.url().endsWith('/login')) return;   // no password set
   await page.fill('#pw', PASSWORD);
   await Promise.all([page.waitForURL((u) => !String(u).endsWith('/login')), page.click('button[type=submit]')]);
+  await ready(page);   // let the first page's calls finish: the next goto would abort them (a false "request failed")
 }
 const ready = (page) => page.waitForFunction(() => !!document.querySelector('#view .headline'), null, { timeout: 15000 });   // rendered (folded panels may still say "Loading…")
 const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

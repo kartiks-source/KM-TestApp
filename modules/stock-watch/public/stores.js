@@ -3,7 +3,8 @@
  *    (localStorage + the sw_store cookie), else the server's default (the first store).
  *  - SW_STORES.url(path) adds ?store=<id> to every page call, so two tabs on two stores never cross.
  *  - The store pill in the top bar is the picker: a menu of stores with a dot (ok / stale / error); on phones a
- *    store bar under the top bar does the same. Choosing one remembers it and reloads. One store: just its name.
+ *    store bar under the top bar does the same. Choosing one remembers it and reloads. One store: just its name
+ *    (phones: the store bar shows it, no menu). The list (dots, "Synced N min ago") is read again every minute.
  * Rules: LOGIC.md §18. Server: GET /api/stores (server.js). */
 (function (root) {
   'use strict';
@@ -47,7 +48,7 @@
     if (st.running) return 'Pulling now…';
     return st.lastSync ? `Synced ${ago(st.lastSync)}` : st.source === 'live' ? 'Live data' : 'No data yet';
   }
-  const dot = (s) => { const k = (s.status && s.status.state) || 'ok'; return `<i class="sdot ${k}" aria-hidden="true"></i><span class="sr">${STATE_WORD[k]}: </span>`; };
+  const dot = (s) => { const k = (s.status && s.status.state) || 'ok'; return `<i class="sdot s-${k}" aria-hidden="true"></i><span class="sr">${STATE_WORD[k]}: </span>`; };
   const current = () => list.find((s) => s.id === id) || null;
 
   function items() {
@@ -58,14 +59,16 @@
     const c = current(), many = list.length > 1;
     const nm = document.getElementById('store-name');
     if (nm && c) nm.innerHTML = `${many ? dot(c) : ''}${esc(c.name)}`;
+    const pill = nm && nm.closest('.store-pill');
+    if (pill && c) pill.title = `${c.name}${many ? ` · ${statusLine(c)}` : ''} · choose ${many ? 'store and ' : ''}what you see`;
     if (c) document.title = `${c.name} · Stock-out Watch`;
     const menu = document.getElementById('store-menu');
     if (menu) menu.innerHTML = many ? `<p class="rp-h" id="store-h">Store</p><div role="group" aria-labelledby="store-h">${items()}</div>` : '';
     const bar = document.getElementById('storebar');
     if (bar) {
-      bar.hidden = !many;
-      bar.innerHTML = many && c ? `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}. Change store">${dot(c)}<span class="sm-name">${esc(c.name)}</span><span class="sm-n">${list.length} stores</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
-        + `<div class="menu" role="group" aria-label="Stores">${items()}</div></details>` : '';
+      bar.hidden = !c;
+      bar.innerHTML = !c ? '' : !many ? `<p class="store-m one"><span class="sm-name">${esc(c.name)}</span></p>` : `<details class="colpick storepick"><summary class="store-m" aria-label="Store: ${esc(c.name)}. Change store">${dot(c)}<span class="sm-name">${esc(c.name)}</span><span class="sm-n">${list.length} stores</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>`
+        + `<div class="menu" role="group" aria-label="Stores">${items()}</div></details>`;
     }
     document.documentElement.classList.toggle('multi-store', many);
   }
@@ -76,9 +79,10 @@
     location.assign(addressFor(next));
   }
 
+  const load = () => fetch('/api/stores', { credentials: 'same-origin', cache: 'no-store' })
+    .then((r) => { if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); } return r.json(); });
   /** Resolves with the store id once the list is in (app.js waits for it before its first call). */
-  const ready = fetch('/api/stores', { credentials: 'same-origin', cache: 'no-store' })
-    .then((r) => { if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); } return r.json(); })
+  const ready = load()
     .then((j) => {
       list = Array.isArray(j.stores) ? j.stores : [];
       if (!list.some((s) => s.id === id)) id = j.current || (list[0] && list[0].id) || '';   // a store no longer listed: the default
@@ -87,6 +91,18 @@
       return id;
     })
     .catch((e) => { if (e.message !== 'Signed out') console.warn('stores:', e.message); return id; });
+
+  /* every minute: fresh dots and "Synced N min ago" (the stale banner re-checks on the same beat). Not while a menu
+     is open (a redraw would close it and drop focus), not in a hidden tab; the current store stays chosen. */
+  const REFRESH_MS = Number(root.SW_STORES_REFRESH_MS) || 60e3;   // tests set it shorter
+  setInterval(() => {
+    if (document.hidden || !list.length || document.querySelector('details.rolepick[open], details.storepick[open]')) return;
+    load().then((j) => {
+      if (!Array.isArray(j.stores) || document.querySelector('details.rolepick[open], details.storepick[open]')) return;
+      list = j.stores;
+      render();
+    }).catch(() => { /* next minute */ });
+  }, REFRESH_MS);
 
   /* choosing: click, Enter / Space on a menu item; arrows move between items; Escape closes and returns focus */
   document.addEventListener('click', (e) => {

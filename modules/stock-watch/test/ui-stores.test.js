@@ -43,7 +43,7 @@ test('desktop: the store pill is a picker with a dot per store; keyboard picks t
   const pg = await open(1440, 900, '/#overview');
   assert.match(pg.url(), /[?&]store=sammsara-demo\b/, 'address names the store (shareable)');
   assert.equal(await pg.$eval('#store-name', (e) => e.textContent), 'Up to date: Sammsara (demo)');
-  assert.ok(await pg.$('#store-name .sdot.ok'), 'status dot on the pill');
+  assert.ok(await pg.$('#store-name .sdot.s-ok'), 'status dot on the pill');
   assert.match(await pg.title(), /^Sammsara \(demo\) · Stock-out Watch$/);
   const first = await headline(pg);
   assert.ok(pg.calls.length && pg.calls.every((u) => u.searchParams.get('store') === 'sammsara-demo'), 'every call carries ?store=');
@@ -91,19 +91,22 @@ test('phone 390 and 360: a store bar under the top bar, 44 px targets, no sidewa
   }
 });
 
-test('one store: the pill is the plain name (no dot, no store menu, no store bar)', opts, async () => {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  await ctx.route('**/api/stores', async (route) => {
-    const j = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...j, stores: j.stores.slice(0, 1) } });
-  });
-  const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));
-  await pg.goto(base + '/#overview'); await pg.waitForSelector('.tiles');
-  assert.equal(await pg.$eval('#store-name', (e) => e.innerHTML), 'Sammsara (demo)');
-  assert.equal(await pg.$eval('#store-menu', (e) => e.innerHTML), '');
-  assert.equal(await pg.$eval('#storebar', (e) => e.hidden), true);
-  assert.deepEqual(errors, []);
-  await ctx.close();
+test('one store: the pill is the plain name (no dot, no store menu); phones show the name in the store bar, no menu', opts, async () => {
+  for (const [w, h] of [[1440, 900], [390, 844]]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    await ctx.route('**/api/stores', async (route) => {
+      const j = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...j, stores: j.stores.slice(0, 1) } });
+    });
+    const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));
+    await pg.goto(base + '/#overview'); await pg.waitForSelector('.tiles');
+    assert.equal(await pg.$eval('#store-name', (e) => e.innerHTML), 'Sammsara (demo)');
+    assert.equal(await pg.$eval('#store-menu', (e) => e.innerHTML), '');
+    const bar = await pg.$eval('#storebar', (e) => ({ shown: getComputedStyle(e).display !== 'none', text: e.textContent, menu: !!e.querySelector('details, .sdot') }));
+    assert.deepEqual(bar, { shown: w <= 760, text: 'Sammsara (demo)', menu: false }, `${w}: store bar (UI-5)`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
 });
 
 test('show everything by default: no role, Reorder opens on All, every Overview panel', opts, async () => {
@@ -125,6 +128,92 @@ test('show everything by default: no role, Reorder opens on All, every Overview 
 test('viewer address: an unknown or unsafe ?store= falls back to a listed store, never an error page', opts, async () => {
   const pg = await open(1440, 900, '/?store=..%2F..%2Fetc#overview');
   assert.match(pg.url(), /store=(sammsara-demo|second-demo)/);
+  assert.deepEqual(pg.errors, []);
+  await pg.context().close();
+});
+
+/* ---------- critic round (UI-1 … UI-6) ---------- */
+
+/** A context whose /api/stores lists n stores (the real first one, then fakes), every one in `state`. */
+async function many(w, h, n, state, extra = {}) {
+  const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+  let calls = 0;
+  await ctx.route('**/api/stores', async (route) => {
+    const j = await (await route.fetch()).json();
+    const st = typeof state === 'function' ? state(++calls) : state;
+    const s0 = j.stores[0];
+    const stores = Array.from({ length: n }, (_, i) => ({ ...s0, id: i ? `store-${i}` : s0.id, name: i ? `Store ${i}` : s0.name, status: { ...s0.status, state: st } }));
+    await route.fulfill({ json: { ...j, stores } });
+  });
+  if (extra.init) await ctx.addInitScript(extra.init);
+  const pg = await ctx.newPage(); pg.errors = []; pg.on('pageerror', (e) => pg.errors.push(e.message));
+  await pg.goto(base + (extra.url || '/#overview')); await pg.waitForSelector('.tiles');
+  return pg;
+}
+const box = (pg, sel) => pg.$$eval(sel, (els) => els.map((e) => { const b = e.getBoundingClientRect(); return [b.width, b.height]; }));
+
+test('status dot is an 8 px dot in every state, on the pill, in the menu and in the phone store bar (UI-1)', opts, async () => {
+  for (const state of ['ok', 'stale', 'error']) {
+    for (const [w, h] of [[1280, 800], [360, 740]]) {
+      const pg = await many(w, h, 2, state);
+      if (w > 760) await pg.click('.top .store-pill'); else await pg.click('#storebar summary');
+      const sel = w > 760 ? '#store-name .sdot, #store-menu .sdot' : '#storebar .sdot';
+      const dots = await box(pg, sel);
+      assert.ok(dots.length >= 3, `${state} ${w}: ${dots.length} dots`);
+      assert.ok(dots.every(([dw, dh]) => dw === 8 && dh === 8), `${state} ${w}: ${JSON.stringify(dots)}`);
+      assert.equal(await pg.$eval(sel, (e) => e.classList.contains(`s-${e.className.match(/s-(\w+)/)[1]}`)), true);
+      assert.deepEqual(pg.errors, []);
+      await pg.context().close();
+    }
+  }
+});
+
+test('store + view menu: every store and role reachable on a short laptop (8 stores at 1280x720) (UI-2)', opts, async () => {
+  const pg = await many(1280, 720, 8, 'ok');
+  await pg.click('.top .store-pill');
+  await pg.mouse.wheel(0, 20000);
+  const m = await pg.$eval('details.rolepick .menu', (e) => { const b = e.getBoundingClientRect(); return { bottom: b.bottom, vh: innerHeight, scrolls: e.scrollHeight > e.clientHeight }; });
+  assert.ok(m.bottom <= m.vh, `menu ends at ${m.bottom}, window ${m.vh}`);
+  assert.ok(m.scrolls, 'the menu scrolls inside itself');
+  await pg.$eval('#role-menu button:last-child', (b) => b.scrollIntoView({ block: 'nearest' }));
+  const last = await pg.$eval('#role-menu button:last-child', (b) => { const r = b.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  assert.ok(last, 'last role in view');
+  await pg.context().close();
+});
+
+test('long store name: ellipsis on the pill (full name in its title); at 1280 with a role the range and role stay whole (UI-3, UI-4)', opts, async () => {
+  const LONG = 'Sammsara Luxury Home Decor and Gifting Company India';
+  const put = (name) => fetch(`${base}/api/settings?store=second-demo`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ storeName: name }) });
+  assert.equal((await put(LONG)).status, 200);
+  try {
+    for (const [w, h] of [[1280, 800], [1440, 900]]) {
+      const pg = await open(w, h, '/?store=second-demo&role=ops#overview', '.tiles');
+      const r = await pg.evaluate(() => {
+        const nm = document.querySelector('#store-name'), cs = getComputedStyle(nm), role = document.querySelector('#role-name');
+        return { ellipsis: cs.textOverflow === 'ellipsis' && cs.display === 'block', cut: nm.scrollWidth > nm.clientWidth, title: document.querySelector('.store-pill').title,
+          range: [...document.querySelectorAll('.top .range button')].every((b) => b.scrollWidth <= b.clientWidth + 1 && b.getBoundingClientRect().right <= innerWidth),
+          roleOneLine: role.textContent !== '' && role.getBoundingClientRect().height <= 20, sx: document.documentElement.scrollWidth - innerWidth };
+      });
+      assert.deepEqual(r, { ellipsis: true, cut: true, title: r.title, range: true, roleOneLine: true, sx: 0 }, `${w}`);
+      assert.ok(r.title.startsWith(LONG), `${w}: title ${r.title}`);
+      await pg.context().close();
+    }
+  } finally { await put('Second store (demo)'); }
+});
+
+test('the picker reads the store list again every minute: a store that starts failing turns red without a reload (UI-6)', opts, async () => {
+  const pg = await many(1440, 900, 2, (n) => (n === 1 ? 'ok' : 'error'), { init: 'window.SW_STORES_REFRESH_MS = 300' });
+  assert.ok(await pg.$('#store-name .sdot'), 'a dot');
+  await pg.waitForSelector('#store-name .sdot.s-error', { timeout: 5000 });
+  assert.deepEqual(pg.errors, []);
+  await pg.context().close();
+});
+
+test('several stores: the product drawer names the store (UI-5)', opts, async () => {
+  const pg = await open(390, 844, '/?store=sammsara-demo#overview', '.tiles');
+  await pg.click('[data-product]');
+  await pg.waitForSelector('#drawer-title');
+  assert.equal(await pg.textContent('#drawer .dstore'), 'Sammsara (demo)');
   assert.deepEqual(pg.errors, []);
   await pg.context().close();
 });
