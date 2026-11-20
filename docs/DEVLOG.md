@@ -9,6 +9,17 @@ stock-watch, `main`. KD sent the real base URL (Azure App Service, dev API); Rai
 - Checked by hand (key and token never printed): brands → 1 (TATA Motors); fresh-token → 200, `new-test-store-glcl79bh.myshopify.com`, expiry ~1 h; read-only Shopify query → New Test Store, INR, Asia/Kolkata, 22 products, 11 orders. No IP allow-list hit, so no static IP needed yet.
 - Open: compare a pull against Shopify admin; Performity's prod base URL when they move off dev; static IP only if they enable `EXTERNAL_POC_ALLOWED_IPS`.
 
+## 2026-11-20 · final critic round 1 fixes
+stock-watch 1.0.0-rc.1, on `main` (ae2c6cd L1; the UI code landed inside 56f79b3, a concurrent Performity-Origin commit that staged the whole tree; this entry in its own commit; not pushed, not deployed).
+- L1 (P1): catalog keeps `spells: [{from,to,status}]` when a variant turns active again (max 20, pruned 120 d after `to`); engine `cutBySpells` ends a stock-out at a spell's start and reopens it at its end if still 0; spell days are not in-stock days for the rate (`unsellable`); `period.catalogAsOf` passes spells. Repro (draft while out, reactivate on restock): ₹ lost and the 10 Nov bar stay put. LOGIC §1/§2/§3/§17, FORMATS, AGENTS. Tests: store.test.js (2).
+- UI-1 `.range button:focus-visible{outline-offset:-2px}`. UI-2 Back in stock `nw` (Pause rows 34 px at 1280–1920). UI-3 table Why drops "· supplier takes N d" (tooltip keeps it), `.why` 260 px ≤1440: In stock back at 1280, Sells/day at 1440.
+- SIMP-1: headline "Order ₹X today · ₹Y sales lost …"; tile 1 = profit lost · % of demand (no cost: % of demand lost · stock-outs), tile 2 = more to order this week (opens This week). Role hide keys unchanged. SIMP-2: Reorder All headline "· ₹Z more this week (M)" (today + week = orderValueAll = list); CSV / Tick all unchanged (they match the stated scope).
+- Phones: M1 store bar always a menu (one store too): role name + role list `#role-menu-m` (`SW_ROLES.paint`), view-only can switch; M2 Pause card header wraps (`.bk` pill under the name); M3 chips scroll the least; M4 `.mcard h3{flex:1 1 auto}`; M5 closed fold = summary; M6 7d/14d/30d/60d (aria-label full), min-width 44; M7 12 / 11.5 px; M8 phone stock chart R 24; M9 login 16 px + 44 px ≤760; M10 Sort by nowrap (+ select `min-width:0`: smoke caught 3 px sideways at 360). Desktop untouched by M fixes.
+- Tests: ui-helpers +3 (desktop UI-1..3; SIMP-1/2 sums; phones M1–M8, M10 at 390 + 360, M3 and M8 checked to fail on the old code), ui-stores one-store test now expects the role menu, server.test login CSS (M9).
+- Not done: M3 when the active chip is the last one (All) the row still ends cut on the left: that is already the least scroll; no fade mask added (would also fade the first chip's edge). Critic SIMP-1 alt (drop tiles) rejected: role views and RACI hang on 4 tile slots.
+- Checked: `npm test` 255 pass / 23 skip (browser); `test:ui` 23/23; `test:smoke` 30/30 + roles all pass (`PLAYWRIGHT_CHANNEL=chrome`).
+- Open: shared dev log page row not added; critics not re-run on these fixes.
+
 ## 2026-11-20 · finish sprints · last gaps
 stock-watch 1.0.0-rc.1, on `main` (cdcf303 + this entry; not pushed, not deployed).
 - SW-056: `src/version.js`; `/health`, `/status`, `/api/report` `app`, footer `v1.0.0-rc.1 · <sha>` (`dev` unstamped). SHA from `RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or `BUILD_SHA` file (`npm run stamp` before `railway up`, then delete; not gitignored because `railway up` skips ignored files). Dockerfile copies it (glob next to package.json). Hex only.
