@@ -10,7 +10,7 @@ The code is in `src/engine.js`, which has no inputs or outputs of its own, so ev
 
 If you change a rule, change this file in the same commit and add a line to `docs/DEVLOG.md`.
 
-**Index** (find the section, read only that): §0a store time zone · §1 what goes in (rows, catalog, §1a CSV/Sheet/Flow, §1c stock history rebuilt from Shopify, what counts as a sale) · §2 stock-out episodes · §3 sales per day · §4 ₹ lost (§4a hour profile, §4b example) · §5 Overview totals (§5a This month, Yesterday) · §6 reorder status and qty (§6a assumptions + typing, §6b Mark ordered) · §7 slow sellers (§7a A/B/C, §7b profit, §7c overstock, §7d trend) · §8 restocking · §9 Products columns (§9a/§9b Group by) · §10 demo · §11 known limits · §12 Google Sheet differences · §13 view-only + change log · §14 sync runs (§14a capacity + data folder lock) · §15 decision helpers (§15a–d) · §16 role views · §17 morning digest · §18 several stores.
+**Index** (find the section, read only that): §0a store time zone · §1 what goes in (rows, catalog, §1a CSV/Sheet/Flow, §1c stock history rebuilt from Shopify, what counts as a sale) · §2 stock-out episodes · §3 sales per day · §4 ₹ lost (§4a hour profile, §4b example) · §5 Overview totals (§5a This month, Yesterday) · §6 reorder status and qty (§6a assumptions + typing, §6b Mark ordered) · §7 slow sellers (§7a A/B/C, §7b profit, §7c overstock, §7d trend) · §8 restocking · §9 Products columns (§9a/§9b Group by, §9e returns %) · §10 demo · §11 known limits · §12 Google Sheet differences · §13 view-only + change log · §14 sync runs (§14a capacity + data folder lock) · §15 decision helpers (§15a–d) · §16 role views · §17 morning digest · §18 several stores.
 
 ---
 
@@ -150,7 +150,7 @@ Data → Upload a CSV shows, before anything is stored, what kind of file it is,
 |---|---|---|
 | Cancelled orders | left out, also when cancelled after we first read the order | whatever the template sends; send only live orders |
 | Test orders | left out | left out only if the Flow condition excludes them |
-| Refunds and removed items | netted: units are Shopify's `currentQuantity` | as sent |
+| Refunds and removed items | netted: units are Shopify's `currentQuantity`; the original `quantity` is kept as `ordered` for the return % (§9e), and a fully refunded line is stored with qty 0 (never a sale) | as sent |
 | Discounts | price after line **and** order-level discounts (`discountedUnitPriceAfterAllDiscountsSet`) | as sent |
 | Tax (GST) | taken out (1.1.1): when the order's prices include tax (`taxesIncluded`), price = price paid − the line's tax lines ÷ its ordered quantity | as sent |
 | Later edits | each run re-reads orders updated since the last run (30-minute overlap) and replaces their lines | not picked up |
@@ -551,6 +551,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Sells / day, Avg price | over the last 28 days (further back for a long stock-out, section 3), whatever period is selected, so the reorder maths doesn't change when you switch the view |
 | % lost | the product's lost ÷ (its sold + its lost) |
 | Outs | stock-outs touching the selected period |
+| Returns % | units refunded, returned or removed ÷ units ordered, orders placed in the period; – under 5 units ordered; amber at 15%+ (§9e) |
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 | Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
@@ -624,6 +625,34 @@ Products → View: Categories / Collections / Tags / Parent products shows a **T
 - **Saved lists**: admin names and saves the list for the whole team (same name, any case, replaces it); everyone picks it from **Saved lists** beside the search box; admin can delete. Per store, at most 100 lists of 2,000 entries.
 - Why: buyers and marketing work from lists (a supplier's SKUs, a campaign's products, the Diwali range) kept in sheets; pasting them answers "how are these doing" in one step.
 
+## 9e. Returns % per product (SW-064, `src/engine.js` `returnsOf`)
+
+**Rule:** for orders placed in the selected period (by order date, the same lines as ₹ sold):
+- units ordered = Σ `ordered` (Shopify's line `quantity`, as first ordered)
+- units returned = Σ (`ordered` − `qty`), `qty` = Shopify's `currentQuantity` (what the customer kept)
+- **Returns % = returned ÷ ordered**, one decimal; **–** when fewer than 5 units were ordered (too few to mean anything)
+- **₹ refunded = Σ returned × the line's unit price** (after discounts, ex GST: the same price as ₹ sold, §What counts as a sale)
+- **High returns** (chip on Products, amber in the column): Returns % ≥ 15%. `totals` carry the store's `unitsOrdered`, `unitsReturned`, `returnPct`, `refundValue` and `highReturns` (count).
+
+Shown: Products column **Returns %** (optional, on by default, steps aside on narrow screens; only when some line carries `ordered`), chip **High returns** (only when a product qualifies), drawer line "Returned: 12% (5 of 42) · ₹1.2 L refunded", phone cards "x% returned" at 15%+. Sammsara, 60 days: 264 of 4,525 units came back (5.8%), ₹10.35 L refunded; one coffee table had about 48% of its ₹ refunded.
+
+**Demand, ₹ sold and ₹ lost don't change:** they keep using units kept (`currentQuantity`). A fully refunded line is stored with qty 0 so its return counts here, and the engine drops qty-0 lines before any sales maths.
+
+**Why ordered − current:** Shopify already gives both on every line we read, so no extra API call and no new permission (refund objects would need more calls per order). It catches refunds with or without a restock, returns and order edits that removed items, all of which mean "the customer didn't keep it".
+
+**By order date, not return date:** a return counts against the period its order was placed in, so the % is "of what we sold in these days, how much came back". Shopify's own report books returns on the day of the return. To check against Shopify: ShopifyQL `FROM sales SHOW quantity_ordered, quantity_returned, returns GROUP BY product_title SINCE -60d` (Analytics → Reports); totals over a long period agree, a short period differs by returns that cross its edges.
+
+**Upgrade:** lines read before SW-064 have no `ordered`; they count 0 returned and stay out of the denominator. A store read before reads its last 60 days of orders once more on the next pull (`shopify.orderFields: 'ordered'`, same mechanism as the 1.1.1 GST re-read), so history gets it.
+
+**Considered:** Shopify refund objects (`order.refunds`) for the return date and restock flag (more calls per order, more API budget); counting only restocked refunds (misses refunds without a restock, the common case for damaged goods).
+
+**Can be wrong:**
+- An order edit that removes an item counts as a return (the customer changed their mind before shipping; still a lost sale).
+- An exchange shows as a return of one variant and, if Shopify makes a new order or line for the replacement, a sale of the other.
+- A return of an order placed before the period isn't in the period; a return made after the period ends still lowers it (by order date).
+- Cancelled orders stay out entirely (as for sales), so a cancellation is not a return.
+- Flow / Sheet / CSV rows carry no `ordered`: no return % for those stores.
+
 ---
 
 ## 10. Demo data (not real)
@@ -637,6 +666,7 @@ How it's generated, so the patterns look like a real store:
 - **Baskets:** about 25% of orders include a second item.
 - **Restocking habits** are assigned per product: proper restocks, late restocks, "a few pieces by hand" top-ups, overstocked slow movers, and a few never restocked.
 - **Small extras:** damage write-offs and returns at a low rate.
+- **Order returns (SW-064):** every line carries `ordered`; about 2.5% of décor lines and 7% of furniture lines had a unit sent back, and three well-selling products a lot (25–80% of lines), so Returns % and High returns show. Sales are unchanged (ordered = qty + 1 on a returned line); its own random stream (demo VERSION sammsara-8).
 - **Tags and collections (for Group by):** variants of one product share a product ID; tags say furniture or décor, finish (Gold, Brass, Marble, Glass…), motif (Animal motif, Floral), Diwali gifting and price band (Under 3000, Premium); ten collections are built on those, including an "All products" catch-all. Derived from the catalog's product types and names, not Sammsara's real tags.
 - **Fixed seed:** the same seed gives the same demo every time.
 - **Two demo stores** (no Shopify key, ADR-0015): **Sammsara (demo)** (seed 11, the full catalog) and **Second store (demo)** (seed 29, every third product left out, prices × 0.6, order numbers from #39001). Same rules; different numbers, so a mix-up between stores would show at once.

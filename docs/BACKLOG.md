@@ -289,6 +289,14 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: owner, 20 Nov 2026 (verified by hand on Sammsara: 245/257 variants, ~₹2.05 L lost in 30 days).
 - Status: Done (branch `feature/stock-history`). `src/history.js`, LOGIC §1c, API `POST /api/shopify/history`, `test/history.test.js`. Open: not checked live through the app yet; hour precision only.
 
+## Feature · returns
+
+**SW-064 · Return % per product** (P1 · S · builder)
+- Why: buyers reorder products that come back a lot. Sammsara, 60 days: 264 of 4,525 units returned (5.8%), ₹10.35 L refunded; one coffee table ~48% of its ₹ refunded.
+- Accept: pull keeps each line's original `quantity` as `ordered` (no extra API call); returned = ordered − currentQuantity, by order date; per product `unitsOrdered`, `unitsReturned`, `returnPct` (null under 5 ordered), `refundValue` (ex GST) + store totals; demand / ₹ lost unchanged; one 60-day re-read for old lines; Products column Returns % (amber 15%+, – under 5), High returns chip, drawer line; LOGIC §9e; demo returns.
+- Source: owner, 20 Nov 2026.
+- Status: Done (branch `feature/returns`). Tests: `shopify`, `engine`, `scheduler`, `server`, browser `ui-returns`. Open: `ui-helpers` chip count 6 → 7 for the integrator; not checked live against ShopifyQL `quantity_returned` yet.
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.

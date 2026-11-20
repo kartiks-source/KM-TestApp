@@ -534,3 +534,30 @@ test('Order today rows: biggest ₹ of sales a day first, not every Out now befo
   const r = E.report(stock, orders, {}, { days: 30, now });
   assert.deepEqual(r.reorder.map((p) => [p.id, p.status]), [['star', 'Critical'], ['slowout', 'Out now']]);
 });
+
+/* SW-064 (LOGIC.md §9e): return % per product by order date; demand and ₹ sold stay on units kept. */
+test('returns: % of units ordered, under 5 ordered → null, refund ₹ at the line price; qty-0 lines are not sales', () => {
+  const now = t0 + 20 * D;
+  const stock = [{ t: t0, variantId: 'a', before: null, now: 100, price: 1200 }, { t: t0, variantId: 'b', before: null, now: 100, price: 500 }];
+  const orders = [
+    { t: now - 2 * D, order: '#1', variantId: 'a', qty: 3, ordered: 4, price: 1000 },     // 1 of 4 back
+    { t: now - 3 * D, order: '#2', variantId: 'a', qty: 0, ordered: 2, price: 1000 },     // fully refunded
+    { t: now - 4 * D, order: '#3', variantId: 'a', qty: 2, ordered: 2, price: 1000 },
+    { t: now - 5 * D, order: '#4', variantId: 'a', qty: 1, price: 1000 },                  // no `ordered` (old line): 0 back, not in the %
+    { t: now - 40 * D, order: '#5', variantId: 'a', qty: 0, ordered: 5, price: 1000 },    // before the period
+    { t: now - 2 * D, order: '#6', variantId: 'b', qty: 2, ordered: 4, price: 500 },      // 4 ordered: too few for a %
+  ];
+  const r = E.report(stock, orders, {}, { now, days: 30 });
+  const a = r.products.find((p) => p.id === 'a'), b = r.products.find((p) => p.id === 'b');
+  assert.deepEqual([a.unitsOrdered, a.unitsReturned, a.returnPct, a.refundValue], [8, 3, 37.5, 3000]);
+  assert.equal(a.unitsSold, 6, 'sales: units kept only');
+  assert.equal(a.sold, 6000);
+  assert.deepEqual([b.unitsOrdered, b.unitsReturned, b.returnPct, b.refundValue], [4, 2, null, 1000]);
+  assert.deepEqual([r.totals.unitsOrdered, r.totals.unitsReturned, r.totals.returnPct, r.totals.refundValue, r.totals.highReturns], [12, 5, 41.7, 4000, 1]);
+  /* the same report without `ordered` on any line: no returns, nothing else moves */
+  const plain = E.report(stock, orders.filter((o) => o.qty > 0).map(({ ordered, ...o }) => o), {}, { now, days: 30 });
+  const pa = plain.products.find((p) => p.id === 'a');
+  assert.deepEqual([pa.unitsOrdered, pa.returnPct, pa.refundValue], [0, null, 0]);
+  assert.equal(pa.perDay, a.perDay, 'demand unchanged by returns');
+  assert.equal(pa.lost, a.lost);
+});

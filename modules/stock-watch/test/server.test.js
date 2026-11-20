@@ -240,3 +240,17 @@ test('POST /api/shopify/history (SW-063): admin only, 400 without Shopify; demo 
   assert.equal(set.shopify.history, null);
   assert.equal((await s.req('/api/report', { headers: basic(PASSWORD) })).status, 200);
 });
+
+/* SW-064: /api/report and /api/product carry the return fields (the demo has returns) */
+test('report: products and totals carry returns (unitsOrdered, unitsReturned, returnPct, refundValue)', async (t) => {
+  const s = await start(); t.after(s.stop);
+  const r = await (await s.req('/api/report?days=30')).json();
+  assert.equal(r.source, 'demo');
+  for (const k of ['unitsOrdered', 'unitsReturned', 'refundValue']) assert.equal(typeof r.products[0][k], 'number', k);
+  assert.ok('returnPct' in r.products[0]);
+  assert.ok(r.totals.unitsOrdered > 0 && r.totals.unitsReturned > 0 && r.totals.returnPct > 0 && r.totals.refundValue > 0);
+  assert.ok(r.totals.highReturns >= 1, 'a few demo products come back a lot');
+  const hi = r.products.find((p) => p.returnPct >= 15);
+  const d = await (await s.req(`/api/product/${encodeURIComponent(hi.id)}?days=30`)).json();
+  assert.equal(d.product.returnPct, hi.returnPct);
+});

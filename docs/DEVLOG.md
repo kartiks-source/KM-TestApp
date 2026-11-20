@@ -6,6 +6,14 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 <!-- devlog archive links (scripts/rotate-devlog.js) -->
 Older entries: [2026-11](devlog/2026-11.md)
 
+## 2026-11-20 · return % per product
+stock-watch, branch `feature/returns` (not pushed, not deployed). SW-064, LOGIC §9e.
+- Pull: order lines keep `ordered` (Shopify line `quantity`) beside `qty` (`currentQuantity`); fully refunded lines kept with qty 0 (engine leaves them out of sales; history check skips them). `shopify.orderFields` → one 60-day re-read, like the GST one.
+- Engine: per product `unitsOrdered`, `unitsReturned`, `returnPct` (null under 5 ordered), `refundValue` (₹ ex GST), by order date; `totals` same + `highReturns`. Demand, ₹ sold, ₹ lost unchanged.
+- Page: Products column Returns % (optional, amber 15%+, before Units sold so it shows at 1440), chip High returns (only when one qualifies), drawer line "Returned: x% (a of b) · ₹ refunded", phone cards "x% returned" at 15%+. Overview unchanged.
+- Demo: returns on its own random stream (sales unchanged), three busy products 25–80% of lines; VERSION sammsara-8.
+- Open: `test/ui-helpers.test.js` expects 6 Products chips, now 7 (not touched: another branch edits it); check against ShopifyQL `FROM sales SHOW quantity_ordered, quantity_returned` on the live store. Shared dev log page not updated from here.
+
 ## 2026-11-20 · UI + mobile fixes (1.1.1)
 stock-watch 1.1.1, on `main` (not pushed, not deployed). Fixes from the UI, simplicity and mobile critics, checked on a copy of the live Sammsara data at 1440 and 360.
 - Counts (P1, UI-2/M2/SIMP-3): `totals.stockouts` leaves out not-selling episodes (`stockoutsNotSelling`, episode `notSelling`); tile/summary 94 → 54 = Stock-outs page "53 products ran out 54 times" (local copy); weekly `ranOut` too. Badge = stillOut 47 = page.

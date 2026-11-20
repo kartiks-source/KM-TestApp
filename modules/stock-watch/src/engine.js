@@ -4,7 +4,8 @@
  *
  * Inputs (normalised rows):
  *   stock  { t, variantId, sku, product, variant, before, now, price }   one row per stock change
- *   orders { t, order, variantId, sku, qty, price }                      one row per order line
+ *   orders { t, order, variantId, sku, qty, price, ordered? }            one row per order line (qty = units kept;
+ *                                                                        ordered = units first ordered, SW-064; qty 0 = fully refunded)
  *
  * Output: report() → totals, daily sold vs lost, reorder list, every stock-out, per-product summary.
  */
@@ -147,6 +148,22 @@ const MIN_IN_STOCK_DAYS = 7;
  *  capped at units ÷ calendar days since the product's first sale, and can't make the product a best seller (A).
  *  Before: 2 units sold in the 17 h before a long stock-out read as 0.29 a day → ₹23,280 lost, ranked A. */
 const LOW_UNITS = 5, LOW_DAYS = 14;
+/** Returns (SW-064, LOGIC.md §9e): a % only from 5 units ordered; 15%+ is "high". */
+const RETURN_MIN_UNITS = 5, HIGH_RETURN_PCT = 15;
+/** Units returned in the period, per variant (and the store): lines with `ordered` only, by order date like sales.
+ *  returned = ordered − qty (refunds, returns, removals); refund ₹ = returned × the line's price (ex GST). */
+function returnsOf(orders, from) {
+  const by = new Map();
+  for (const o of orders) {
+    if (o.t < from || !(num(o.ordered) > 0)) continue;
+    const id = String(o.variantId), x = by.get(id) || { ordered: 0, returned: 0, value: 0 };
+    const back = Math.max(0, num(o.ordered) - num(o.qty));
+    x.ordered += num(o.ordered); x.returned += back; x.value += back * num(o.price);
+    by.set(id, x);
+  }
+  return by;
+}
+const returnPct = (ordered, returned) => (ordered >= RETURN_MIN_UNITS ? round((returned / ordered) * 100, 1) : null);
 /** A falling trend (product or store, ≤ PACE_DROP %) shows the order quantity at the last 14 days' pace too (§6). */
 const PACE_DROP = -20;
 
@@ -321,6 +338,9 @@ function report(stock, orders, settings = {}, opts = {}) {
   const days = Math.max(1, Math.ceil((now - from) / DAY));
   const off = S.timeZone = TZ.zoneOf(S);   // SW-049: the store's IANA zone (old stores: their saved offset)
   S.tzOffsetMin = TZ.offsetAt(off, now);    // today's offset, for anything that still reads the minutes
+  /* SW-064: fully refunded lines (qty 0) carry returns only; every sales number below uses lines that sold something */
+  const returns = returnsOf(orders, from);
+  orders = orders.filter((o) => num(o.qty) > 0);
   const profile = hourProfile(orders.filter((o) => o.t >= now - 60 * DAY), off);
 
   /* group by product (variant) */
@@ -441,6 +461,9 @@ function report(stock, orders, settings = {}, opts = {}) {
       unitsSold: p.lines.filter((o) => o.t >= from).reduce((s, o) => s + num(o.qty), 0),
       type: p.type || '', onOrder: oo,
     };
+    /* returns in the period (SW-064, LOGIC.md §9e): demand and ₹ lost stay on units kept */
+    const rt = returns.get(String(p.id)) || { ordered: 0, returned: 0, value: 0 };
+    Object.assign(row, { unitsOrdered: rt.ordered, unitsReturned: rt.returned, returnPct: returnPct(rt.ordered, rt.returned), refundValue: Math.round(rt.value) });
     if (lowData) row.lowData = true;
     /* the product's first stock record (UI-1): before it there's no stock history, so ₹ lost there is unknown, not 0 */
     row.historyFrom = p.changes.length ? p.changes[0].t : null;
@@ -566,6 +589,8 @@ function report(stock, orders, settings = {}, opts = {}) {
       excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
       storeTrendPct: baseTrend,
       costed: products.filter((p) => p.cost != null && (p.sold || p.lost)).length,
+      ...(() => { const o = products.reduce((s, p) => s + p.unitsOrdered, 0), b = products.reduce((s, p) => s + p.unitsReturned, 0);
+        return { unitsOrdered: o, unitsReturned: b, returnPct: returnPct(o, b), refundValue: products.reduce((s, p) => s + p.refundValue, 0), highReturns: products.filter((p) => p.returnPct >= HIGH_RETURN_PCT).length }; })(),
       active: products.filter((p) => p.sold || p.lost).length,
     },
     daily: dailyRows, reorder, stockouts, products,
@@ -607,4 +632,4 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
 }
 
 module.exports = {
-  CALC_VERSION, TODAY_STATUS, afterLastSale, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };
+  CALC_VERSION, TODAY_STATUS, RETURN_MIN_UNITS, HIGH_RETURN_PCT, returnsOf, afterLastSale, trend, trendCall, storeTrend, TREND_MIN_UNITS, LOW_UNITS, LOW_DAYS, PACE_DROP, minMax, report, productDetail, episodes, demandPerDay, demandRate, inStockStart, KEEP_DAYS, MIN_IN_STOCK_DAYS, plan, onOrderNow, hourProfile, sellingHours, dayKey, DEFAULT_SETTINGS, HOUR, DAY };

@@ -186,7 +186,7 @@ function validate(rows, orders, changes, firstSeenAt, { since = -Infinity, zone 
   const hs = hourStart(firstSeenAt, zone);
   let lines = 0, bad = 0, badUnits = 0; const variants = new Set();
   for (const o of orders || []) {
-    if (!(o.t >= since && o.t < firstSeenAt) || !byId.has(String(o.variantId))) continue;
+    if (!(o.t >= since && o.t < firstSeenAt) || !byId.has(String(o.variantId)) || !(Number(o.qty) > 0)) continue;   // a fully refunded line (qty 0, SW-064) sold nothing
     lines++;
     if (o.t >= hs) continue;
     const id = String(o.variantId), list = outs.get(id);
