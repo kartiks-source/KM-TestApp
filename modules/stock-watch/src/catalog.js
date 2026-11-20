@@ -2,7 +2,7 @@
 /*
  * The catalog that Group by (SW-022) rolls up on: which parent product each variant belongs to, its
  * category and tags, and which collections each product is in. Read-only from Shopify. Collections are
- * kept in DATA_DIR/catalog.json (separate from store.json). Rules: LOGIC.md §9b.
+ * kept per store in DATA_DIR/stores/<id>/catalog.json (separate from store.json; ADR-0015). Rules: LOGIC.md §9b.
  *
  *   variants     the store's catalog snapshot (SW-002, store.json → catalog, replaced on every stock pull:
  *                productId, product, type, tags). Not copied here: one source for variant attributes.
@@ -33,23 +33,26 @@ const MEMBERS_Q = `query CollectionProducts($id: ID!, $after: String) {
 }`;
 
 const gidTail = (gid) => String(gid || '').replace(/^gid:\/\/shopify\/\w+\//, '');
-let FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'catalog.json');
-let cat = null;
-let running = null;
+const scope = require('./scope');
+let override = null;                                   // tests: one file instead of the store's
+const states = new Map();                              // file → { cat, running }
+const fileOf = () => override || path.join(scope.dir(), 'catalog.json');
+const S = () => { const f = fileOf(); let st = states.get(f); if (!st) { st = { file: f, cat: null, running: null }; states.set(f, st); } return st; };
 
 const blank = () => ({ variants: {}, variantsAt: null, collections: {}, collectionsAt: null, pending: null, lastError: null });
 function load() {
-  if (cat) return cat;
-  try { cat = { ...blank(), ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; } catch { cat = blank(); }
-  return cat;
+  const st = S();
+  if (st.cat) return st.cat;
+  try { st.cat = { ...blank(), ...JSON.parse(fs.readFileSync(st.file, 'utf8')) }; } catch { st.cat = blank(); }
+  return st.cat;
 }
-function save() {
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE + '.tmp', JSON.stringify(cat));
-  fs.renameSync(FILE + '.tmp', FILE);
+function saveState(st) {
+  fs.mkdirSync(path.dirname(st.file), { recursive: true });
+  fs.writeFileSync(st.file + '.tmp', JSON.stringify(st.cat));
+  fs.renameSync(st.file + '.tmp', st.file);
 }
 /** Tests: point at another file and forget what's in memory. */
-function use(file) { FILE = file; cat = null; running = null; }
+function use(file) { override = file || null; states.clear(); }
 
 /** The store's catalog snapshot (SW-002: { variantId: { productId, product, type, tags, seenAt, … } }) →
  *  { variants: { variantId: { productId, product, type, tags } }, variantsAt }. Deleted variants keep their last attributes. */
@@ -68,8 +71,10 @@ function fromSnapshot(snapshot) {
  * Returns { skipped } (fresh), { partial } (page budget used up; carries on next time) or { collections }.
  */
 function refreshCollections(opts = {}) {
-  if (running) return running;
-  running = (async () => {
+  const st = S();
+  if (st.running) return st.running;
+  const save = () => saveState(st);
+  st.running = (async () => {
     const { q = require('./shopify').gql, now = Date.now(), maxPages = MAX_PAGES } = opts;
     const c = load();
     if (!c.pending) {
@@ -98,8 +103,8 @@ function refreshCollections(opts = {}) {
       c.collectionsAt = now; c.pending = null; c.lastError = null; save();
       return { collections: P.list.length };
     } catch (e) { c.lastError = e.message; save(); throw e; }
-  })().finally(() => { running = null; });
-  return running;
+  })().finally(() => { st.running = null; });
+  return st.running;
 }
 
 /** The catalog to group by: the demo's own when the data is the demo, else the store snapshot's variants + the collections read here. */

@@ -9,6 +9,7 @@ const path = require('node:path');
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-onorder-'));
 const E = require('../src/engine');
 const OO = require('../src/onorder');
+require('../src/scope').useDir(process.env.DATA_DIR);   // module on its own: one store folder
 
 const D = E.DAY;
 const now = Date.parse('2026-11-19T06:00:00Z');

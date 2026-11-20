@@ -73,6 +73,7 @@
   };
   const ORDER = Object.keys(ROLES);
   const KEY = 'sw-role';
+  const ALL = 'All';   // no role: every page, every panel, every column (the default; a role only narrows it)
 
   const valid = (r) => Object.prototype.hasOwnProperty.call(ROLES, r);
   const hides = (role, key) => valid(role) && ROLES[role].hide.includes(key);
@@ -105,7 +106,7 @@
     return { view: R.home, filter: R.filter || null, setHash: !hash };
   }
 
-  const API = { ROLES, ORDER, PARTS, valid, hides, css, landing };
+  const API = { ROLES, ORDER, PARTS, ALL, valid, hides, css, landing };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof document === 'undefined') return;
 
@@ -132,7 +133,7 @@
     if (nm) nm.textContent = role ? ROLES[role].name : '';
     const menu = document.getElementById('role-menu');
     if (menu) {
-      menu.innerHTML = '<p class="rp-h">Show me</p>' + ['', ...ORDER].map((r) => `<button class="linkbtn${r === role ? ' on' : ''}" data-role="${r}" aria-pressed="${r === role}"><b>${r ? esc(ROLES[r].name) : 'Everything'}</b><small>${r ? esc(ROLES[r].lands) : 'Every page, every number (default)'}</small></button>`).join('');
+      menu.innerHTML = '<p class="rp-h">Show me</p>' + ['', ...ORDER].map((r) => `<button class="linkbtn${r === role ? ' on' : ''}" data-role="${r}" aria-pressed="${r === role}"><b>${r ? esc(ROLES[r].name) : ALL}</b><small>${r ? esc(ROLES[r].lands) : 'Every page, every number (default)'}</small></button>`).join('');
     }
   }
   function choose(r) {
@@ -154,7 +155,7 @@
       if (L.setHash) history.replaceState(null, '', '#' + L.view);
     },
     /** The "Show me" field on Data & settings (the store menu is hidden on phones). */
-    field: () => `<div class="field"><label for="f-role">Show me</label><select id="f-role">${['', ...ORDER].map((r) => `<option value="${r}" ${r === role ? 'selected' : ''}>${r ? esc(ROLES[r].name) : 'Everything (default)'}</option>`).join('')}</select><small>Remembered on this browser. Link for a role: /?role=ceo</small></div>`,
+    field: () => `<div class="field"><label for="f-role">Show me</label><select id="f-role">${['', ...ORDER].map((r) => `<option value="${r}" ${r === role ? 'selected' : ''}>${r ? esc(ROLES[r].name) : `${ALL} (default)`}</option>`).join('')}</select><small>Remembered on this browser. Link for a role: /?role=ceo</small></div>`,
   });
   root.SW_ROLES = API;
 

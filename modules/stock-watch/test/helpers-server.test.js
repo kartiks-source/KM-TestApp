@@ -32,7 +32,7 @@ test('reorder CSV: filter + search respected, PO columns, store-time file name',
   const today = r.reorder.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status));
   const res = await get('/api/export/reorder.csv?days=30&filter=today');
   assert.equal(res.status, 200);
-  assert.match(res.headers.get('content-disposition'), /reorder-\d{4}-\d{2}-\d{2}\.csv/);
+  assert.match(res.headers.get('content-disposition'), /reorder-sammsara-demo-\d{4}-\d{2}-\d{2}\.csv/);
   const text = await res.text();
   const lines = text.replace(/^﻿/, '').split('\n');
   assert.match(lines[0], /^"Vendor","Product","SKU","Variant ID","Order qty","Unit cost","Order value","Status"/);
@@ -53,7 +53,7 @@ test('decide: store, hide, undo; bad input → 400 / 404', async () => {
   let r2 = await (await get('/api/report?days=30')).json();
   assert.equal(r2.decide.some((y) => y.id === x.id), false);
   assert.ok(r2.decided.some((y) => y.id === x.id && y.decision === 'keep'));
-  const saved = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8'));
+  const saved = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'stores', 'sammsara-demo', 'decisions.json'), 'utf8'));
   assert.equal(saved[x.id].d, 'keep');
   assert.equal(typeof saved[x.id].base, 'number');
   assert.equal((await post('/api/decide', { id: x.id, decision: null })).status, 200);
@@ -72,9 +72,9 @@ test('decide: trial values never bring a decided item back; loading demo data wi
     const t = await (await get(`/api/report?days=30&demandWindowDays=${w}`)).json();
     assert.equal(t.decide.filter((y) => r.decide.some((x) => x.id === y.id)).length, 0, `trial window ${w} d: decisions checked on saved-settings rates`);
   }
-  assert.ok(Object.keys(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8'))).length > 0);
+  assert.ok(Object.keys(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'stores', 'sammsara-demo', 'decisions.json'), 'utf8'))).length > 0);
   assert.equal((await post('/api/demo', {})).status, 200);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'decisions.json'), 'utf8')), {});
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'stores', 'sammsara-demo', 'decisions.json'), 'utf8')), {});
 });
 
 test('a variant ID that is an Object.prototype key ("constructor", "toString"…) never breaks the PO CSV (critic r2 S1)', async () => {

@@ -7,7 +7,8 @@
 
   const state = {
     days: 30, view: 'overview', report: null, settings: null, source: null,
-    filter: { reorder: 'today', stockouts: 'all', products: 'all' }, q: { reorder: '', stockouts: '', products: '' },
+    filter: { reorder: 'all', stockouts: 'all', products: 'all' },   // show everything by default; a role (roles.js) or a tab narrows it
+    q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
     pick: new Set(),                            // Reorder rows ticked for Mark ordered
@@ -49,8 +50,10 @@
   const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}" title="${esc(s)}">${esc(SHORT[s] || s)}</span>`;
 
   /* ---------- server ---------- */
+  /* every call names the store this page shows (public/stores.js, ADR-0015): two tabs on two stores never cross */
+  const storeUrl = (path) => (window.SW_STORES ? SW_STORES.url(path) : path);
   async function api(path, opt = {}) {
-    const r = await fetch(path, { ...opt, headers: { ...(opt.body && typeof opt.body === 'string' && opt.json !== false ? { 'content-type': 'application/json' } : {}), ...(opt.headers || {}) } });
+    const r = await fetch(storeUrl(path), { ...opt, headers: { ...(opt.body && typeof opt.body === 'string' && opt.json !== false ? { 'content-type': 'application/json' } : {}), ...(opt.headers || {}) } });
     if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); }
     const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
@@ -67,6 +70,7 @@
     header(); render();
   }
   async function load() {
+    if (window.SW_STORES) await SW_STORES.ready;
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     state.runs = set.runs || [];   // SW-030
@@ -76,34 +80,29 @@
     freshness();
   }
 
-  /* ---------- stale-data banner (SW-019): "Data is X h old" when the last Shopify pull is over 45 minutes old ----------
-     Reads the unauthed GET /status when the server has it, else the Shopify lastSync that came with the report. */
+  /* ---------- stale-data banner (SW-019): "Data is X h old" when this store's last Shopify pull is over 45 minutes old ----------
+     From the report's freshness (this store only; /status covers every store, ADR-0015), aged on the page every minute. */
   const STALE_MIN = 45;
   const asTime = (v) => (typeof v === 'number' && v > 1e12 ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
   const ageText = (min) => (min < 90 ? `${Math.round(min)} min` : min < 48 * 60 ? `${n1(min / 60)} h` : `${n1(min / 1440)} days`);
-  async function freshness() {
-    let st = null;
-    try {
-      const r = await fetch('/status', { cache: 'no-store', credentials: 'same-origin' });
-      if ((r.headers.get('content-type') || '').includes('json')) st = await r.json();
-    } catch { /* no /status: use the report */ }
-    const sh = state.shopify || {};
-    const fromStatus = st && (asTime(st.lastSync) ?? asTime(st.shopify?.lastSync) ?? asTime(st.lastPull) ?? (Number.isFinite(st.ageMin) ? Date.now() - st.ageMin * 60e3 : null));
-    const last = fromStatus ?? asTime(sh.lastSync);
-    const connected = !!sh.source || st?.stale === true;
+  function freshness() {
+    const f = (state.report && state.report.freshness) || {}, sh = state.shopify || {};
+    const last = asTime(f.lastPull) ?? asTime(sh.lastSync);
+    const connected = !!f.shopify || !!sh.source;
     const age = last ? (Date.now() - last) / 60e3 : null;
-    const stale = connected && (st?.stale === true || (age != null && age > STALE_MIN));
+    const stale = connected && (f.stale === true || (age != null && age > STALE_MIN));
     const el = $('#stale');
     if (!stale) { el.hidden = true; return; }
-    const err = sh.lastError || st?.lastError || st?.shopify?.lastError;
+    const err = sh.lastError;
     el.innerHTML = `<b>${age != null ? `Data is ${ageText(age)} old.` : 'Data may be out of date.'}</b> <span>${last ? `Last Shopify pull ${dt(last)}` : 'No Shopify pull yet'}${err ? ` · ${esc(err)}` : ''}${sh.running ? ' · pulling now…' : ''}. Numbers may not show the latest stock and orders.</span> <a href="#data">Data &amp; settings</a>`;
     el.hidden = false;
   }
   setInterval(() => { if (state.report) freshness(); }, 60e3);
 
   function header() {
-    const r = state.report, s = state.settings;
-    $('#store-name').textContent = s.storeName || 'Store';
+    const r = state.report, s = state.settings, name = (r.store && r.store.name) || s.storeName || 'Store';
+    if (window.SW_STORES && SW_STORES.list().length) SW_STORES.rename(name);   // stores.js draws the pill (dot + name)
+    else { $('#store-name').textContent = name; document.title = `${name} · Stock-out Watch`; }
     $('#n-reorder').textContent = r.totals.orderToday || '';
     $('#n-stockouts').textContent = r.totals.stillOut || '';
     $('#n-stockouts').title = `${r.totals.stillOut} products still out of stock`;
@@ -267,7 +266,7 @@
     cols = cols.filter(colVisible);
     const W = state.colW[colKey(id)], fixed = W && cols.every((c) => W[c.k]);
     if (fixed) { const sum = cols.reduce((a, c) => a + W[c.k], 0), room = tableRoom(); if (sum > room) cols.forEach((c) => { W[c.k] = Math.max(40, Math.floor((W[c.k] * room) / sum)); }); }
-    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}" tabindex="0" aria-sort="${s && s.k === c.k ? (s.dir > 0 ? 'ascending' : 'descending') : 'none'}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
+    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.opt ? ' data-opt="1"' : ''} tabindex="0" aria-sort="${s && s.k === c.k ? (s.dir > 0 ? 'ascending' : 'descending') : 'none'}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}" tabindex="0">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk + more;
     const cur = s ? `${s.k}|${s.dir}` : '';
@@ -357,9 +356,10 @@
   const trendCell = (p) => `<span class="trc">${spark(p, 48, 16)}${trendOnly(p)}</span>`;
   const mspark = (p) => ((p.weeks || []).some((w) => w.units > 0) ? `<span class="mspark">${spark(p, 48, 16)}</span>` : '');   // M9: no sales in 8 weeks = a row of rose dashes; the Why line says it
 
-  /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
-  const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
-  const showCol = (id, c) => (!c.opt || (colsOn[id] || []).includes(c.k)) && !window.SW_ROLES?.hidesCol(id, c.k);   // a role view can remove default columns (SW-020)
+  /* columns picker: every column is on by default (show everything); untick to hide one, remembered on this browser.
+     Optional columns that don't fit the screen step aside on their own (fitTables), last first, so the page never scrolls sideways. */
+  const colsOff = (() => { try { return JSON.parse(localStorage.getItem('sw-cols-off') || '{}'); } catch { return {}; } })();
+  const showCol = (id, c) => (!c.opt || !(colsOff[id] || []).includes(c.k)) && !window.SW_ROLES?.hidesCol(id, c.k);   // a role view can remove default columns (SW-020)
   function colPicker(id, cols) {
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
     return `<details class="colpick desk"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
@@ -490,7 +490,7 @@
       <section class="headline">${head}</section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', storeUrl(`/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`), pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.onOrder.remaining)} pcs</b><small>on order</small></div></header>
@@ -719,7 +719,7 @@
       : sh.source ? (sh.lastError ? `Shopify: ${esc(sh.lastError)}` : sh.lastSync ? `Connected to Shopify · last read ${dt(sh.lastSync)}` : 'Connected to Shopify · first read pending')
         : src.kind === 'live' ? 'Live data' : 'No data yet';
     return `
-      <section class="headline"><h1>Data &amp; settings</h1></section>
+      <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. Passwords are for every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
         <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
@@ -732,8 +732,8 @@
         <div class="toolbar"><button class="btn" id="sheet-save">Save and sync now</button></div></details>
       <details class="panel fold"><summary><b>Shopify Flow</b> <span class="muted">sends each change straight here</span></summary>
         <p class="muted">In Shopify Flow use the action <b>Send HTTP request</b> (POST) with the header <span class="mono">X-Ingest-Key</span> set to the key below; body = the same comma-separated line as the sheet, or JSON. One workflow per URL. Keep the key out of the URL.</p>
-        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base)}/ingest/stock</div></div>
-        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base)}/ingest/order</div></div>
+        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base + storeUrl('/ingest/stock'))}</div></div>
+        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base + storeUrl('/ingest/order'))}</div></div>
         <div class="field"><label>Header <span class="mono">X-Ingest-Key</span></label><div class="code" id="u-key">${maskKey(s.ingestKey)}</div><small>${s.ingestKeyAt ? `Last changed ${dt(s.ingestKeyAt)}` : 'Not changed since setup'}</small></div>
         <div class="toolbar"><button class="btn ghost" data-copy="u-stock">Copy stock URL</button><button class="btn ghost" data-copy="u-order">Copy order URL</button><button class="btn ghost" id="show-key">Show key</button><button class="btn ghost" id="copy-key">Copy key</button><button class="btn ghost" id="new-key">New key</button></div></details>
       <details class="panel fold"><summary><b>Upload a CSV</b> <span class="muted">one-off history</span></summary>
@@ -746,7 +746,7 @@
       <h2 class="sect">Settings</h2>
       <section class="panel">
         <div class="form">
-          ${field('storeName', 'Store name', s.storeName, 'Shown at the top', 'text')}
+          ${field('storeName', 'Store name', s.storeName || (state.report.store && state.report.store.name) || '', 'Shown in the store picker, the tab title and digests', 'text')}
           ${window.SW_ROLES ? SW_ROLES.field() : ''}
           <div class="field"><label for="f-tzOffsetMin">Time zone</label><select id="f-tzOffsetMin" data-setting="tzOffsetMin">${tzOpts.map(([v, l]) => `<option value="${v}" ${v === +s.tzOffsetMin ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small>Days and the sales-by-hour pattern follow this</small></div>
         </div>
@@ -762,6 +762,7 @@
       <form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`;
   }
 
+  const manyStores = () => !!(window.SW_STORES && SW_STORES.list().length > 1);
   const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
   const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" type="${type}" step="any" value="${esc(v)}"><small>${esc(hint)}</small></div>`;
@@ -775,7 +776,7 @@
       const d = await api(`/api/product/${encodeURIComponent(id)}?days=${state.days}${whatQs()}`);
       const p = d.product, now = state.report.generatedAt, from = state.report.from;
       body.innerHTML = `
-        <h2 id="drawer-title">${esc(p?.name || id)}</h2>
+        ${manyStores() ? `<p class="dstore">${esc(SW_STORES.name())}</p>` : ''}<h2 id="drawer-title">${esc(p?.name || id)}</h2>
         <div class="toolbar">${p ? status(p) + bestTag(p) : ''}<span class="mono muted">${esc(p?.sku || '')}</span></div>
         ${p?.why ? `<p class="dwhy">${whyCell(p)}</p>` : ''}
         <section class="tiles dtiles">
@@ -829,15 +830,30 @@
     render._caret = null;
     fitTables();
   }
-  /* critic r2 UI-2: when the columns don't fit (ones the user added from Columns…), the table scrolls sideways inside its
-     box with a note, instead of clipping them out of reach; the default columns fit from 1180 px, so the page never scrolls */
+  /* Show everything, never scroll the page sideways: when the columns don't fit, the optional ones step aside, the last
+     first, until the table fits; a small note names them (untick in Columns… to choose others). Only if the table still
+     doesn't fit (a user-widened column) does it scroll sideways inside its box (critic r2 UI-2). */
   function fitTables() {
     $$('.tbl.desk').forEach((b) => {
-      const t = b.querySelector('table'), over = !!t && b.clientWidth > 0 && t.getBoundingClientRect().width > b.clientWidth + 1;
-      b.classList.toggle('scrollx', over);
-      const hint = b.previousElementSibling && b.previousElementSibling.classList.contains('sx-hint') ? b.previousElementSibling : null;
-      if (over && !hint) b.insertAdjacentHTML('beforebegin', '<div class="sx-hint">More columns than fit: scroll the table sideways →</div>');
-      else if (!over && hint) hint.remove();
+      const t = b.querySelector('table'); if (!t || !t.tHead) return;
+      t.querySelectorAll('.sq').forEach((el) => el.classList.remove('sq'));
+      const over = () => b.clientWidth > 0 && t.getBoundingClientRect().width > b.clientWidth + 1;
+      const aside = [];
+      if (!t.classList.contains('fixed')) {
+        const ths = [...t.tHead.rows[0].cells];
+        for (let i = ths.length - 1; i >= 0 && over(); i--) {
+          if (!ths[i].dataset.opt || getComputedStyle(ths[i]).display === 'none') continue;
+          ths[i].classList.add('sq');
+          for (const row of t.tBodies[0]?.rows || []) row.cells[i]?.classList.add('sq');
+          aside.unshift(ths[i].textContent.replace(/[↑↓]/g, '').trim());
+        }
+      }
+      const still = over();
+      b.classList.toggle('scrollx', still);
+      const prev = b.previousElementSibling && b.previousElementSibling.classList.contains('sx-hint') ? b.previousElementSibling : null;
+      const text = still ? 'More columns than fit: scroll the table sideways →' : aside.length ? `Not shown at this width: ${aside.join(', ')} (wider screen, or untick others in Columns)` : '';
+      if (!text) { if (prev) prev.remove(); return; }
+      if (prev) prev.textContent = text; else b.insertAdjacentHTML('beforebegin', `<div class="sx-hint">${esc(text)}</div>`);
     });
   }
   function route() { closeDrawer(); render._animate = true; state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
@@ -939,10 +955,10 @@
     if (e.target.id === 'f-view') { state.lens = e.target.value; state.limit.products = 0; state.limit.groups = 0; render(); return; }
     if (e.target.id === 'f-more') { state.filter.products = e.target.value || 'all'; state.limit.products = 0; render(); return; }
     if (e.target.dataset && e.target.dataset.col) {
-      const [id, k] = e.target.dataset.col.split('|'); const on = new Set(colsOn[id] || []);
-      if (e.target.checked) on.add(k); else on.delete(k);
-      colsOn[id] = [...on]; try { localStorage.setItem('sw-cols', JSON.stringify(colsOn)); } catch { /* private window */ }
-      render(); $(`.colpick`)?.setAttribute('open', ''); return;
+      const [id, k] = e.target.dataset.col.split('|'); const off = new Set(colsOff[id] || []);
+      if (e.target.checked) off.delete(k); else off.add(k);
+      colsOff[id] = [...off]; try { localStorage.setItem('sw-cols-off', JSON.stringify(colsOff)); } catch { /* private window */ }
+      render(); $('#view .colpick.desk')?.setAttribute('open', ''); return;   // the Columns menu, not the store menu
     }
     const id = e.target.dataset && e.target.dataset.msort;
     if (!id) return;

@@ -10,7 +10,7 @@
   const role = () => (window.SW_ROLES && SW_ROLES.current()) || '';
   function toast(msg) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600); }
   async function api(path, opt = {}) {
-    const r = await fetch(path, { ...opt, headers: opt.body ? { 'content-type': 'application/json' } : {} });
+    const r = await fetch(window.SW_STORES ? SW_STORES.url(path) : path, { ...opt, headers: opt.body ? { 'content-type': 'application/json' } : {} });   // this store only (ADR-0015)
     if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); }
     const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);

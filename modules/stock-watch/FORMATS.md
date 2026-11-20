@@ -108,7 +108,21 @@ UTF-8 with BOM, every cell quoted, text starting with `= + - @ tab CR` gets a le
 - Pause promotion (`pause-promotion-YYYY-MM-DD.csv`): `Product, SKU, Variant ID, Why, Back in stock, In stock, Days left`.
 - Push these (`push-these-YYYY-MM-DD.csv`): `Product, SKU, Variant ID, Overstock ₹, In stock, Days left`.
 
+## Kept in the browser (per browser, never on the server)
+
+Nothing here is a secret or a number; clearing site data only resets choices.
+
+| Key | Where | Shape | Set by |
+|---|---|---|---|
+| `sw_store` | cookie, `Path=/`, a year, `SameSite=Lax` (`Secure` on https), readable by the page | a store id (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`) | the store picker (`public/stores.js`); the server uses it only when the request has no `?store=` and the id is listed (ADR-0015) |
+| `sw-store` | `localStorage` | the same store id | the store picker; the page's default when the address has no `?store=` |
+| `sw-role` | `localStorage` | a role key (`ceo`, `ops`, …) or absent = All (the default) | the role list under the store pill, Data → Show me, `/?role=` (SW-020) |
+| `sw-cols-off` | `localStorage` | `{ reorder: ['outs', …], products: [...] }`: optional columns **unticked** (every optional column is on by default; replaces the old opt-in `sw-cols`, which is ignored) | Columns… on Reorder / Products |
+| `sw-colw` | `localStorage` | `{ <table>: { <column>: px } }`: dragged column widths | dragging a header edge; double-click resets |
+
 ## Files in `DATA_DIR` (`/data` on Railway)
+
+Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/stores/<id>/`, laid out exactly as one store's were before (`<id>` = Performity brand_id in lower case, a Key Vault store handle, or `sammsara-demo` / `second-demo`). Only `secret` and `stores.json` sit at the top, for every store. The table below is one store's folder, then the two shared files.
 
 | File | Written by | Shape | In app backups? |
 |---|---|---|---|
@@ -119,9 +133,12 @@ UTF-8 with BOM, every cell quoted, text starting with `= + - @ tab CR` gets a le
 | `decisions.json` | `src/decide.js` via `src/sidefile.js` (temp + fsync + rename, previous kept as `.bak`) | `{ [variantId]: { d: 'keep'\|'drop'\|'clear', base, at } }`: base = sales per day when decided | yes, as `sideFiles['decisions.json']` (SW-005) |
 | `onorder.json.bak`, `decisions.json.bak`, `….corrupt-<time>` | `src/sidefile.js` | the previous good save (used when the file can't be read), and a copy of an unreadable file left for a human; with neither good, the app refuses to start (critic r2 X1) | no |
 | `catalog.json` | `src/catalog.js` (temp + rename) | `{ collections: { [collectionId]: { title, productIds[] } }, collectionsAt, pending, lastError, variants, variantsAt }`: Shopify collections cache for Group by, re-read daily; `pending` = a resumable read in progress | no (rebuilt from Shopify within a day) |
-| `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key | no (a new one signs everyone out) |
 | `backups/store-YYYYMMDD.json`, `backups/store-YYYYMMDD-HHMMSS-<why>.json` | `src/backup.js` | copies of `store.json` plus `sideFiles: { 'onorder.json', 'decisions.json' }` (`why` = `before-clear`, `before-demo`, `before-restore`); newest 14 of each kind | — |
 | `restore.json` | a human | a `store.json` to put in place at the next start (`docs/RUNBOOK.md`) | — |
+| `.migrated-from-data-dir.json` | `src/migrate.js`, the home store only; its presence in any store folder means the move is done for good | `{ from: 'DATA_DIR', id, at, files: [{ path, sha256 }] }`: the old single-store files moved here, with their hashes (originals are deleted only while they still match) | no |
+| **top of `DATA_DIR`:** `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key, for every store | no (a new one signs everyone out) |
+| **top of `DATA_DIR`:** `stores.json` | `src/stores.js` (Performity only) | `{ list: [{ id, name, shop }], at }`: the last good brand list, used while the API is down | no (re-read every 10 minutes) |
+| **top of `DATA_DIR`:** `stores/.migrating-<id>/` | `src/migrate.js` | a half-done copy left by a crash during the move; thrown away and redone on the next start | no |
 
 ### `store.json` (schema 1)
 

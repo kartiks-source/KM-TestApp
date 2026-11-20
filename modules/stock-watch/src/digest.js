@@ -117,23 +117,25 @@ const BUILD = {
 };
 
 /**
- * build({ report, yesterday, week, prev, role, storeName, base, now })
+ * build({ report, yesterday, week, prev, role, storeName, storeId, base, now })
  *   report    engine.report() for the default 30 days (order today, overstock, best sellers: same as the page)
  *   yesterday src/period.js yesterday() (optional)
  *   week      a 7-day report: weekly roles' "sales lost, last 7 days" (optional; else `report`)
  *   prev      that 7-day report as it stood 7 days earlier (CEO "up/down from"; optional)
  *   role      a key of public/roles.js, or '' for everyone
  *   base      the app's address for the deep link (optional)
+ *   storeId   the store the link opens (multi-store, ADR-0015; optional)
  * → { role, roleName, title, lines, link, text }   lines include the title; at most MAX_LINES
  */
-function build({ report: r, yesterday = null, week = null, prev = null, role = '', storeName = '', base = '', now } = {}) {
+function build({ report: r, yesterday = null, week = null, prev = null, role = '', storeName = '', storeId = '', base = '', now } = {}) {
   const key = R.valid(role) ? role : '';
   const roleName = key ? R.ROLES[key].name : 'Everyone';
   const at = now || r.generatedAt;
   const title = `Stock-out Watch · ${storeName || 'your store'} · ${dateLabel(at, r.settings.tzOffsetMin)}${key ? ` · ${roleName}` : ''}`;
   const body = (BUILD[key] || BUILD.founder)(r, { yesterday, week, prev }).filter(Boolean);
   const lines = [title, ...body].slice(0, MAX_LINES);
-  const link = base ? `${base.replace(/\/+$/, '')}/${key ? `?role=${key}` : ''}#${key ? R.ROLES[key].home : 'overview'}` : '';
+  const qs = [storeId ? `store=${encodeURIComponent(storeId)}` : '', key ? `role=${key}` : ''].filter(Boolean).join('&');
+  const link = base ? `${base.replace(/\/+$/, '')}/${qs ? `?${qs}` : ''}#${key ? R.ROLES[key].home : 'overview'}` : '';
   return { role: key, roleName, title, lines, link, text: lines.join('\n') + (link ? `\nOpen: ${link}` : '') };
 }
 

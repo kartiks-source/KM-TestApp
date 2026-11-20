@@ -14,8 +14,11 @@ const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sw-store-'));
 function freshStore(dir) {
   process.env.DATA_DIR = dir;
   delete require.cache[require.resolve('../src/store')];
+  require('../src/scope').useDir(dir);   // the module on its own: `dir` is the store's folder
   return require('../src/store');
 }
+/** Where a server keeps a store's file (multi-store, ADR-0015): DATA_DIR/stores/<id>/store.json. */
+const SF = (dir, id = 'sammsara-demo') => path.join(dir, 'stores', id, 'store.json');
 
 /** Start server.js as its own process on a free port. Resolves once it's listening. */
 function startServer(dir, env = {}) {
@@ -93,7 +96,8 @@ test('a save that fails is reported and retried, never thrown', () => {
 });
 
 test('server: corrupt store.json and no backup → exits 1 without writing', async () => {
-  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  const dir = tmpDir(); const file = SF(dir, 'second-demo');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, 'not json');
   const r = await runToExit(dir);
   assert.equal(r.code, 1);
@@ -120,7 +124,7 @@ test('server: SIGTERM saves and exits 0', async () => {
   const code = await stop(s);
   assert.equal(code, 0);
   assert.match(s.log(), /SIGTERM: stopping/);
-  assert.ok(fs.existsSync(path.join(dir, 'store.json')));
+  assert.ok(fs.existsSync(SF(dir)) && fs.existsSync(SF(dir, 'second-demo')), 'every store saved');
 });
 
 
@@ -137,7 +141,7 @@ test('first real row clears the demo and marks the store as ever live', () => {
 });
 
 test('server: demo → ingest → restart with a new demo version → real row still there', async () => {
-  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  const dir = tmpDir(); const file = SF(dir);
   let s = await startServer(dir);
   const set = await (await fetch(s.base + '/api/settings')).json();
   assert.equal(set.source, 'demo');
@@ -157,11 +161,11 @@ test('server: demo → ingest → restart with a new demo version → real row s
 });
 
 test('server: cleared live store stays empty after restart (no demo)', async () => {
-  const dir = tmpDir(); const file = path.join(dir, 'store.json');
-  fs.writeFileSync(file, JSON.stringify({ stock: [], orders: [], source: 'empty', everLive: true, settings: {} }));
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'empty', everLive: true, settings: {} }));   // single-store layout: moved into the first store
   const s = await startServer(dir);
   await stop(s);
-  const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const j = JSON.parse(fs.readFileSync(SF(dir), 'utf8'));
   assert.equal(j.source, 'empty'); assert.equal(j.orders.length, 0);
 });
 
@@ -191,8 +195,8 @@ test('the same order via Flow and then the Shopify pull counts once in totals.so
 test('server: Shopify connected → Flow ingest, CSV import and Sheet sync refused with 409', async () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'empty', settings: { ingestKey: 'k123' } }));
-  // client ID without a store name: "connected" for the guards, but no pull can reach the network
-  const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_CLIENT_ID: 'x' });
+  // client ID without a secret: "connected" for the guards, but no pull can reach the network
+  const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_STORE: 'test-store', SHOPIFY_CLIENT_ID: 'x' });
   const auth = { authorization: 'Basic ' + Buffer.from('u:pw').toString('base64') };
   try {
     let r = await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': 'k123' }, body: JSON.stringify({ order: '#1', variant_id: '1', qty: 1 }) });
@@ -204,19 +208,19 @@ test('server: Shopify connected → Flow ingest, CSV import and Sheet sync refus
     r = await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': 'wrong' }, body: '{}' });
     assert.equal(r.status, 401);   // the key is still checked first
   } finally { await stop(s); }
-  const j = JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8'));
+  const j = JSON.parse(fs.readFileSync(SF(dir, 'test-store'), 'utf8'));
   assert.equal(j.orders.length, 0);
 });
 
 test('server: Clear and import wait while a Shopify pull runs (409)', async () => {
   freshStore(tmpDir());
   delete require.cache[require.resolve('../server')];
-  process.env.SHOPIFY_CLIENT_ID = 'x';
+  process.env.SHOPIFY_CLIENT_ID = 'x'; process.env.SHOPIFY_STORE = 'test-store';
   const shopify = require('../src/shopify');
   const real = shopify.pullStock;
   let finish; shopify.pullStock = () => new Promise((r) => { finish = () => r({ rows: [], lastQty: {}, catalog: {} }); });
   const { server, syncShopify } = require('../server');
-  const run = syncShopify().catch(() => {});
+  const run = syncShopify('test-store').catch(() => {});
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
@@ -225,7 +229,7 @@ test('server: Clear and import wait while a Shopify pull runs (409)', async () =
     r = await fetch(base + '/api/import?kind=order', { method: 'POST', body: 'x' });
     assert.equal(r.status, 409);
   } finally {
-    finish(); await run; shopify.pullStock = real; delete process.env.SHOPIFY_CLIENT_ID;
+    finish(); await run; shopify.pullStock = real; delete process.env.SHOPIFY_CLIENT_ID; delete process.env.SHOPIFY_STORE;
     await new Promise((r) => server.close(r));
   }
 });
@@ -345,7 +349,7 @@ test('server: /status 503 when the last Shopify pull is over 45 min old, 200 whe
   for (const [ago, code] of [[50, 503], [5, 200]]) {
     const dir = tmpDir();
     fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'live', settings: {}, shopify: { lastSync: Date.now() - ago * 60e3 } }));
-    const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_CLIENT_ID: 'x' });
+    const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_STORE: 'test-store', SHOPIFY_CLIENT_ID: 'x' });
     try {
       const r = await fetch(s.base + '/status');
       assert.equal(r.status, code);

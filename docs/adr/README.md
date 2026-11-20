@@ -17,3 +17,5 @@ One file per decision, Nygard format (`0000-template.md`). Number in order; neve
 | 0011 | Auth: one admin password, signed cookie, hardened | Accepted |
 | 0012 | Single instance on Railway, deploy from a clean main | Accepted |
 | 0013 | Performity look and feel | Accepted |
+| 0014 | Shopify access through the Performity POC API (option A) | Accepted |
+| 0015 | Several stores in one app: a folder per store, picked from the top bar | Accepted |

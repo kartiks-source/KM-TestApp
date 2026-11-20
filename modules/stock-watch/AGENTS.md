@@ -20,6 +20,7 @@ Google Sheet CSV / upload ───┘
 
 - **Stock row:** `{ t, variantId, sku, product, variant, before, now, price, src }`, one per stock change.
 - **Order row:** `{ t, order, variantId, sku, qty, price, src }`, one per order line.
+- **Several stores (ADR-0015):** `src/stores.js` lists them (Performity brands; Key Vault `STORES`; `SHOPIFY_STORE`; no key → two demo stores). Each store's data is in `DATA_DIR/stores/<id>/`, the old single-store layout unchanged. Every request, pull, digest tick and daily backup runs inside `scope.run(id)` (`src/scope.js`, AsyncLocalStorage); per-store modules get their folder from `scope.dir()`, which **throws outside a store** (never a default). `?store=<id>` on every `/api` route and `/ingest/*` (else the `sw_store` cookie, else the first store); unknown id → 404. Pulls: one queue, one store at a time. First start moves an old single-store `DATA_DIR` into its home store, once per `DATA_DIR` (`src/migrate.js`, `stores.home()`).
 - **One source per store (ADR-0009):** `src` = shopify / flow / sheet / csv / demo. With Shopify connected, `/ingest/*`, `/api/sync` and `/api/import` return 409; `/api/clear` and import return 409 while a pull runs. `/api/demo` returns 409 while the store holds real data (source `live`).
 - **Catalog** (`store.json` → `catalog`, Shopify only): `{variantId → productId, product, variant, sku, type, tags, price, cost, status, tracked, active, stock, seenAt, inactiveSince}`, replaced on every pull (ADR-0010). Engine takes stock now and attributes from it; inactive variants are left out of reorder and overstock.
 - **Engine** (`src/engine.js`, pure functions): stock-out episodes, in-stock sales rate, ₹ lost (weighted by the store's hour-of-day sales pattern), reorder status and quantity.
@@ -29,7 +30,10 @@ Google Sheet CSV / upload ───┘
 | File | Role |
 |---|---|
 | `LOGIC.md` | how every number is worked out and why; read it before changing `src/engine.js` |
-| `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min, demo loader |
+| `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min (one store at a time, `pullAll`), demo loader; `openStore` / `inStore` / `eachStore` run work for one store |
+| `src/scope.js` | which store the current work is for: `run(id, fn)`, `id()`, `dir()` → `DATA_DIR/stores/<id>`; store id rule (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`); `useDir()` for tests only |
+| `src/stores.js` | the store registry (ADR-0015): `list()`, `refresh()` (Performity brand list, last good one kept in `DATA_DIR/stores.json`), `pick(?store, cookie)` → id or 404/503 |
+| `src/migrate.js` | one-time, crash-safe move of an old single-store `DATA_DIR` into `stores/<home id>/` once per `DATA_DIR` (copy, SHA-256 check, marker, atomic rename, delete originals that still match) |
 | `src/groups.js` | Group by (SW-022): rolls Products rows up by parent product, category, collection or tag, keyed by IDs (LOGIC.md §9a) |
 | `src/catalog.js` | variant → product ID, type, tags (from the SW-002 store catalog snapshot, no second copy) and collections + members (read-only, 24 h cache, resumable) in `DATA_DIR/catalog.json` (LOGIC.md §9b); demo IDs, tags and collections from `demo.catalog()` |
 | `src/engine.js` | all the maths (tested) |
@@ -41,18 +45,19 @@ Google Sheet CSV / upload ───┘
 | `src/access.js` | roles: admin / view password, role in the signed cookie, the 403 gate for view sessions (SW-029) |
 | `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |
 | `src/runs.js` | sync progress ("Syncing · 2,340 orders") and the last 20 runs: start, time taken, rows, error, notes (SW-030) |
-| `src/keys.js` | where the Shopify key comes from: Azure Key Vault or Railway variables |
+| `src/keys.js` | where the Shopify key comes from: Performity POC API, Azure Key Vault or Railway variables; `access(storeId)`, caches per store; Performity calls paced (≥ 2.1 s, token calls per brand ≥ 6.1 s) |
 | `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
 | `src/digest.js` | morning digest text per role, pure (SW-028) |
 | `src/digest-service.js` | digest routes, outbound webhook, daily schedule at a store-time hour, send log in `store.digest` |
+| `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
 | `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
-| `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store`, `backup`, `docs`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
+| `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store`, `backup`, `docs`; multi-store: `stores` (ids, registry incl. the stand-in API with 2 brands, migration), `multistore` (real server, two demo stores never mix, 404s, cookie, view-only), `scheduler` (one pull at a time); browser (`npm run test:ui` at the root, Playwright): `ui-helpers`, `ui-stores` (picker desktop + 390/360, one store, defaults); module tests point a module at one folder with `scope.useDir()`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
 
 ## Shopify access (decided 19 Nov 2026)
 
@@ -97,6 +102,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" for ticked Reorder rows (bulk bar; phone cards have the tick too) and in the drawer, with an Ordered tab (SW-012; the per-row button went in critic round 1, S2: one control per row); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Sprint 2 D-helpers (branch `sprint2/D-helpers`): SW-024 Why cell + order-by + still-out ₹/day, SW-025 reorder CSV as a PO (`?filter=&q=`, vendor, unit cost, variant ID), SW-026 Pause / Push chips on Products, SW-032 slow-seller Decide bucket.
 - Sprint 2 merged on `main` (C-access, D-helpers, A-groups, B-roles + integration fixes, see docs/DEVLOG.md): one `reportOpts()` for report, groups, drawer, CSV and digest; roles cover Sprint 1/2 controls per RACI.
+- Multi-store (ADR-0015, branch `feature/multistore`, 0.10.0, not merged to main): registry, per-store folders, migration, `?store=` everywhere, sequential pulls, per-store alerts / digest / backups; store picker in the top bar (`public/stores.js`, phone store bar). Show everything by default (ADR-0006 amendment): no role, Reorder → All, optional columns on (step aside when they don't fit), every Overview panel. Critic round fixed (ISO-1 migration once per DATA_DIR, SEC-1 no Performity call unless ready, UI-1..UI-6 picker; DEVLOG 2026-11-20).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
 
@@ -104,5 +110,5 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 
 1. Connect the first real store via Key Vault; compare 10 days of orders and stock for 10 SKUs against Shopify admin.
 2. Alert when a pull fails or data is older than expected.
-3. Move storage to Postgres when there's more than one store, or more than a few months of data.
+3. Move storage to Postgres when the stores together pass ADR-0003's triggers (sum of `/status` `storeBytes`), or a store needs more than a few months of data.
 4. Push stock changes through Shopify Flow too, so stock-outs are timed to the minute rather than to 15 minutes.

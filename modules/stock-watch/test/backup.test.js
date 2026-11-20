@@ -11,32 +11,37 @@ process.env.DATA_DIR = DATA;
 process.env.ADMIN_PASSWORD = 'backup-test-password';
 const store = require('../src/store');
 const backup = require('../src/backup');
+const scope = require('../src/scope');
 const { server } = require('../server');
+/* the first store's folder (the server's default store): direct module calls and requests share it */
+const SD = path.join(DATA, 'stores', 'sammsara-demo');
+scope.useDir(SD);
 
-const ls = () => { try { return fs.readdirSync(backup.DIR).sort(); } catch { return []; } };
-const clean = () => fs.rmSync(backup.DIR, { recursive: true, force: true });
+const ls = () => { try { return fs.readdirSync(backup.dir()).sort(); } catch { return []; } };
+const clean = () => fs.rmSync(backup.dir(), { recursive: true, force: true });
 const T = Date.parse('2026-11-19T06:30:00Z');   // 12:00 India time
 const stockRow = (i) => ({ t: Date.now() - i * 36e5, variantId: String(i), sku: `S${i}`, product: 'P', variant: '', before: 1, now: 0, price: 100 });
 
 test('restore on boot: a valid restore.json replaces store.json and the old store is kept', () => {
-  fs.writeFileSync(path.join(DATA, 'store.json'), JSON.stringify({ settings: {}, stock: [{ old: 1 }], orders: [], source: 'live' }));
-  fs.writeFileSync(path.join(DATA, 'restore.json'), JSON.stringify({ settings: {}, stock: [], orders: [{ restored: 1 }], source: 'live' }));
+  fs.mkdirSync(SD, { recursive: true });
+  fs.writeFileSync(path.join(SD, 'store.json'), JSON.stringify({ settings: {}, stock: [{ old: 1 }], orders: [], source: 'live' }));
+  fs.writeFileSync(path.join(SD, 'restore.json'), JSON.stringify({ settings: {}, stock: [], orders: [{ restored: 1 }], source: 'live' }));
   const r = backup.restorePending(T);
   assert.equal(r.restored, true);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(DATA, 'store.json'), 'utf8')).orders, [{ restored: 1 }]);
-  assert.ok(!fs.existsSync(path.join(DATA, 'restore.json')));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(SD, 'store.json'), 'utf8')).orders, [{ restored: 1 }]);
+  assert.ok(!fs.existsSync(path.join(SD, 'restore.json')));
   assert.deepEqual(JSON.parse(fs.readFileSync(r.kept, 'utf8')).stock, [{ old: 1 }]);
   assert.match(path.basename(r.kept), /^store-20261119-120000-before-restore\.json$/);
 });
 
 test('restore on boot: a file that is not a store is rejected and the current store stays', () => {
-  const before = fs.readFileSync(path.join(DATA, 'store.json'), 'utf8');
-  fs.writeFileSync(path.join(DATA, 'restore.json'), '{"hello":1}');
+  const before = fs.readFileSync(path.join(SD, 'store.json'), 'utf8');
+  fs.writeFileSync(path.join(SD, 'restore.json'), '{"hello":1}');
   const r = backup.restorePending(T);
   assert.equal(r.restored, false);
   assert.ok(fs.existsSync(r.rejected));
-  assert.equal(fs.readFileSync(path.join(DATA, 'store.json'), 'utf8'), before);
-  fs.rmSync(path.join(DATA, 'store.json')); clean();
+  assert.equal(fs.readFileSync(path.join(SD, 'store.json'), 'utf8'), before);
+  fs.rmSync(path.join(SD, 'store.json')); clean();
 });
 
 test('empty and demo stores are not backed up', () => {
@@ -61,25 +66,25 @@ test('daily backup: one file per local day, named store-YYYYMMDD.json, holding t
 
 test('start(): every replaceAll (Clear, demo → live) snapshots the old data first', () => {
   clean();
-  backup.start({ everyMs: 864e5 });          // also takes today's daily backup
+  backup.start({ everyMs: 864e5, each: (fn) => fn() });          // also takes today's daily backup
   const daily = ls().filter((n) => /^store-\d{8}\.json$/.test(n));
   assert.equal(daily.length, 1);
   store.replaceAll([], [], 'empty');          // what /api/clear does
   const snap = ls().filter((n) => n.endsWith('-before-clear.json'));
   assert.equal(snap.length, 1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(backup.DIR, snap[0]), 'utf8')).stock.length, 2);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(backup.dir(), snap[0]), 'utf8')).stock.length, 2);
   store.replaceAll([], [], 'empty');          // nothing left to lose: no second snapshot
   assert.equal(ls().filter((n) => n.endsWith('-before-clear.json')).length, 1);
 });
 
 test('rotation keeps the newest 14 of each kind', () => {
-  clean(); fs.mkdirSync(backup.DIR, { recursive: true });
+  clean(); fs.mkdirSync(backup.dir(), { recursive: true });
   for (let i = 1; i <= 20; i++) {
     const dd = String(i).padStart(2, '0');
-    fs.writeFileSync(path.join(backup.DIR, `store-202611${dd}.json`), '{}');
-    fs.writeFileSync(path.join(backup.DIR, `store-202611${dd}-120000-before-clear.json`), '{}');
+    fs.writeFileSync(path.join(backup.dir(), `store-202611${dd}.json`), '{}');
+    fs.writeFileSync(path.join(backup.dir(), `store-202611${dd}-120000-before-clear.json`), '{}');
   }
-  fs.writeFileSync(path.join(backup.DIR, 'notes.txt'), 'not a backup');
+  fs.writeFileSync(path.join(backup.dir(), 'notes.txt'), 'not a backup');
   backup.rotate();
   const left = ls();
   assert.equal(left.filter((n) => /^store-\d{8}\.json$/.test(n)).length, backup.KEEP);

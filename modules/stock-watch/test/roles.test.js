@@ -39,6 +39,13 @@ test('no role, or an unknown one, removes nothing (default = today’s view)', (
   assert.equal(R.valid('__proto__'), false);
 });
 
+test('show everything by default: "All" is the no-role choice, not a role, and ?role=all lands nowhere special', () => {
+  assert.equal(R.ALL, 'All');
+  assert.equal(R.valid('all'), false); assert.equal(R.valid('All'), false);
+  assert.equal(R.css('all'), '');
+  assert.equal(R.landing('all', ''), null, 'no role → the page asked for, Reorder on its All tab');
+});
+
 test('css removes exactly the role’s parts and re-flows the tiles', () => {
   const ceo = R.css('ceo');
   assert.match(ceo, /#tabs a\[data-view="reorder"\]/);

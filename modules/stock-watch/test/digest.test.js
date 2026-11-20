@@ -18,6 +18,7 @@ const store = require('../src/store');
 const D = require('../src/digest');
 const S = require('../src/digest-service');
 const ROLES = require('../public/roles');
+require('../src/scope').useDir(path.join(process.env.DATA_DIR, 'stores', 'sammsara-demo'));   // the server's first store
 
 const DAY = E.DAY;
 const now = Date.parse('2026-11-19T04:30:00Z');                  // Thu 19 Nov, 10:00 IST
@@ -157,7 +158,7 @@ test('schedule: nothing before the hour; at 9:00 store time pulls first, then se
   assert.ok(sent.every((s) => s.ok && s.status === 200));
   assert.equal(got.length, 3);
   assert.equal(got[0].headers['content-type'], 'application/json');
-  assert.deepEqual(Object.keys(got[0].body).sort(), ['app', 'at', 'kind', 'lines', 'link', 'role', 'roleName', 'store', 'text', 'title']);
+  assert.deepEqual(Object.keys(got[0].body).sort(), ['app', 'at', 'kind', 'lines', 'link', 'role', 'roleName', 'store', 'storeId', 'text', 'title']);
   assert.deepEqual(await S.tick(ctx, at(10)), []);                       // once a day
   assert.deepEqual(await S.tick(ctx, at(12.5, '2026-11-20')), []);       // next day, past the 3 h catch-up window
   const mon = await S.tick(ctx, at(9.5, '2026-11-23'));                  // Monday: weekly roles too
@@ -187,7 +188,7 @@ test('routes: digest JSON + text, bad role 400, settings PUT validates, send-now
   try {
     const j = await (await fetch(`${base}/api/digest?role=ops`)).json();
     assert.equal(j.ok, true); assert.equal(j.role, 'ops'); assert.ok(j.lines.length <= 6);
-    assert.equal(j.link, `${base}/?role=ops#reorder`);                   // link from the address the app was opened at
+    assert.equal(j.link, `${base}/?store=sammsara-demo&role=ops#reorder`);   // link from the address the app was opened at; opens this store
     const t = await fetch(`${base}/api/digest.txt?role=marketing`);
     assert.match(t.headers.get('content-type'), /text\/plain/);
     assert.match(await t.text(), /^Stock-out Watch · Test Store/);

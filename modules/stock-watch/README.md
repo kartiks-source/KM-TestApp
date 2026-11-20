@@ -4,8 +4,9 @@ Stock-out Watch shows which bestsellers to reorder before they run out, and what
 
 - **Shopify, read-only.** With a store key (from Azure Key Vault, or a Railway variable as a stop-gap) it reads stock every 15 minutes and new orders straight from Shopify. It can't change the store: every call is checked and anything but a read is refused.
 - **Or no key at all.** Data can also come from the store's own Shopify Flow (into a Google Sheet or straight to this app), or as a CSV upload.
-- **Plain Node.js, zero dependencies.** One process, data kept in a JSON file.
-- **Demo data on first run**: 60 days of invented stock and sales on Sammsara's public product list, so it can be shown right away.
+- **Several stores in one app** (ADR-0015). Every brand the Performity key may use is a store; pick it from the store pill in the top bar. Each store's data lives in its own folder and never mixes with another's.
+- **Plain Node.js, zero dependencies.** One process, data kept in JSON files (one folder per store).
+- **Demo data on first run**: two demo stores with 60 days of invented stock and sales on Sammsara's public product list ("Sammsara (demo)" and "Second store (demo)", clearly labelled), so it can be shown right away.
 
 ## Run it
 
@@ -25,7 +26,11 @@ Requires Node 20 or newer.
 | **Reorder** | Every selling product that is Out now / Critical (≤ 3 days) / Order now (runs out before a new order lands) / Order this week. Shows stock, sales per day, days left, order quantity and value, and ₹ lost. CSV download. |
 | **Stock-outs** | Every stock-out with when it went out and came back, hours, units and ₹ lost, and the refill size. Flags small top-ups and products out again within a week. |
 | **Products** | Every product. Click one for its stock-level chart (out-of-stock periods shaded), units sold per day, and its stock-outs. |
-| **Data & settings** | Data status, demo reload and clear, CSV upload, Google Sheet links, Shopify Flow webhook URLs, and the settings. |
+| **Data & settings** | Data status, demo reload and clear, CSV upload, Google Sheet links, Shopify Flow webhook URLs, and the settings (all for the store chosen in the top bar). |
+
+**Everything shows by default.** No role is chosen ("All"), Reorder opens on its All tab, every optional column is on (untick in Columns…; on a narrow laptop the right-most ones step aside and a note names them), and Overview shows every panel. A role under the store pill only removes things.
+
+**Stores.** The store pill in the top bar lists every store with a dot: green = data fresh, amber = last good pull over 45 minutes ago, red = the last pull or sync failed. Choosing one opens it (`?store=<id>` in the address, remembered on this browser). With one store the pill shows just its name. Every page, export, digest and setting is for the chosen store.
 
 ## How the numbers work
 
@@ -65,8 +70,8 @@ Where the credentials come from (Railway variables, nothing typed into the page)
 
 | Source | Variables |
 |---|---|
-| **Performity POC API** (decided, option A) | `PERFORMITY_POC_API_URL`, `PERFORMITY_POC_API_KEY` (sent as `X-Api-Key`), optional `PERFORMITY_BRAND_ID`. `GET …/catalys/shopify/service/external/brands` lists allowed brands; `POST …/external/fresh-token {brand_id}` returns `{access_token, shop_domain, expires_at}` (UTC, no zone; `null` = no expiry). A fresh token is asked for right before each pull, reused only within that pull, re-asked once on a Shopify 401, never refreshed or stored. A wrong key pauses calls 15 min (5 wrong keys would block our IP); 429 waits; 500 retried once. Stand-in for testing: `scripts/stand-in-token-api.js`. |
-| **Azure Key Vault** | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE`. Reads `shopify-<SHOPIFY_STORE>-client-id` and `shopify-<SHOPIFY_STORE>-client-secret` (or one `shopify-<SHOPIFY_STORE>` secret with JSON). Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
+| **Performity POC API** (decided, option A) | `PERFORMITY_POC_API_URL`, `PERFORMITY_POC_API_KEY` (sent as `X-Api-Key`), optional `PERFORMITY_BRAND_ID` (limits the app to that one brand). `GET …/catalys/shopify/service/external/brands` lists allowed brands, and each one is a store (name = brand name; the list is re-read every 10 minutes and the last good one kept if the API is down); `POST …/external/fresh-token {brand_id}` returns `{access_token, shop_domain, expires_at}` (UTC, no zone; `null` = no expiry). A fresh token is asked for right before each pull, reused only within that pull, re-asked once on a Shopify 401, never refreshed or stored. A wrong key pauses calls 15 min (5 wrong keys would block our IP); 429 waits; 500 retried once. Calls are spaced ≥ 2.1 s apart and token calls per brand ≥ 6.1 s (Performity: 30/min per IP, 10 token calls/min per brand); stores are pulled one at a time. Stand-in for testing: `scripts/stand-in-token-api.js` (`STAND_IN_BRANDS=2` for two brands). |
+| **Azure Key Vault** | `AZURE_KEY_VAULT_URL`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SHOPIFY_STORE` (or `STORES=<store>,<store>,…` for several stores, each read the same way). Reads `shopify-<SHOPIFY_STORE>-client-id` and `shopify-<SHOPIFY_STORE>-client-secret` (or one `shopify-<SHOPIFY_STORE>` secret with JSON). Our Azure login needs only "Key Vault Secrets User" on that vault. The secret is the admin token (`shpat_…`), or JSON with `shop` + `accessToken`, or `clientId` + `clientSecret` for an app made in Shopify's Dev Dashboard. |
 | **Railway variables** (stop-gap) | `SHOPIFY_STORE` + `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` (legacy: `SHOPIFY_ACCESS_TOKEN`). Move to Key Vault and rotate the key once the vault is ready. |
 
 `SHOPIFY_STORE` is the part before `.myshopify.com`. Once either source is set, the app won't start without `ADMIN_PASSWORD`, and demo data is turned off.
@@ -81,7 +86,7 @@ Where the credentials come from (Railway variables, nothing typed into the page)
 3. Paste both links under **Data & settings → Google Sheet**. The app syncs every 15 minutes.
 
 ### B. Shopify Flow → this app directly
-Use Flow's **Send HTTP request** action (POST) to the URLs shown under Data & settings, with the header `X-Ingest-Key: <key>` (the key is under Data & settings → Shopify Flow, masked until you press Show key):
+Use Flow's **Send HTTP request** action (POST) to the URLs shown under Data & settings (they end in `?store=<id>`: each store has its own URL and key), with the header `X-Ingest-Key: <key>` (the key is under Data & settings → Shopify Flow, masked until you press Show key):
 - `/ingest/stock`
 - `/ingest/order`
 
@@ -118,7 +123,8 @@ Railway builds the `Dockerfile` at the repo root, which copies this folder. Atta
 | `ADMIN_PASSWORD` | required in production (any user name) |
 | `RAILWAY_RUN_UID` | `0`, so the app can write to the Railway volume |
 | `PORT` | set by Railway (default 4400 locally) |
-| `DATA_DIR` | where `store.json` lives (default `./data`; `/data` in Docker) |
+| `DATA_DIR` | where the data lives (default `./data`; `/data` in Docker): `stores/<id>/store.json` and side files per store, `secret` and `stores.json` for all. An old single-store `DATA_DIR` moves into its store (`SHOPIFY_STORE` / `PERFORMITY_BRAND_ID`, else the first) on the first start, once (`docs/RUNBOOK.md`) |
+| `STORES` | Key Vault only: several stores, `STORES=brand-a,brand-b` (else `SHOPIFY_STORE`) |
 | Shopify key variables | see "Shopify, read-only" above |
 | `SHOPIFY_API_VERSION` | optional, default `2026-07` |
 | `DIGEST_WEBHOOK_URL` | optional: where the morning digest is POSTed (env only; the page never sees or saves it) |
@@ -132,8 +138,11 @@ Morning digest: `GET /api/digest?role=ops` (JSON) or `/api/digest.txt?role=ops` 
 ## Layout
 
 ```
-server.js          HTTP server, API, Flow ingest, sheet sync, Shopify pull schedule
-src/keys.js        where the Shopify key comes from (Key Vault or variables)
+server.js          HTTP server, API, Flow ingest, sheet sync, Shopify pull schedule (one store at a time)
+src/scope.js       which store the current request / pull is for → its folder DATA_DIR/stores/<id>
+src/stores.js      the store list: Performity brands, STORES / SHOPIFY_STORE, or the two demo stores
+src/migrate.js     one-time move of an old single-store DATA_DIR into its home store
+src/keys.js        where the Shopify key comes from (Performity, Key Vault or variables), per store
 src/shopify.js     read-only guard + stock and order pulls
 src/engine.js      all the maths (pure, tested)
 src/rows.js        CSV / sheet / webhook → rows
@@ -142,13 +151,13 @@ src/demo.js        made-up demo store
 src/period.js      "This month" + the Yesterday strip
 src/digest.js      morning digest text per role (pure)
 src/digest-service.js  digest routes, webhook, daily schedule, send log
-public/            the web page (no build step); roles.js = role views, digest-ui.js = Share menu + digest settings
+public/            the web page (no build step); stores.js = store picker, roles.js = role views, digest-ui.js = Share menu + digest settings
 test/              node --test
 ```
 
 ## Limits / next steps
 
-- **Storage:** the JSON-file store suits one store with a few months of data. For more stores, move `src/store.js` to Postgres; the rest is unchanged.
+- **Storage:** JSON files suit a few stores with a few months of data each (ADR-0003 counts the sum of all stores). For many stores, move `src/store.js` to Postgres; the rest is unchanged.
 - **History:** it starts when data starts flowing. Shopify keeps no stock history, so lost-sales numbers build up from day one.
 - **Stock timing:** read every 15 minutes, so a stock-out is timed to within 15 minutes, and one that starts and ends between two reads is missed. For exact timing, also send stock changes through Shopify Flow (option B above).
-- **Stores:** one store per deployment. Multi-store would add a store id to every row and the URL.
+- **Stores:** one password for every store (no per-store access yet). A full round of pulls takes one pull per store, one after the other.

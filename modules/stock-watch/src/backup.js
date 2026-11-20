@@ -4,17 +4,18 @@
  * (every backup, the export and restore also carry onorder.json and decisions.json as `sideFiles`, critic r2 X1:
  *  lost PO marks put ordered lines back in Order today, the duplicate PO SW-012 exists to stop)
  *
- *   DATA_DIR/backups/store-YYYYMMDD.json              one a day (store's local date), checked hourly
- *   DATA_DIR/backups/store-YYYYMMDD-HHMMSS-<why>.json  before every replaceAll (Clear, demo → live,
- *                                                     import replacing demo, demo reload) and before a restore
+ * Per store (ADR-0015), in that store's folder DATA_DIR/stores/<id>/ (src/scope.js):
+ *   backups/store-YYYYMMDD.json              one a day (store's local date), checked hourly
+ *   backups/store-YYYYMMDD-HHMMSS-<why>.json  before every replaceAll (Clear, demo → live,
+ *                                            import replacing demo, demo reload) and before a restore
  *
  * The newest 14 of each kind are kept. Demo data and an empty store are never backed up: there's
  * nothing to lose, and demo reloads would push real snapshots out of the 14.
  * GET /api/export/backup.json (login needed) downloads the store as it is now.
- * Restore: copy a backup to DATA_DIR/restore.json and restart; see docs/RUNBOOK.md.
+ * Restore: copy a backup to DATA_DIR/stores/<id>/restore.json and restart; see docs/RUNBOOK.md.
  *
- * Wiring: server.js calls start() first thing at startup (before anything loads the store) and
- * route() inside the logged-in part of the API.
+ * Wiring: server.js calls start() once, prepare() for each store before anything loads it (applies a pending
+ * restore), daily() for each store every hour, and route() inside the logged-in part of the API.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,14 +23,15 @@ const store = require('./store');
 const onorder = require('./onorder');
 const decide = require('./decide');
 const { parse, writeAtomic: writeSide } = require('./sidefile');
+const scope = require('./scope');
 
-/* the side files a backup carries, by file name (DATA_DIR/<name>) */
+/* the side files a backup carries, by file name (<store folder>/<name>) */
 const SIDES = { [onorder.FILE_NAME]: onorder, [decide.FILE_NAME]: decide };
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const DIR = path.join(DATA_DIR, 'backups');
-const FILE = path.join(DATA_DIR, 'store.json');
-const RESTORE = path.join(DATA_DIR, 'restore.json');
+/* the current store's folder (src/scope.js) */
+const dir = () => path.join(scope.dir(), 'backups');
+const storeFile = () => path.join(scope.dir(), 'store.json');
+const restoreFile = () => path.join(scope.dir(), 'restore.json');
 const KEEP = 14;
 const DAILY = /^store-\d{8}\.json$/;
 const EVENT = /^store-\d{8}-\d{6}-[a-z0-9-]+\.json$/;
@@ -45,7 +47,7 @@ function text() {
 /** The side files as they are on disk now (for the before-restore copy, which runs before anything is loaded). */
 function sidesOnDisk() {
   const out = {};
-  for (const n of Object.keys(SIDES)) { try { const j = parse(path.join(DATA_DIR, n)); if (j) out[n] = j; } catch { /* unreadable: left out, the file stays */ } }
+  for (const n of Object.keys(SIDES)) { try { const j = parse(path.join(scope.dir(), n)); if (j) out[n] = j; } catch { /* unreadable: left out, the file stays */ } }
   return out;
 }
 const worthKeeping = (d) => d.source !== 'demo' && (d.stock.length || d.orders.length);
@@ -67,6 +69,7 @@ function stamp(t, offMin) {
 
 /** Keep the newest KEEP of each kind (names sort by time). */
 function rotate() {
+  const DIR = dir();
   let names; try { names = fs.readdirSync(DIR); } catch { return; }
   for (const re of [DAILY, EVENT]) {
     const old = names.filter((n) => re.test(n)).sort().reverse().slice(KEEP);
@@ -79,7 +82,7 @@ function snapshot(why, now = Date.now()) {
   const d = store.load();
   if (!worthKeeping(d)) return null;
   const s = stamp(now, d.settings.tzOffsetMin);
-  const file = path.join(DIR, `store-${s.day}-${s.time}-${String(why).toLowerCase().replace(/[^a-z0-9-]+/g, '-')}.json`);
+  const file = path.join(dir(), `store-${s.day}-${s.time}-${String(why).toLowerCase().replace(/[^a-z0-9-]+/g, '-')}.json`);
   writeAtomic(file, text());
   rotate();
   console.log(`backup: ${path.basename(file)} (${d.stock.length} stock rows, ${d.orders.length} order lines)`);
@@ -90,7 +93,7 @@ function snapshot(why, now = Date.now()) {
 function daily(now = Date.now()) {
   const d = store.load();
   if (!worthKeeping(d)) return null;
-  const file = path.join(DIR, `store-${stamp(now, d.settings.tzOffsetMin).day}.json`);
+  const file = path.join(dir(), `store-${stamp(now, d.settings.tzOffsetMin).day}.json`);
   if (fs.existsSync(file)) return null;
   writeAtomic(file, text());
   rotate();
@@ -99,11 +102,12 @@ function daily(now = Date.now()) {
 }
 
 /**
- * Restore on boot: if DATA_DIR/restore.json exists and looks like a store, the current store.json is
+ * Restore on boot: if the store folder holds restore.json and looks like a store, the current store.json is
  * kept as a "before-restore" backup and restore.json takes its place. A file that isn't a store is
  * renamed restore.json.rejected-<time> and the current store stays. Must run before store.load().
  */
 function restorePending(now = Date.now()) {
+  const RESTORE = restoreFile(), FILE = storeFile(), DIR = dir(), DATA_DIR = scope.dir();
   if (!fs.existsSync(RESTORE)) return null;
   let ok = false, off = 330;
   try {
@@ -144,19 +148,22 @@ function restorePending(now = Date.now()) {
 }
 
 let started = false;
-/** Startup: apply a pending restore, snapshot before every replaceAll, daily backup now and hourly. */
-function start({ everyMs = 60 * 60e3 } = {}) {
+/** Once at startup: snapshot before every replaceAll (of whichever store it runs for), and the hourly daily-backup
+ *  check, run for every store by each(fn) (server.js: one store at a time, inside scope.run). */
+function start({ everyMs = 60 * 60e3, each = null } = {}) {
   if (started) return; started = true;
-  try { restorePending(); } catch (e) { console.error('restore failed:', e.message); }
   const replaceAll = store.replaceAll;
   store.replaceAll = function (stock, orders, source) {
     try { snapshot(`before-${source === 'demo' ? 'demo' : 'clear'}`); } catch (e) { console.error('backup before replace failed:', e.message); }
     return replaceAll.apply(this, arguments);
   };
-  const tick = () => { try { daily(); } catch (e) { console.error('daily backup failed:', e.message); } };
+  if (!each) return;
+  const tick = () => each(() => { try { daily(); } catch (e) { console.error(`daily backup failed (store ${scope.current()}):`, e.message); } });
   tick();
   setInterval(tick, everyMs).unref();
 }
+/** Before a store is first loaded: apply its pending restore.json. Never throws (a failed restore keeps the store as it is). */
+function prepare() { try { return restorePending(); } catch (e) { console.error(`restore failed (store ${scope.current()}):`, e.message); return null; } }
 
 /** GET /api/export/backup.json (call only after the login check). Returns true when it answered. */
 function route(req, res, url) {
@@ -168,4 +175,4 @@ function route(req, res, url) {
   return true;
 }
 
-module.exports = { start, route, snapshot, daily, rotate, restorePending, text, DIR, KEEP, SIDES };
+module.exports = { start, prepare, route, snapshot, daily, rotate, restorePending, text, dir, KEEP, SIDES };

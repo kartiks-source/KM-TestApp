@@ -43,6 +43,8 @@ const heads = (pg) => pg.$$eval('.tbl.desk table thead th', (th) => th.map((x) =
 test('Reorder: Status column only on All; Why dates agree with the tab', opts, async () => {
   const pg = await page();
   await pg.goto(base + '/#reorder'); await pg.waitForSelector('.tbl.desk table');
+  assert.ok(await pg.$('[data-filter-reorder="all"].on'), 'Reorder opens on All (show everything)');
+  await pg.click('[data-filter-reorder="today"]'); await pg.waitForSelector('[data-filter-reorder="today"].on');
   assert.equal((await heads(pg)).includes('Status'), false, 'Order today: no Status column');
   assert.ok((await heads(pg)).includes('Why'));
   const today = await pg.$$eval('.tbl.desk tbody .why', (w) => w.map((x) => x.textContent));
@@ -154,25 +156,35 @@ test('Reorder: every tab fits its box at 1280 and 1400 (All keeps Sales lost on 
   }
 });
 
-test('Columns: added columns that do not fit scroll inside the table (with a note), never clipped; default view has no note (critic r2 UI-2)', opts, async () => {
-  const all = { reorder: ['stock', 'perDay', 'outs'], products: ['type', 'perDay', 'unitsSold', 'lostPct', 'outs', 'excessValue', 'lostProfit', 'margin'] };
-  for (const w of [1280, 1440]) {
+test('Columns: every optional column is on by default; ones that do not fit step aside (named in a note), never a sideways scroll; unticking is remembered', opts, async () => {
+  const OPT = { reorder: ['In stock', 'Sells / day', 'Times out'], products: ['Category', 'Sells / day', 'Units sold', 'Share of demand lost', 'Times out', 'Overstock ₹', 'Profit lost', 'Margin'] };
+  for (const w of [1280, 1440, 1920]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
-    await ctx.addInitScript((c) => { if (location.search.includes('cols=all')) localStorage.setItem('sw-cols', JSON.stringify(c)); else localStorage.removeItem('sw-cols'); }, all);
     const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));
     for (const view of ['products', 'reorder']) {
       await pg.goto(`${base}/?role=all#${view}`); await pg.waitForSelector('.tbl.desk table');
-      assert.equal(await pg.$('.sx-hint'), null, `${w} ${view}: default columns fit`);
-      await pg.goto(`${base}/?role=all&cols=all#${view}`); await pg.waitForSelector('.tbl.desk table');
       const m = await pg.evaluate(() => { const b = document.querySelector('.tbl.desk'), t = b.querySelector('table');
-        return { tw: Math.round(t.getBoundingClientRect().width), sw: b.scrollWidth, bw: b.clientWidth, sx: getComputedStyle(b).overflowX, hint: !!document.querySelector('.sx-hint'), page: document.documentElement.scrollWidth - innerWidth }; });
-      if (m.tw > m.bw + 1) {
-        assert.equal(m.sx, 'auto', `${w} ${view}: table ${m.tw} in ${m.bw} must scroll`); assert.ok(m.hint, 'note shown');
-        assert.ok(m.sw >= m.tw - 1, `${w} ${view}: every column reachable (${m.sw} ≥ ${m.tw})`);
-      }
-      assert.equal(m.page, 0, `${w} ${view}: the page itself never scrolls sideways`);
+        const shown = [...t.tHead.rows[0].cells].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent.replace(/[↑↓]/g, '').trim());
+        const aside = [...t.tHead.rows[0].cells].filter((c) => c.classList.contains('sq')).map((c) => c.textContent.replace(/[↑↓]/g, '').trim());
+        return { shown, aside, tw: t.getBoundingClientRect().width, bw: b.clientWidth, scrollx: b.classList.contains('scrollx'), hint: document.querySelector('.sx-hint')?.textContent || '', page: document.documentElement.scrollWidth - innerWidth }; });
+      assert.equal(m.page, 0, `${w} ${view}: the page never scrolls sideways`);
+      assert.equal(m.scrollx, false, `${w} ${view}: no sideways scroll inside the table either`);
+      assert.ok(m.tw <= m.bw + 1, `${w} ${view}: table ${m.tw} fits ${m.bw}`);
+      for (const c of OPT[view]) assert.ok(m.shown.includes(c) || m.aside.includes(c), `${w} ${view}: ${c} is on (shown, or stepped aside for width)`);
+      if (m.aside.length) assert.ok(m.aside.every((c) => m.hint.includes(c)), `${w} ${view}: the note names ${m.aside}`);
+      else assert.equal(m.hint, '', `${w} ${view}: nothing aside, no note`);
+      if (w === 1920 && view === 'reorder') assert.deepEqual(m.aside, [], '1920: every Reorder column fits');
     }
     assert.deepEqual(errors, []);
     await ctx.close();
   }
+  // untick → hidden, and still hidden after a reload (this browser remembers)
+  const ctx = await browser.newContext({ viewport: { width: 1920, height: 900 } }); const pg = await ctx.newPage();
+  await pg.goto(`${base}/#reorder`); await pg.waitForSelector('.tbl.desk table');
+  await pg.click('#view .colpick.desk > summary'); await pg.uncheck('[data-col="reorder|outs"]');
+  assert.equal((await heads(pg)).includes('Times out'), false);
+  await pg.reload(); await pg.waitForSelector('.tbl.desk table');
+  assert.equal((await heads(pg)).includes('Times out'), false, 'remembered');
+  assert.ok((await heads(pg)).includes('In stock'), 'the others stay on');
+  await ctx.close();
 });
