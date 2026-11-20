@@ -3,6 +3,18 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · final critic round 2 fixes
+stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, this entry; not pushed, not deployed).
+- L1 (P1): `planWithOrder` keeps the row's own status unless the PO covers the need (Ordered): 5/day, 10 in stock, 50 on order stayed Critical (was This week, off Order today). LOGIC §6b; onorder.test (fails on the old code).
+- X1 (P1): `.railway/railway.ts` `preserve()` for every variable in `.env.example` / SECURITY.md (omit=delete would have wiped the Performity key/URL, webhooks on apply); RUNBOOK: read the plan for variable deletions. docs.test checks the list. Not run: `railway config plan` (no SDK here).
+- UI-1 / SIMP-A (P1): daily chart drawn at the box's real width (`fitChart`, on render + resize), 200 px tall, unscaled 12.5 px labels: Overview ends at 864 px at 1280/1440/1920 × 900. 1280×800 (all roles): chart panel ends at 841, its title and most of the bars above the fold (SIMP-A's no-scroll at 800 would need a ~110 px chart; not done).
+- UI-2 (P1): `.tr.up`/`.mv-v.up` #15803D (5.0:1), `--ok` #0B7A71 (4.65:1 on ok-soft), `#n-stockouts` #6B7385 (4.76:1).
+- SIMP-B (P1): Stock-outs h1 "N still out, costing ₹X/day" on desktop too; sub-line "… sales lost · ₹ profit lost". LOGIC §still-out.
+- Phones (≤760 only, desktop untouched): M1 chips snap to whole chips; the active chip's least scroll is rounded up to a chip start (end padding when it's the last), fade only on a side with more chips (`chipEdges`, first 6 px of the left fade clear); supersedes round-1 M3 "least scroll" (test updated). M2 toast above the bulk bar. M3 sticky ×. M4 `.mq small` 12.5 px, order cost 600. M5 Products cards (sorted by ₹ lost: not Pause/Push/Slow, no other sort) put ₹ lost top-right, status in the facts. M6 `.chart text` 12.5 px, daily chart unscaled, R 22 and phone ticks counted back from today (last date was cut). M7 role ellipsis, "N stores" hidden with a role. M8 Plan settings one line; `.msort` moved beside Search (`.tq`, Reorder + Stock-outs; select gets `aria-label`): first card y 343 at 360 (was ~403). M9 panel link and ⋯ 44 px wide.
+- Tests: ui-helpers +2 (desktop UI-1/UI-2/SIMP-B at 1280/1440/1920; phones M1–M6, M8, M9 at 390 + 360), ui-stores +1 (M7); 4 fail on the old public/ code.
+- Checked: `npm test` 257 pass / 23 skip (283/283 with Playwright); `test:ui` 26/26; `test:smoke` 30/30 + roles all pass (`PLAYWRIGHT_CHANNEL=chrome`).
+- Not done: Drawer charts (Stock level, Units sold) still scale with their viewBox (~11.2 px labels at 360); Products keeps Sort on its own row (its Search shares the View row). Open: shared dev log page row not added; critics not re-run.
+
 ## 2026-11-20 · Performity connected (Origin header)
 stock-watch, `main`. KD sent the real base URL (Azure App Service, dev API); Railway var updated by the user.
 - Live calls gave `403 Origin not allowed`: Performity allows our key only from the domain we gave them, checked on `Origin` (not in the calling guide). `keys.pocCall` now sends `Origin: https://$RAILWAY_PUBLIC_DOMAIN` (or `PERFORMITY_ORIGIN`); clear error for that 403. Tests: 2 new (default/override/none; error text).

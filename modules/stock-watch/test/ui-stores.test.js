@@ -181,6 +181,22 @@ test('store + view menu: every store and role reachable on a short laptop (8 sto
   await pg.context().close();
 });
 
+test('phone store bar with a role: the store name wins over the role and the store count (final r2 M7)', opts, async () => {
+  for (const [w, h] of [[360, 740], [390, 844]]) {
+    const pg = await open(w, h, '/?store=second-demo&role=founder#overview', '.tiles');
+    const r = await pg.evaluate(() => {
+      const nm = document.querySelector('#storebar .sm-name'), n = [...document.querySelectorAll('#storebar .sm-n:not(.sm-role)')];
+      return { name: nm.scrollWidth <= nm.clientWidth, role: document.querySelector('#storebar .sm-role').textContent, count: n.every((x) => getComputedStyle(x).display === 'none') };
+    });
+    assert.deepEqual(r, { name: true, role: r.role, count: true }, `${w}: "Second store (demo)" whole, "2 stores" hidden with a role`);
+    assert.ok(r.role, `${w}: role shown`);
+    await pg.context().close();
+  }
+  const pg = await open(360, 740, '/?store=second-demo&role=#overview', '.tiles');
+  assert.match(await pg.textContent('#storebar summary'), /2 stores/, 'no role: the count is back');
+  await pg.context().close();
+});
+
 test('long store name: ellipsis on the pill (full name in its title); at 1280 with a role the range and role stay whole (UI-3, UI-4)', opts, async () => {
   const LONG = 'Sammsara Luxury Home Decor and Gifting Company India';
   const put = (name) => fetch(`${base}/api/settings?store=second-demo`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ storeName: name }) });

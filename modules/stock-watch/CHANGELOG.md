@@ -14,6 +14,12 @@ The first version meant for production, once the open items in `docs/BACKLOG.md`
 
 New in this release:
 
+- Fixed: a product in stock but Critical or Order now with a part-filled purchase order stays in Order today (it moved to This week); only an order that covers the need marks it Ordered (LOGIC §6b; final critic r2 L1).
+- Changed: Stock-outs headline leads with "N still out, costing ₹X/day" on every screen, with "products ran out · sales lost · profit lost" under it (SIMP-B).
+- Fixed: Overview's daily chart keeps a fixed 200 px height and 12.5 px labels at any width, so Overview fits one 900 px screen from 1280 to 1920 px (UI-1). Trend-up green, the OK pill and the Stock-outs badge meet WCAG AA contrast (UI-2).
+- Phones: the filter chips stop on whole chips with a fade at a scrolled edge (no bare "0" at the left), toasts sit above "Mark N ordered", the drawer's × stays in view, order cost 12.5 px, Products cards show ₹ lost top-right, chart labels 12.5 px, the store name wins over the role in the store bar, Sort beside Search on Reorder and Stock-outs, 44 px targets (final critic r2 M1–M9).
+- Ops: `.railway/railway.ts` preserves every app variable, so `railway config apply` can't delete the Performity key or webhooks (X1, `docs/RUNBOOK.md`).
+
 - Performity calls send our app's domain as `Origin` (Performity allows our key only from it); `PERFORMITY_ORIGIN` overrides it. A `403 Origin not allowed` now says which origin was sent.
 
 - Added: `/health`, `/status` and the page footer show the app version and the commit it was built from (`v1.0.0-rc.1 · abc1234`; `dev` for an unstamped build). Deploy step: `npm run stamp` before `railway up` (SW-056, `docs/RUNBOOK.md`).

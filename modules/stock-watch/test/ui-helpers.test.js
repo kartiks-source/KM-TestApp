@@ -310,10 +310,11 @@ test('final critic round 1, phones 390 and 360 (M1–M8, M10): role in the store
     try {
       await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('[data-filter-reorder="ordered"]');
       await pg.click('[data-filter-reorder="ordered"]'); await pg.waitForSelector('[data-filter-reorder="ordered"].on');
-      const m = await pg.$eval('.wrap > .toolbar .chips', (c) => { const b = c.getBoundingClientRect(), a = c.querySelector('.on').getBoundingClientRect(); return { over: c.scrollWidth > c.clientWidth + 1, scrolled: c.scrollLeft, l: a.left - b.left, r: b.right - a.right }; });
+      const m = await pg.$eval('.wrap > .toolbar .chips', (c) => { const b = c.getBoundingClientRect(), a = c.querySelector('.on').getBoundingClientRect(); return { over: c.scrollWidth > c.clientWidth + 1, scrolled: c.scrollLeft, l: a.left - b.left, r: b.right - a.right, cut: [...c.children].filter((x) => { const r = x.getBoundingClientRect(); return r.left < b.left - 0.5 && r.right > b.left + 6; }).map((x) => x.textContent), mask: getComputedStyle(c).maskImage || getComputedStyle(c).webkitMaskImage }; });   // the first 6 px are masked clear
       assert.ok(m.over, `${w}: fixture: the chips row overflows`);
       assert.ok(m.l >= 0 && m.r >= 0, `${w}: M3 Ordered chip in full ${JSON.stringify(m)}`);
-      assert.ok(m.scrolled === 0 || m.r <= 12, `${w}: M3 scrolled the least (Order today stays in view as far as it can) ${JSON.stringify(m)}`);
+      assert.deepEqual(m.cut, [], `${w}: final r2 M1: the row starts on a whole chip, never a bare count at the left edge ${JSON.stringify(m)}`);
+      assert.match(m.mask, /gradient/, `${w}: final r2 M1: the scrolled edge fades`);
     } finally {
       await fetch(base + '/api/onorder', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: [{ id: one.id, qty: 0 }] }) });
     }
@@ -326,6 +327,78 @@ test('final critic round 1, phones 390 and 360 (M1–M8, M10): role in the store
     await pg.goto(base + '/?role=all#data'); await pg.waitForSelector('.panel.fold');
     const folds = await pg.$$eval('.panel.fold:not([open])', (f) => f.map((x) => x.getBoundingClientRect().height - x.querySelector('summary').getBoundingClientRect().height));
     assert.ok(folds.length && folds.every((d) => d <= 3), `${w}: M5 closed fold = its label (${folds})`);
+    assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+});
+
+test('final critic round 2, desktop: daily chart drawn at its width, 200 px tall, 12.5 px labels; Overview fits 900 px (UI-1, SIMP-A); AA colours (UI-2); Stock-outs leads with the action (SIMP-B)', opts, async () => {
+  for (const w of [1280, 1440, 1920]) {
+    const pg = await page(w, 900);
+    await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('#daily-chart svg');
+    const c = await pg.evaluate(() => { const s = document.querySelector('#daily-chart svg'), r = s.getBoundingClientRect(), t = s.querySelector('text');
+      return { h: Math.round(r.height), scale: r.width / s.viewBox.baseVal.width, font: getComputedStyle(t).fontSize, bottom: document.querySelector('#daily-chart').getBoundingClientRect().bottom, sx: document.documentElement.scrollWidth - innerWidth }; });
+    assert.equal(c.h, 200, `${w}: chart height`);
+    assert.ok(Math.abs(c.scale - 1) < 0.01, `${w}: not scaled (${c.scale})`);
+    assert.equal(c.font, '12.5px');
+    assert.ok(c.bottom <= 900, `${w}: Overview ends at ${c.bottom} (fits 900)`);
+    assert.equal(c.sx, 0);
+    await pg.goto(base + '/?role=all#stockouts'); await pg.waitForSelector('.headline h1');
+    assert.match(await pg.textContent('.headline h1'), /^\d+ still out, costing ₹[\d,.]+( L)?\/day$/, `${w}: SIMP-B h1 = the action`);
+    assert.match(await pg.textContent('.headline p'), /products ran out \d+ times · ₹.* sales lost · ₹.* profit lost/);
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+  const pg = await page(1440, 900);
+  await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('#daily-chart svg');
+  const col = await pg.evaluate(() => {
+    const probe = (cls, txt = 'x') => { const e = document.createElement('span'); e.className = cls; e.textContent = txt; document.body.append(e); const c = getComputedStyle(e); const r = [c.color, c.backgroundColor]; e.remove(); return r; };
+    return { up: probe('tr up')[0], ok: probe('st ok'), badge: getComputedStyle(document.querySelector('#n-stockouts')).backgroundColor };
+  });
+  const lum = (rgb) => { const [r, g, b] = rgb.match(/\d+/g).slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const cr = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  assert.ok(cr(col.up, 'rgb(255,255,255)') >= 4.5, `UI-2 trend up ${col.up}`);
+  assert.ok(cr(col.ok[0], col.ok[1]) >= 4.5, `UI-2 OK pill ${col.ok}`);
+  assert.ok(cr('rgb(255,255,255)', col.badge) >= 4.5, `UI-2 Stock-outs badge ${col.badge}`);
+  await pg.context().close();
+});
+
+test('final critic round 2, phones 390 and 360 (M1–M6, M8, M9): whole chips, toast clear of the bulk bar, sticky ×, money sizes, ₹ lost top-right, chart labels, Sort beside Search, 44 px', opts, async () => {
+  for (const [w, h] of PHONES) {
+    const pg = await page(w, h);
+    await pg.goto(base + '/?role=all#reorder'); await pg.waitForSelector('.phone .mcard');
+    /* M8: Plan settings one line; Search and Sort share a row; the first card starts higher */
+    const m8 = await pg.evaluate(() => { const q = document.querySelector('.tq .search').getBoundingClientRect(), s = document.querySelector('.tq .msort select').getBoundingClientRect();
+      return { plan: document.querySelector('.plan summary').getBoundingClientRect().height, row: Math.abs(q.top - s.top) < 1, label: document.querySelector('.tq .msort select').getAttribute('aria-label'), card: document.querySelector('.phone .mcard').getBoundingClientRect().top }; });
+    assert.ok(m8.plan <= 45, `${w}: M8 Plan settings one line (${m8.plan})`);
+    assert.ok(m8.row && m8.label === 'Sort by', `${w}: M8 Sort beside Search, named for screen readers`);
+    assert.ok(m8.card < 360, `${w}: M8 first card at ${m8.card}`);
+    /* M4: the order cost is 12.5 px and bold */
+    assert.deepEqual(await pg.$eval('.mcard .mq small.mv', (e) => [getComputedStyle(e).fontSize, getComputedStyle(e).fontWeight]), ['12.5px', '600'], `${w}: M4`);
+    /* M9: the ⋯ menu is 44 px wide */
+    assert.ok(await pg.$eval('.wrap > .toolbar .colpick:not(.desk) > summary', (e) => e.getBoundingClientRect().width) >= 44, `${w}: M9 ⋯`);
+    /* M2: tick a card, then a toast: it sits above "Mark N ordered" */
+    await pg.click('.phone .mcard .mpick'); await pg.waitForSelector('.wrap > .bulk');
+    const m2 = await pg.evaluate(() => { const t = document.getElementById('toast'); t.textContent = 'Saved'; t.hidden = false; const a = t.getBoundingClientRect(), b = document.getElementById('pick-mark').getBoundingClientRect(); t.hidden = true; return a.bottom <= b.top || a.top >= b.bottom; });
+    assert.ok(m2, `${w}: M2 toast clear of the Mark button`);
+    await pg.click('#pick-clear');
+    /* M3: the × stays in view when the drawer is scrolled */
+    await pg.click('.phone .mcard h3'); await pg.waitForSelector('#drawer:not([hidden]) svg');
+    const x = await pg.evaluate(() => { const c = document.querySelector('.drawer-card'); c.scrollTop = c.scrollHeight; const r = document.getElementById('drawer-close').getBoundingClientRect(); return { top: r.top, w: r.width, h: r.height, scrolled: c.scrollTop > 100 }; });
+    assert.ok(x.scrolled && x.top >= 0 && x.top < 30 && x.w >= 44 && x.h >= 44, `${w}: M3 × pinned ${JSON.stringify(x)}`);
+    await pg.click('#drawer-close');
+    /* M5: Products (sorted by ₹ lost): ₹ lost top-right, the status in the facts */
+    await pg.goto(base + '/?role=all#products'); await pg.waitForSelector('.phone .mcard');
+    const m5 = await pg.$eval('.phone .mcard', (c) => ({ mq: c.querySelector('header .mq')?.innerText.replace(/\n/g, ' '), st: !!c.querySelector('.mfacts .st'), hst: !!c.querySelector('header .st') }));
+    assert.match(m5.mq || '', /^₹[\d,.]+( L)? sales lost$/, `${w}: M5 ${JSON.stringify(m5)}`);
+    assert.ok(m5.st && !m5.hst, `${w}: M5 status moved to the facts`);
+    /* M6: Overview chart labels are 12.5 px on screen (not scaled down); none outside the chart */
+    await pg.goto(base + '/?role=all#overview'); await pg.waitForSelector('#daily-chart svg');
+    const m6 = await pg.$eval('#daily-chart svg', (s) => ({ scale: s.getBoundingClientRect().width / s.viewBox.baseVal.width, font: getComputedStyle(s.querySelector('text')).fontSize, out: [...s.querySelectorAll('text')].map((t) => t.getBBox()).filter((b) => b.x < -0.5 || b.x + b.width > s.viewBox.baseVal.width + 0.5).length }));
+    assert.ok(Math.abs(m6.scale - 1) < 0.01 && m6.font === '12.5px' && m6.out === 0, `${w}: M6 ${JSON.stringify(m6)}`);
+    /* M9: Biggest losses "All" is 44 px wide */
+    assert.ok(Math.min(...await pg.$$eval('.panel-head a', (a) => a.map((x) => x.getBoundingClientRect().width))) >= 44, `${w}: M9 panel link`);
     assert.equal(await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
     assert.deepEqual(pg.errors, []);
     await pg.context().close();

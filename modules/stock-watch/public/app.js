@@ -288,7 +288,7 @@
     const opts = cols.filter((c) => (c.r || c.val) && !['status', 'name', 'type', 'start', 'end'].includes(c.k))
       .flatMap((c) => (c.k === 'daysLeft' ? [[`${c.k}|1`, 'Days left: fewest first']] : [[`${c.k}|-1`, `${c.label}: highest first`]]));
     const phone = `<div class="phone">
-        <label class="msort"><span>Sort by</span><select data-msort="${id}"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: ({ pause: 'Out first, then fewest days left', push: 'Most ₹ stuck first', slow: 'Biggest ₹ first' })[pFilter()] || 'Biggest loss first', groups: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label class="msort"><span>Sort by</span><select data-msort="${id}" aria-label="Sort by"><option value="">${({ reorder: 'Most urgent first', stockouts: 'Biggest loss first', products: ({ pause: 'Out first, then fewest days left', push: 'Most ₹ stuck first', slow: 'Biggest ₹ first' })[pFilter()] || 'Biggest loss first', groups: 'Biggest loss first' })[id] || 'Default'}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
         <div class="mcards">${rows.map((r) => `<article class="mcard" data-id="${esc(r.id)}" tabindex="0">${card(r)}</article>`).join('')}</div>
       </div>`;
     return desk + phone + more;
@@ -296,8 +296,12 @@
   const kv = (label, value, cls = '') => `<div class="${cls}"><span>${label}</span><b>${value}</b></div>`;
 
   /* ---------- charts (SVG, to scale) ---------- */
-  function dailyChart(daily) {
-    const W = narrow() ? 360 : Math.max(1000, Math.round(innerWidth * 0.62)), H = narrow() ? 230 : 365, L = narrow() ? 50 : 64, R = 10, T = 12, B = 34;
+  /* Drawn at the box's real width (fitChart) and a fixed height, so the SVG isn't scaled: labels stay at the CSS size
+     and the chart doesn't grow with the screen (final r2 UI-1 / SIMP-A: 407–538 px tall at 1280–1920 pushed Overview
+     past one screen; M6: phones scaled the labels down to ~9 px). w = the first guess before the page lays out. */
+  const chartGuessW = () => (narrow() ? Math.min(innerWidth, 760) - 44 : Math.max(600, innerWidth - 300));
+  function dailyChart(daily, w = chartGuessW()) {
+    const W = Math.max(280, Math.round(w)), H = narrow() ? 220 : 200, L = 64, R = narrow() ? 22 : 10, T = 12, B = 30;   // M6: room for the last date at 12.5 px
     const max = Math.max(1, ...daily.map((d) => d.sold + d.lost));
     const step = niceStep(max / 4); const top = Math.ceil(max / step) * step;
     const y = (v) => T + (H - T - B) * (1 - v / top);
@@ -311,9 +315,9 @@
       g += `<g><title>${dayLabel(d.day)}: sold ${moneyFull(d.sold)}, lost ${moneyFull(d.lost)}${d.outSkus ? ` · ${d.outSkus} product(s) out` : ''}</title>`
         + `<rect x="${x}" y="${ys}" width="${w}" height="${Math.max(0, y(0) - ys)}" rx="2" fill="#0978BE"/>`
         + (d.lost > 0 ? `<rect x="${x}" y="${yl}" width="${w}" height="${Math.max(1, ys - yl)}" rx="2" fill="#E0506E"/>` : '') + '</g>';
-      if (i % every === 0 || i === daily.length - 1) g += `<text x="${x + w / 2}" y="${H - 12}" text-anchor="middle">${dayLabel(d.day)}</text>`;
+      if (narrow() ? (daily.length - 1 - i) % every === 0 : i % every === 0 || i === daily.length - 1) g += `<text x="${x + w / 2}" y="${H - 12}" text-anchor="middle">${dayLabel(d.day)}</text>`;
     });
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily sales and sales lost to stock-outs">${g}</svg>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Daily sales and sales lost to stock-outs">${g}</svg>`;
   }
   function niceStep(x) { const p = 10 ** Math.floor(Math.log10(Math.max(1, x))); const m = x / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
 
@@ -443,7 +447,7 @@
         </div>
         ${moving()}
       </section>
-      <section class="panel chart">
+      <section class="panel chart" id="daily-chart">
         <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
         ${dailyChart(r.daily)}
       </section>`;
@@ -514,7 +518,7 @@
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.onOrder.remaining)} pcs</b><small>on order</small></div></header>
         <div class="mfacts">${landsCell(p)}${bestTag(p)}</div>` : `
-        <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small>${money(p.orderValue)}</small></div></header>
+        <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small class="mv">${money(p.orderValue)}</small></div></header>
         <div class="mfacts">${f === 'all' ? status(p) : poTag(p).trim()}${whyCell(p)}${bestTag(p)}</div>`))}`;
   }
 
@@ -543,9 +547,9 @@
       { k: 'pattern', label: 'Pattern', f: pattern, val: (a) => a.small + a.repeat },
     ];
     return `
-      <section class="headline">${narrow() && t.stillOut && t.stillOutPerDay
-        ? `<h1>${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span></h1><p>${all.length} products ran out ${t.stockouts} times · <span class="lostv">${money(t.lost)}</span> in sales${t.hasCost ? ` · <span class="nw">${money(t.lostProfit)} profit</span>` : ''}</p>`   // M10: phones lead with the action
-        : `<h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> in sales${t.hasCost ? ` · ${money(t.lostProfit)} profit` : ''}${t.stillOut && t.stillOutPerDay ? ` · ${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span>` : ''}</h1>`}
+      <section class="headline">${t.stillOut && t.stillOutPerDay
+        ? `<h1>${t.stillOut} still out, costing <span class="lost">${money(t.stillOutPerDay)}/day</span></h1><p>${all.length} products ran out ${t.stockouts} times · <span class="lostv">${money(t.lost)}</span> sales lost${t.hasCost ? ` · <span class="nw">${money(t.lostProfit)} profit lost</span>` : ''}</p>`   // M10 + final r2 SIMP-B: the action leads, phone and desktop
+        : `<h1>${all.length} products ran out ${t.stockouts} times · <span class="lost">${money(t.lost)}</span> sales lost${t.hasCost ? ` · ${money(t.lostProfit)} profit lost` : ''}</h1>`}
         <details class="how exp"><summary>How we estimate this</summary><p>Hours out of stock, weighted by when this store usually sells, × the product’s normal sales per hour × the average price paid. Open a product for each stock-out.</p></details></section>
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-stockouts="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
         <input class="search" id="q-stockouts" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.stockouts)}"></div>
@@ -637,6 +641,8 @@
     if (f === 'push') cols = cols.map((c) => (c.k === 'orderQty' ? { ...PRODUCT_COLS().find((x) => x.k === 'excessValue'), opt: 0 } : c)).filter((c, i, a) => c.k !== 'excessValue' || a.findIndex((x) => x.k === 'excessValue') === i);
     if (f === 'slow') cols = cols.filter((c) => !['status', 'orderQty', 'daysLeft'].includes(c.k)).concat([{ k: 'decide', label: 'Decide', f: decideCell, val: (p) => decideOf().get(p.id)?.value || 0 }, ...(viewOnly() ? [] : [{ k: 'act', label: '', f: decideBtns }])]);
     const moreOn = PRODUCT_MORE.some(([k]) => k === f);
+    /* final r2 M5: phone cards sorted by ₹ lost (every tab but Pause / Push / Slow) put ₹ lost top-right, status in the facts */
+    const so = state.sort.products, lossSort = !['pause', 'push', 'slow'].includes(f) && (!so || so.k === 'lost');
     return `
       <section class="headline"><h1>${f === 'pause' ? `Pause promotion on ${inr.format(rows.length)} products` : f === 'push' ? `Push ${inr.format(rows.length)} overstocked products` : 'Products'}</h1><p>${inr.format(rows.length)} shown · <span class="nw">${money(tot.sold)} sold</span> · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
         <span class="hfind">${viewSelect()}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
@@ -644,8 +650,8 @@
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
         ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products', null, (f === 'pause' || f === 'push') && rows.length ? `<button class="linkbtn" id="csv-mkt">Download this list (CSV)</button>` : '')}</div>
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
-        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week bk">${esc(p.backIn || '–')}</span>` : status(p)}</header>
-        <div class="mfacts"><span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
+        <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week bk">${esc(p.backIn || '–')}</span>` : lossSort ? `<div class="mq"><b class="${p.lost ? 'lostv' : 'muted'}">${p.lost ? money(p.lost) : '–'}</b><small>sales lost</small></div>` : status(p)}</header>
+        <div class="mfacts">${lossSort ? status(p) : ''}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost && !lossSort ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
       ${f === 'slow' ? decidedNote() : ''}`;
   }
   /* SW-032: decided items are hidden until their sales change by more than half; listed here so a decision can be undone */
@@ -842,12 +848,42 @@
     $('#view').innerHTML = (VIEWS[state.view] || overview)() + (viewOnly() ? '<form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>' : '');
     if (narrow()) {   // M3: phones scroll the chips row sideways; keep the active chip in view (pure DOM: the page doesn't move)
       const on = $('.wrap > .toolbar .chips .on');
-      if (on) { const c = on.parentElement, a = on.getBoundingClientRect(), b = c.getBoundingClientRect(); if (a.right > b.right) c.scrollLeft += a.right - b.right + 10; else if (a.left < b.left) c.scrollLeft -= b.left - a.left + 10; }   // critic M3: the least that shows it
+      /* final r2 M1: the least scroll that shows the active chip, rounded up to a chip's start (10 px in), so the row
+         never starts on a cut chip (the least alone left "Order today 0" cut to a bare "0" at the left edge). When the
+         active chip is last, a little end padding makes that start reachable. Snap points keep manual scrolls on whole chips. */
+      if (on) {
+        const c = on.parentElement, b = c.getBoundingClientRect(), x0 = b.left - c.scrollLeft, a = on.getBoundingClientRect();
+        const least = Math.max(0, a.right - x0 - c.clientWidth + 10);
+        if (least > 0) {
+          const starts = [...c.children].map((e) => e.getBoundingClientRect().left - x0 - 10).filter((v) => v >= least - 1);
+          const want = Math.min(a.left - x0 - 10, starts.length ? Math.min(...starts) : least);
+          const max = c.scrollWidth - c.clientWidth;
+          if (want > max) c.style.paddingRight = `${Math.ceil(want - max) + (parseFloat(getComputedStyle(c).paddingRight) || 0)}px`;
+          c.scrollLeft = want;
+        }
+        chipEdges(c);
+      }
+      /* M8: Sort sits beside Search (one row) on Reorder and Stock-outs */
+      const tb = $('#view > .toolbar'), q = tb && tb.querySelector(':scope > .search'), ms = $('#view .phone .msort');
+      if (q && ms) { const row = document.createElement('div'); row.className = 'tq'; q.before(row); row.append(q, ms); }
     }
     const focusId = render._focus; render._focus = null;
     if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); const c = render._caret ?? el.value.length; try { el.setSelectionRange(c, c); } catch { /* not a text input */ } } }
     render._caret = null;
     fitTables();
+    fitChart();
+  }
+  /* final r2 M1: fade the chips row's edge only on a side that has more chips to scroll to */
+  function chipEdges(c) {
+    c.classList.toggle('fl', c.scrollLeft > 1);
+    c.classList.toggle('fr', c.scrollLeft + c.clientWidth < c.scrollWidth - 1);
+  }
+  /* Redraw the Overview daily chart at its box's real width (no scaling). */
+  function fitChart() {
+    const box = $('#daily-chart'), svg = box && box.querySelector('svg');
+    if (!svg || !state.report) return;
+    const w = Math.floor(box.clientWidth - parseFloat(getComputedStyle(box).paddingLeft) - parseFloat(getComputedStyle(box).paddingRight));
+    if (w > 0 && Math.abs(w - +svg.getAttribute('width')) > 1) svg.outerHTML = dailyChart(state.report.daily, w);
   }
   /* Show everything, never scroll the page sideways: when the columns don't fit, the optional ones step aside, the last
      first, until the table fits; a small note names them (untick in Columns… to choose others). Only if the table still
@@ -1018,9 +1054,10 @@
   $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
   window.addEventListener('hashchange', route);
   window.addEventListener('popstate', (e) => { if (!$('#drawer').hidden && !e.state?.drawer) closeDrawer(); });
+  document.addEventListener('scroll', (e) => { if (e.target.classList && e.target.classList.contains('chips')) chipEdges(e.target); }, true);   // final r2 M1
   let wasNarrow = narrow();
   let wasTier = tier();
-  window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } else fitTables(); });
+  window.addEventListener('resize', () => { if (narrow() !== wasNarrow || tier() !== wasTier) { wasNarrow = narrow(); wasTier = tier(); render(); } else { fitTables(); fitChart(); } });
 
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); toast('Copied'); }

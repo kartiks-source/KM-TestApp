@@ -21,7 +21,7 @@
   --amber-soft: #FDF1E2;
   --plum: #6C47FF;
   --plum-soft: #EFEBFF;
-  --ok: #0E9B90;
+  --ok: #0B7A71;   /* AA 4.65:1 on --ok-soft (final r2 UI-2; was #0E9B90, 3.07:1) */
   --ok-soft: #E3F6F4;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -115,6 +115,7 @@ button.tile:hover { border-color: var(--brand); }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--soft); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .chart svg { width: 100%; height: auto; display: block; }
+#daily-chart svg { width: auto; max-width: 100%; }   /* drawn at the box's width (fitChart): never scaled up */
 .chart text { font: 12.5px var(--sans); fill: var(--faint); }
 
 /* bar list */
@@ -221,7 +222,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 .trc.big { gap: 12px; } .small { font-size: 12.5px; margin: 0; }
 .catm { color: var(--faint); font-size: 12px; }
 #view.calm .spark .sb { animation: none; }
-#n-stockouts { background: #8A93A6; }
+#n-stockouts { background: #6B7385; }   /* AA 4.76:1 with white (was #8A93A6, 3.09:1) */
 /* trend sparkline: bars rise in on render; rose base = out of stock that week */
 .trc { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; vertical-align: middle; line-height: 1; }
 .spark { display: block; overflow: visible; }
@@ -233,7 +234,7 @@ td:first-child b, td.name { color: var(--brand); font-weight: 500; }
 @keyframes sbIn { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .spark .sb { animation: none; } }
 .tr { display: inline-block; min-width: 54px; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.tr.up { color: #16A34A; } .tr.down { color: var(--lost); } .tr.flat { color: var(--soft); } .tr.low { color: var(--faint); } .tr.new { color: var(--brand); }
+.tr.up { color: #15803D; } .tr.down { color: var(--lost); } .tr.flat { color: var(--soft); } .tr.low { color: var(--faint); } .tr.new { color: var(--brand); }
 .tile b small { font-size: 13px; color: var(--faint); font-weight: 500; }
 
 /* assumptions bar: change a number, everything updates */
@@ -641,4 +642,38 @@ table.fixed td:first-child { max-width: none; }
   /* M10: "Sort by" on one line */
   .msort > span { white-space: nowrap; flex: none; }
   .msort select { min-width: 0; }   /* the list gives way, never the page (long option names) */
+}
+
+/* ---- phones, final critic round 2 (M1–M9). Inside ≤760 px only: desktop untouched. ---- */
+@media (max-width: 760px) {
+  /* M1: the chips row stops on whole chips; an edge fades only where more chips are (chipEdges in app.js) */
+  .wrap > .toolbar .chips { scroll-snap-type: x proximity; scroll-padding-inline: 10px; }
+  .wrap > .toolbar .chip { scroll-snap-align: start; }
+  .wrap > .toolbar .chips.fr { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+  /* left: the first 6 px (the gap the chip before ends in) fully clear, then a fade */
+  .wrap > .toolbar .chips.fl { -webkit-mask-image: linear-gradient(90deg, transparent 6px, #000 22px); mask-image: linear-gradient(90deg, transparent 6px, #000 22px); }
+  .wrap > .toolbar .chips.fl.fr { -webkit-mask-image: linear-gradient(90deg, transparent 6px, #000 22px, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, transparent 6px, #000 22px, #000 calc(100% - 18px), transparent); }
+  /* M2: with the "Mark N ordered" bar up, the toast sits above it, never on its button */
+  body:has(.wrap > .bulk) .toast { bottom: calc(62px + 8px + 96px + env(safe-area-inset-bottom)); }
+  /* M3: × stays at the top of the drawer while it scrolls (no backdrop to tap on a phone) */
+  .x { position: sticky; top: 0; right: auto; margin: -10px -8px -34px auto; align-self: flex-end; flex: none; z-index: 2; background: var(--page); border-radius: 50%; }
+  /* M4: the order cost (the money figure) at 12.5 px, and the ₹ on Reorder cards stands out */
+  .mcard .mq small { font-size: 12.5px; color: var(--ink-2); }
+  .mcard .mq small.mv { font-weight: 600; }
+  /* M6: chart labels readable (the daily chart is drawn at its real width; drawer charts scale ~0.9) */
+  .chart text { font-size: 12.5px; }
+  /* M7: the store name wins: the role gives way first, and "N stores" hides when a role is shown */
+  .store-m .sm-role ~ .sm-n { display: none; }
+  .store-m .sm-role:empty ~ .sm-n { display: inline; }
+  .store-m .sm-role { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* M8: Plan settings on one line; Sort beside Search (app.js moves .msort into .tq) */
+  .plan summary { flex-wrap: nowrap; white-space: nowrap; }
+  .plan summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wrap > .toolbar > .tq { order: -1; flex: 1 1 100%; display: flex; gap: 6px; min-width: 0; }
+  .wrap > .toolbar > .tq .search { flex: 1 1 0; width: auto; order: 0; }
+  .wrap > .toolbar > .tq .msort { flex: 1.4 1 0; min-width: 0; margin: 0; }   /* "Most urgent first" fits at 360 */
+  .wrap > .toolbar > .tq .msort > span { display: none; }
+  /* M9: the last two tap targets under 44 px wide */
+  .panel-head a { min-width: 44px; text-align: center; display: inline-block; }
+  .wrap > .toolbar .colpick > summary.btn { min-width: 44px; justify-content: center; }
 }

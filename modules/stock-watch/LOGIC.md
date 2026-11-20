@@ -525,7 +525,7 @@ One plain sentence per row, the same text in the Reorder table, the phone card a
 
 **Status column:** on the Reorder tabs *Order today* and *This week* every row has the same status, so the column is replaced by the Why cell. *All* keeps both.
 
-**Still-out cost per day** (Stock-outs headline: "17 still out, costing ₹16,599/day") = Σ over products at 0 stock of sales per day × average price paid. It is the sales rate each empty shelf is missing right now; tomorrow's ₹ lost grows by about this much if nothing is refilled.
+**Still-out cost per day** (Stock-outs headline, every screen size: "17 still out, costing ₹16,599/day", with "N products ran out M times · ₹ sales lost · ₹ profit lost" under it; final r2 SIMP-B: desktop used to put all five numbers in one line) = Σ over products at 0 stock of sales per day × average price paid. It is the sales rate each empty shelf is missing right now; tomorrow's ₹ lost grows by about this much if nothing is refilled.
 
 **When it can be wrong:** dates assume the rate holds (section 3); one lead time for the store (section 6); a product out for the whole demand window has rate 0 (section 3) and adds nothing to the per-day cost.
 
