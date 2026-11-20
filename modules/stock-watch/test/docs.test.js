@@ -43,3 +43,21 @@ test('doc fences: every .md file closes every code fence', () => {
   const bad = files.flatMap((f) => openFences(fs.readFileSync(f, 'utf8')).map((o) => `${path.relative(ROOT, f)}:${o.line} opens a code fence that never closes`));
   assert.deepEqual(bad, []);
 });
+
+/* Critic r2 X2: SECURITY.md lists every secret the code reads and every route that changes data, and keeps no
+ * stale "planned" auth text. Secret-like variables are found by scanning the code, so a new one fails here. */
+test('SECURITY.md names every secret variable the code reads and every write route; no stale auth text', () => {
+  const MOD = path.join(__dirname, '..');
+  const sec = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
+  const code = ['server.js', ...fs.readdirSync(path.join(MOD, 'src')).filter((f) => f.endsWith('.js')).map((f) => path.join('src', f))]
+    .map((f) => fs.readFileSync(path.join(MOD, f), 'utf8')).join('\n');
+  const names = new Set();
+  for (const m of code.matchAll(/process\.env\.([A-Z][A-Z0-9_]+)|\benv\(\s*'([A-Z][A-Z0-9_]+)'\s*\)|\benv\(`([A-Z][A-Z0-9_]+)_\$\{/g)) names.add(m[1] || m[2] || m[3]);
+  const secrets = [...names].filter((n) => /PASSWORD|SECRET|KEY|TOKEN|WEBHOOK/.test(n) && n !== 'AZURE_KEY_VAULT_URL');
+  assert.ok(secrets.length >= 8, `found ${secrets}`);
+  for (const n of secrets) assert.ok(sec.includes('`' + n), `SECURITY.md is missing ${n}`);
+  for (const r of ['POST /api/clear', 'POST /api/demo', 'POST /api/import', 'PUT /api/settings', 'POST /api/onorder', 'POST /api/decide', 'PUT /api/digest/settings', 'POST /api/digest/send', 'POST /ingest/stock', 'GET /api/export/backup.json']) {
+    assert.ok(sec.includes(r), `SECURITY.md endpoints table is missing ${r}`);
+  }
+  assert.doesNotMatch(sec, /Planned hardening|Known gaps|SW-008 makes it|Hardening to a random key|when they land/, 'auth text describes the code as it is');
+});
