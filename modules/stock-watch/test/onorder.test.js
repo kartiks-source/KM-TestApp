@@ -9,6 +9,7 @@ const path = require('node:path');
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-onorder-'));
 const E = require('../src/engine');
 const OO = require('../src/onorder');
+const H = require('../src/helpers');
 require('../src/scope').useDir(process.env.DATA_DIR);   // module on its own: one store folder
 
 const D = E.DAY;
@@ -76,6 +77,25 @@ test('out of stock with a part-filled order: stays Out now in Order today and in
   assert.equal(full.products[0].status, 'Ordered');
   assert.equal(full.totals.outNow, 1);
   assert.equal(full.totals.orderToday, 0);
+});
+
+test('in stock, Critical, with a part-filled order: stays Critical in Order today (final r2 L1)', () => {
+  /* 5/day, stock 10 (2 d left), PO of 50 lands in 5 d: used to become "Order this week", off Order today. */
+  const stock = [{ t: now - 28 * D, variantId: 'v3', sku: 'S3', product: 'Mug', before: 150, now: 150, price: 300 }, { t: now - D, variantId: 'v3', before: 15, now: 10 }];
+  const orders = [];
+  for (let i = 0; i < 28; i++) orders.push({ t: now - 28 * D + i * D + 1000, order: '#' + i, variantId: 'v3', sku: 'S3', qty: 5, price: 300 });
+  const at = (qty) => E.report(stock, orders, {}, { now, onOrder: { v3: { qty, eta: now + 5 * D, at: now } } });
+  const none = E.report(stock, orders, {}, { now }).products[0];
+  assert.equal(none.status, 'Critical');
+  for (const qty of [30, 50]) {
+    const r = at(qty), p = r.products[0];
+    assert.equal(p.onOrder.counts, true, `PO ${qty} counts`);
+    assert.equal(p.status, 'Critical', `PO ${qty}`);
+    assert.equal(p.orderQty, none.orderQty - qty, `PO ${qty}: only the extra`);
+    assert.equal(r.totals.orderToday, 1, `PO ${qty}: still in Order today`);
+    assert.match(H.why(p, { leadDays: 7, safetyDays: 3, tzOffsetMin: 330 }, now).why, /order by today/);
+  }
+  assert.equal(at(250).products[0].status, 'Ordered');
 });
 
 test('past the expected date with nothing received: back in Order today, flagged late', () => {

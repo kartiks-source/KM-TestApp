@@ -253,7 +253,7 @@ The six assumptions (lead time, cover, safety, sales history window, slow-seller
 | Result | Shown as |
 |---|---|
 | stock + on order is enough (status would be OK) | **Ordered · lands 25 Nov**, off Order today, listed under the **Ordered** tab, order qty 0 |
-| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "50 on order" next to the status. With the shelf empty it stays **Out now** however close the order gets (critic L2: a part-filled order used to move an empty shelf to *Order now* or even *This week*, off Order today and out of "out now") |
+| stock + on order still isn't enough | stays in Order today, order qty = only the extra still needed, with "50 on order" next to the status. The row keeps the status it has without the order (**Out now**, **Critical**, **Order now** or *This week*) however close the order gets, since units on the way don't change when the shelf empties; the Why cell still says "order by today" (critic L2: a part-filled order used to move an empty shelf to *Order now* or even *This week*, off Order today and out of "out now"; final r2 L1: the same for stock > 0, e.g. 5/day, 10 in stock, 50 on order moved Critical to *This week*) |
 | past the expected date and less than 90% received | back in **Order today**, in red: "Ordered 200 · was due 25 Nov" |
 | lands after the shelf empties and later than a fresh order could | doesn't count: the row stays in Order today with the order shown, so you can decide whether to chase the supplier or order elsewhere |
 

@@ -250,13 +250,14 @@ function onOrderNow(rec, changes, now, stock, perDay, lead) {
   return { qty: num(rec.qty), remaining, eta, at: num(rec.at) || null, by: rec.by || null, late, counts };
 }
 /** plan() with an on-order record: units that count are added to stock; if that covers the need, status is "Ordered".
- *  An empty shelf stays "Out now" (Order today, counted in out now) until the order covers the need: units on the
- *  way don't stop today's lost sales (LOGIC.md §6b); the order qty is only the extra still needed. */
+ *  Otherwise the row keeps its own status (Out now / Critical / Order now stay in Order today): units on the way
+ *  don't change when the shelf empties, and a part order mustn't move a row off Order today (LOGIC.md §6b,
+ *  critic L2 for an empty shelf, final r2 L1 for stock > 0). The order qty is only the extra still needed. */
 function planWithOrder(args, oo) {
   const base = plan(args);
   if (!oo || !oo.counts) return base;
   const withPo = plan({ ...args, stock: Math.max(0, args.stock) + oo.remaining });
-  const status = withPo.status === 'OK' ? 'Ordered' : args.stock <= 0 ? 'Out now' : withPo.status;
+  const status = withPo.status === 'OK' ? 'Ordered' : base.status;
   return { daysLeft: base.daysLeft, status, qty: withPo.qty };
 }
 
