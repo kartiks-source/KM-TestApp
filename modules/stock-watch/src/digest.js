@@ -126,14 +126,16 @@ const BUILD = {
  *   role      a key of public/roles.js, or '' for everyone
  *   base      the app's address for the deep link (optional)
  *   storeId   the store the link opens (multi-store, ADR-0015; optional)
+ *   review    this week vs last week, one line (SW-043, src/weekly.js digestLine; optional): Founder / Everyone only
  * → { role, roleName, title, lines, link, text }   lines include the title; at most MAX_LINES
  */
-function build({ report: r, yesterday = null, week = null, prev = null, role = '', storeName = '', storeId = '', base = '', now } = {}) {
+function build({ report: r, yesterday = null, week = null, prev = null, role = '', storeName = '', storeId = '', base = '', now, review = null } = {}) {
   const key = R.valid(role) ? role : '';
   const roleName = key ? R.ROLES[key].name : 'Everyone';
   const at = now || r.generatedAt;
   const title = `Stock-out Watch · ${storeName || 'your store'} · ${dateLabel(at, TZ.zoneOf(r.settings))}${key ? ` · ${roleName}` : ''}`;
   const body = (BUILD[key] || BUILD.founder)(r, { yesterday, week, prev }).filter(Boolean);
+  if (review && (key === '' || key === 'founder')) body.push(review);   // SW-043: the CEO's lines already compare weeks
   const lines = [title, ...body].slice(0, MAX_LINES);
   const qs = [storeId ? `store=${encodeURIComponent(storeId)}` : '', key ? `role=${key}` : ''].filter(Boolean).join('&');
   const link = base ? `${base.replace(/\/+$/, '')}/${qs ? `?${qs}` : ''}#${key ? R.ROLES[key].home : 'overview'}` : '';

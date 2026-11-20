@@ -452,7 +452,8 @@
       <section class="panel chart" id="daily-chart">
         <div class="panel-head"><h2>Sold vs lost, per day</h2><div class="legend"><span><i style="background:#0978BE"></i>Sold ${money(t.sold)}</span><span><i style="background:#C8344F"></i>Lost ${money(t.lost)}</span></div></div>
         ${dailyChart(r.daily)}
-      </section>`;
+      </section>
+      ${window.SW_WEEKLY ? SW_WEEKLY.panel() : ''}`;
   }
 
   /* Overview "Moving" (SW-021): top 3 up and down by ₹ effect = change in daily rate × avg price × 30 (LOGIC.md §7d) */
@@ -578,7 +579,8 @@
   function productRows() {
     const r = state.report, q = state.q.products.toLowerCase(), f = pFilter(), gr = state.group;
     const dm = f === 'slow' ? decideOf() : null;
-    const list = r.products.filter((p) => (dm ? dm.has(p.id) : productMatch(p, f)) && (!gr || gr.ids.has(p.id)) && (!q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
+    const lm = window.SW_LISTS ? SW_LISTS.match(state.q.products, r.products) : null;   // SW-044: a pasted list
+    const list = r.products.filter((p) => (dm ? dm.has(p.id) : productMatch(p, f)) && (!gr || gr.ids.has(p.id)) && (lm ? lm.ids.has(p.id) : !q || `${p.name} ${p.sku} ${p.type}`.toLowerCase().includes(q)));
     if (f === 'pause' || f === 'push') return mktSort(list, f);
     if (dm) return list.sort((a, b) => dm.get(b.id).value - dm.get(a.id).value);
     return list;
@@ -650,10 +652,11 @@
     const so = state.sort.products, lossSort = !['pause', 'push', 'slow'].includes(f) && (!so || so.k === 'lost');
     return `
       <section class="headline"><h1>${f === 'pause' ? `Pause promotion on ${inr.format(rows.length)} products` : f === 'push' ? `Push ${inr.format(rows.length)} overstocked products` : 'Products'}</h1><p>${inr.format(rows.length)} shown · <span class="nw">${money(tot.sold)} sold</span> · <span class="lostv">${money(tot.lost)} lost</span> · ${inr.format(tot.stock)} pcs in stock</p>
-        <span class="hfind">${viewSelect()}<input class="search" id="q-products" placeholder="Search…" title="Search name, SKU or category" value="${esc(state.q.products)}"></span></section>
+        <span class="hfind">${viewSelect()}<input class="search" id="q-products" placeholder="Search or paste a list…" title="Search name, SKU or category, or paste a list of SKUs / names / variant IDs" value="${esc(state.q.products)}">${window.SW_LISTS ? SW_LISTS.pick(state.q.products, { canEdit: !viewOnly(), rerender: () => { if (state.view === 'products') render(); } }) : ''}</span></section>
       <div class="toolbar"><div class="chips">${groupChip()}${PRODUCT_TABS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-products="${k}"${MKT_TIP[k] ? ` title="${esc(MKT_TIP[k])}"` : ''}>${l}<span class="c">${countIn(inType, k)}</span></button>`).join('')}
         <select class="chip sel ${moreOn ? 'on' : ''}" id="f-more" aria-label="More filters"><option value="">More…</option>${PRODUCT_MORE.map(([k, l]) => `<option value="${k}" ${f === k ? 'selected' : ''}>${l} (${countIn(inType, k)})</option>`).join('')}</select></div>
         ${mktBar(rows, f)}${colPicker('products', cols)}${dlMenu('products', null, (f === 'pause' || f === 'push') && rows.length ? `<button class="linkbtn" id="csv-mkt">Download this list (CSV)</button>` : '')}</div>
+      ${window.SW_LISTS ? SW_LISTS.bar(state.q.products, r.products) : ''}
       ${table('products', cols.filter((c) => showCol('products', c)), rows, 'No products match.', (p) => `
         <header><h3>${nameCell(p, false)}</h3>${mspark(p)}${f === 'pause' ? `<span class="st g-week bk">${esc(p.backIn || '–')}</span>` : lossSort ? `<div class="mq"><b class="${p.lost ? 'lostv' : 'muted'}">${p.lost ? money(p.lost) : '–'}</b><small>sales lost</small></div>` : status(p)}</header>
         <div class="mfacts">${lossSort ? status(p) : ''}<span class="${p.stock != null && p.stock <= 0 ? 'bad' : ''}"><b>${p.stock == null ? '–' : inr.format(p.stock)}</b> in stock</span><span><b>${p.daysLeft == null ? '–' : n1(p.daysLeft)}</b> days left</span><span><b>${money(p.sold)}</b> sold</span>${p.lost && !lossSort ? `<span class="lostv">${money(p.lost)} lost</span>` : ''}${p.orderQty ? `<span>order <b>${inr.format(p.orderQty)}</b></span>` : ''}${bestTag(p)}</div>${f === 'slow' ? `<div class="mfacts">${decideCell(p)}${decideBtns(p)}</div>` : ''}`)}
@@ -701,6 +704,7 @@
     ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
     { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
     { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
+    ...(window.SW_TARGETS ? [SW_TARGETS.col(lens, { canEdit: !viewOnly(), rerender: () => { if (state.view === 'products' && state.lens === lens) render(); } })] : []),   // SW-042
     { k: 'trendPct', label: 'Trend', tip: 'Units sold per week by the group’s products, last 8 weeks (rose = one or more of them out part of that week); % = the group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendCell, val: (g) => g.trendPct ?? -999 },
   ];
   function groupView() {
@@ -721,7 +725,7 @@
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
         <header><h3><span class="pname">${esc(g.label)}</span></h3>${mspark(g)}<div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
-        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
+        <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>${window.SW_TARGETS ? SW_TARGETS.card(g) : ''}`)}</div>
       <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
   }
   function openGroup(key) {

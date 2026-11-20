@@ -760,4 +760,54 @@ div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 6
   .sup-name { grid-column: 1 / -1; }
   .sup-row input, .sup-map input, .sup-csv select { min-height: 44px; }
   .mbar .btn.xs { min-height: 44px; }
+/* sprint3 B-review */
+/* weekly review on the Overview (SW-043): numbers left, the products that changed most right; phones stack */
+.weekly .wk-b { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 34%); gap: 8px 24px; align-items: start; }
+.wk-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+@media (min-width: 1101px) { .wk-g { grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr)); } }
+@media (min-width: 761px) and (max-width: 1599px) { .wk-p { display: none; } }
+.wk-c { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.wk-c > span { font-size: 12px; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-c > b { font-size: 16px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wk-d { font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wk-d.good { color: var(--ok); } .wk-d.bad { color: var(--lost); } .wk-d.n { color: var(--soft); }
+.wk-mv { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wk-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(84px, auto); gap: 10px; align-items: center; cursor: pointer; }
+.wk-row .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--brand); }
+.wk-row .num { text-align: right; color: var(--ink-2); }
+.wk-row .wk-d { text-align: right; }
+.wk-row:hover .name, .wk-row:focus-visible .name { text-decoration: underline; }
+@media (max-width: 1100px) { .weekly .wk-b { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .wk-g { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wk-c:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .wk-row { min-height: 44px; }
+}
+/* targets on groups (SW-042): light, sales so far of target, month-end forecast; admin edits in the cell */
+.tg { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; white-space: nowrap; }
+.tg-l { display: inline-flex; align-items: center; gap: 4px; }
+.tg-f { font-size: 12px; color: var(--soft); }
+.tg-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.tg-dot.green { background: var(--ok); } .tg-dot.amber { background: #D98A1E; } .tg-dot.red { background: var(--lost); }
+.tg-e { font-size: 12px; margin-left: 4px; }
+.tg-ed { display: inline-flex; align-items: center; gap: 4px; }
+.tg-in { width: 104px; height: 30px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; font: inherit; font-size: 13px; }
+@media (max-width: 760px) {
+  .tg-m .tg-set, .tg-m .tg-e, .tg-m .btn { min-height: 44px; min-width: 44px; }
+  .tg-m .tg-in { height: 44px; width: 120px; font-size: 16px; }
+  .tg-m .tg { white-space: normal; }
+}
+.tg .linkbtn, .tg-set { display: inline-flex; padding: 2px 4px; color: var(--brand); }
+/* paste-a-list on Products (SW-044): found / not found, save for the team */
+.lsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 10px; padding: 8px 12px; background: var(--brand-wash2); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.ls-nf { color: var(--lost); min-width: 0; overflow-wrap: anywhere; }
+.ls-save { display: inline-flex; align-items: center; gap: 6px; }
+.ls-save input { width: 160px; height: 30px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; font: inherit; font-size: 13px; }
+.lsbar .linkbtn { display: inline-flex; padding: 4px 6px; color: var(--brand); }
+.ls-pick { max-width: 200px; }
+@media (max-width: 760px) {
+  .lsbar .btn, .lsbar .linkbtn { min-height: 44px; min-width: 44px; }
+  .ls-save input { height: 44px; font-size: 16px; width: 150px; }
+  .hfind:has(.ls-pick) { flex-wrap: wrap; }
+  .hfind .search.ls-pick { flex: 1 1 100%; max-width: none; }
 }

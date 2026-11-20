@@ -51,6 +51,9 @@ const people = require('./src/people');   // per-store sign-ins made by the owne
 const tokenScopes = require('./src/token-scopes');   // refuse our own apps' write scopes; note Performity's (SW-051)
 const csvmap = require('./src/csvmap');     // import preview + column mapping, Shopify exports (SW-045)
 const apiv1 = require('./src/apiv1');       // /api/v1: every /api route + summary and paginated rows (SW-050)
+const weekly = require('./src/weekly');     // sprint 3 B-review: daily snapshots, this week vs last week (SW-043)
+const targets = require('./src/targets');   // sprint 3 B-review: monthly targets on groups (SW-042)
+const lists = require('./src/lists');       // sprint 3 B-review: saved product lists (SW-044)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -265,6 +268,7 @@ function loadDemo() {
   store.replaceAll(g.stock, g.orders, 'demo');
   try { suppliers.seedDemo(demo.SUPPLIERS); } catch (e) { console.warn('demo suppliers not saved:', e.message); }   // SW-040: demo terms, only when the store has none (a read-only volume must not stop start-up)
   decide.clear();   // SW-032: decisions belong to the data they were made on
+  weekly.clear(); setImmediate(() => weekly.catchUp());   // SW-043: so are the daily snapshots; the demo's are taken now, in the background
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(isDemoName(s.storeName) ? { storeName: own.name } : {}) });
   return g;
@@ -317,6 +321,7 @@ async function pullOne(id) {
     await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
     log.info('shopify pull done', { store: id, stockChanges: stock, orderLines: orders, seconds: Math.round((Date.now() - started) / 1000) });
     alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
+    weekly.catchUp();   // SW-043: the day's snapshot once the pull reaches past store-midnight (in the background; never throws)
     return { stock, orders };
   } catch (e) {
     runs.finish(store.load(), run, e.message);
@@ -416,9 +421,10 @@ const digestCtx = {
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
   },
-  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(scope.id()); },
+  async pull() { await syncSheet().catch((e) => console.warn('sheet sync:', e.message)); if (keys.status().source) await syncShopify(scope.id()); await weekly.catchUp(); },
   storeName: () => storeName(),
   storeId: () => scope.id(),
+  review: () => { try { return weekly.digestLine(weekly.current()); } catch { return null; } },   // SW-043: one line, this week vs last week
 };
 
 /* ---------- API ---------- */
@@ -512,10 +518,15 @@ async function storeApi(req, res, url, role, id) {
     fileName: (kind) => `${kind === 'map' ? 'supplier-map' : 'suppliers'}-${fileSlug(here.name)}${helpers.fileDate(Date.now(), TZ.zoneOf(d.settings))}.csv`,
   });
   if (sp) return send(res, sp.code, sp.body, sp.type, sp.headers);
+  /* sprint 3 B-review: weekly review (SW-043), targets on groups (SW-042), saved lists (SW-044); month-to-date groups on the saved settings */
+  const now = Date.now(), from = period.monthStart(now, TZ.zoneOf(d.settings));
+  const monthGroups = (lens) => groups.build(engine.report(d.stock, d.orders, d.settings, { from, now, catalog: d.catalog, onOrder: onorder.all() }).products, catalog.current(d.source, d.catalog), lens);
+  for (const h of [weekly, targets, lists]) { const x = await h.handle(req, url, readBody, { role, by: whoOf(req, role), monthGroups, from, now, offMin: TZ.zoneOf(d.settings) }); if (x) return send(res, x.code, x.body); }
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
     r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts());   // SW-027
+    if (!readOnly()) setImmediate(() => weekly.catchUp());   // SW-043: the first report after store-midnight takes the day's snapshot (a read-only copy never writes, SW-055)
     return send(res, 200, { ok: true, ...r, store: here, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness(), app: version.current() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
@@ -585,7 +596,7 @@ async function storeApi(req, res, url, role, id) {
     const g = loadDemo();
     return send(res, 200, { ok: true, stock: g.stock.length, orders: g.orders.length });
   }
-  if (p === '/api/clear' && req.method === 'POST') { if (pulls.has(id)) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); return send(res, 200, { ok: true }); }
+  if (p === '/api/clear' && req.method === 'POST') { if (pulls.has(id)) return fail(res, 409, PULL_RUNNING); store.replaceAll([], [], 'empty'); onorder.clear(); decide.clear(); weekly.clear(); return send(res, 200, { ok: true }); }
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));

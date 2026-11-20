@@ -1,0 +1,67 @@
+'use strict';
+/*
+ * Sprint 3 B-review in the browser: the weekly review panel on the Overview (SW-043), targets on group rows (SW-042),
+ * paste-a-list + saved lists on Products (SW-044). 1440 and 390, no sideways scroll. Needs Playwright
+ * (PLAYWRIGHT_PATH; PLAYWRIGHT_CHANNEL=chrome); skipped without it.
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+let pw = null;
+try { pw = require(process.env.PLAYWRIGHT_PATH || 'playwright'); } catch { /* not installed: skip */ }
+const opts = { skip: pw ? false : 'Playwright not found (set PLAYWRIGHT_PATH)' };
+
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-ui-review-'));
+for (const k of ['ADMIN_PASSWORD', 'VIEW_PASSWORD', 'SHOPIFY_STORE', 'STORES', 'PERFORMITY_POC_API_URL', 'PERFORMITY_POC_API_KEY']) delete process.env[k];
+const { server } = require('../server');
+
+let base, browser;
+test.before(async () => {
+  if (!pw) return;
+  await new Promise((ok) => server.listen(0, ok));
+  base = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await fetch(`${base}/api/demo`, { method: 'POST' })).status, 200);
+  browser = await pw.chromium.launch(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {});
+});
+test.after(async () => { if (browser) await browser.close(); if (server.listening) await new Promise((ok) => server.close(ok)); });
+
+async function open(width, height, url) {
+  const ctx = await browser.newContext({ viewport: { width, height } });
+  const pg = await ctx.newPage();
+  pg.errors = []; pg.on('pageerror', (e) => pg.errors.push(e.message));
+  await pg.goto(base + url); await pg.waitForSelector('#view .headline h1');
+  return pg;
+}
+const sideways = (pg) => pg.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+
+for (const [w, h] of [[1440, 900], [390, 844]]) {
+  test(`${w}: weekly panel on Overview; a target on a category row; a pasted list filters Products, saved for the team`, opts, async () => {
+    const pg = await open(w, h, '/#overview');
+    await pg.waitForSelector('#weekly:not([hidden]) .wk-c');
+    assert.equal(await pg.$$eval('#weekly .wk-c', (c) => c.length) >= 5, true, 'headline numbers with deltas');
+    assert.ok(await pg.$$eval('#weekly .wk-row', (r) => r.length) <= 5, 'top 5 movers at most');
+    assert.equal(await sideways(pg), 0);
+
+    const g = (await (await fetch(`${base}/api/groups?lens=type&days=month`)).json()).groups[0];
+    assert.equal((await fetch(`${base}/api/targets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lens: 'type', key: g.key, amount: 1e7 }) })).status, 200);
+    await pg.goto(`${base}/#products`); await pg.waitForSelector('#f-view');
+    await pg.selectOption('#f-view', 'type');
+    await pg.waitForSelector(w > 760 ? '.desk .tg-dot.red' : '.mcard .tg-dot.red');
+    assert.ok(await pg.$(w > 760 ? '.desk [data-tg-edit]' : '.mcard [data-tg-edit]'), 'admin can set / edit');
+    assert.equal(await sideways(pg), 0);
+
+    await pg.selectOption('#f-view', '');
+    const skus = (await (await fetch(`${base}/api/report`)).json()).products.slice(0, 3).map((p) => p.sku);
+    await pg.fill('#q-products', `${skus.join(', ')}, NOPE-123`);
+    await pg.waitForSelector('.lsbar');
+    assert.match(await pg.textContent('.lsbar'), /3 of 4 found[\s\S]*1 not found: NOPE-123/);
+    await pg.fill('#ls-name', `Test ${w}`);
+    await pg.click('#ls-save');
+    await pg.waitForFunction((n) => (document.querySelector('#ls-pick')?.textContent || '').includes(n), `Test ${w}`);
+    assert.equal(await sideways(pg), 0);
+    assert.deepEqual(pg.errors, []);
+  });
+}

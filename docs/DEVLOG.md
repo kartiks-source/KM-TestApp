@@ -39,6 +39,14 @@ stock-watch, branch `sprint3/A-money` (not merged, not deployed). SW-040 + SW-04
 - Tests: `suppliers.test.js` (rules, store, routes incl. view 403 + cross-site 403), `budget.test.js` (rule, worked example, cut, `?budget=` route), `ui-money.test.js` (1440 + 390: cut line, dimmed rows, CSV link, Clear = same rows, PO drafts, 44 px targets, Data → Suppliers, no sideways scroll).
 - Checked: `npm test` green; ui-money 4/4 with Chrome. Open: `test/ui-money.test.js` to add to root `test:ui` (left out to avoid a package.json merge clash); budget not shared across the team.
 
+## 2026-11-20 · Sprint 3 · B-review
+stock-watch, branch `sprint3/B-review` (not merged, not deployed). SW-043, SW-042, SW-044.
+- SW-043 weekly review: daily per-store snapshot of the headline numbers (`snapshots.json`, `src/weekly.js`), taken on the first report / pull after store-midnight, last 14 days filled in, 400 kept, demo and real never mixed; `GET /api/review`; Overview panel "This week vs last week" (7 numbers with change, top 5 movers by change in ₹ lost); one Founder / Everyone digest line. LOGIC §5b.
+- SW-042 targets on groups: monthly ₹ target per group (`targets.json`, admin-only `POST /api/targets`); "Target this month" column / card line: sold so far of target, run-rate forecast (→), "₹X is stock-outs", green / amber (within 10%) / red. LOGIC §9c.
+- SW-044 paste-a-list: Products search takes a pasted list of SKUs / names / variant IDs; "N of M found", not-found entries named; saved lists per store (`lists.json`, admin-only `POST /api/lists`), "Saved lists" menu beside the search. LOGIC §9d.
+- Tests: weekly, targets, lists, review-api (routes: viewer 403, cross-site 403), ui-review (1440 + 390, 0 px sideways). `ui-review.test.js` is not yet in the root `test:ui` list (runs with `npm test` when PLAYWRIGHT_PATH is set).
+- Not done: critics not run (speed mode).
+
 ## 2026-11-20 · final critic round 2 fixes
 stock-watch 1.0.0-rc.1, on `main` (0e1b893 L1, 15e2897 X1, UI + mobile commit, this entry; not pushed, not deployed).
 - L1 (P1): `planWithOrder` keeps the row's own status unless the PO covers the need (Ordered): 5/day, 10 in stock, 50 on order stayed Critical (was This week, off Order today). LOGIC §6b; onorder.test (fails on the old code).
