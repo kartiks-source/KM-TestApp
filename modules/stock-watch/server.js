@@ -39,6 +39,7 @@ const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
+const csvmap = require('./src/csvmap');     // import preview + column mapping, Shopify exports (SW-045)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -507,9 +508,19 @@ async function storeApi(req, res, url, role, id) {
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
     // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself, with its
     // Mark ordered and decisions (store.endDemo, SW-007), as it does for Flow, Sheet and Shopify.
-    const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
+    // With ?map= (the page's preview) or a Shopify export: read through the column mapping, then remember it (SW-045).
+    const text = await readBody(req), opts = csvImportOpts(d, text), mapped = url.searchParams.has('map') || opts.shopifyKind === kind;
+    const parsed = mapped ? csvmap.parse(text, kind, url.searchParams.get('map'), opts)
+      : rows.fromCsv(text, kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
-    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
+    if (mapped && url.searchParams.has('map')) csvmap.remember(parsed.head, parsed.kind, parsed.map);
+    return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips, ...(mapped ? { format: parsed.format, ignored: parsed.ignored } : {}) });
+  }
+  if (p === '/api/import/preview' && req.method === 'POST') {   // SW-045: what an import would read; writes nothing
+    if (keys.status().source) return fail(res, 409, ONE_SOURCE);
+    const text = await readBody(req, 4e6), k = url.searchParams.get('kind');
+    const pv = csvmap.preview(text, k === 'order' || k === 'stock' ? k : '', url.searchParams.get('map'), { ...csvImportOpts(d, text), truncated: url.searchParams.get('head') === '1' });
+    return send(res, 200, { ok: true, ...pv, tzOffsetMin: d.settings.tzOffsetMin });
   }
   if (p === '/api/sync' && req.method === 'POST') {
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
@@ -529,6 +540,15 @@ async function storeApi(req, res, url, role, id) {
     return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, r.settings.tzOffsetMin)}.csv"` });
   }
   return fail(res, 404, 'Not found');
+}
+
+/** Options for a mapped CSV import (SW-045): store time zone, the 120 days kept, SKU → variant ID already in this store,
+ *  the mapping remembered for this file's headers; shopifyKind = 'stock' / 'order' for a Shopify export (read mapped without ?map=). */
+function csvImportOpts(d, text) {
+  let head = null; try { head = csvmap.headOf(text); } catch { /* empty: parse() says so */ }
+  const f = head && csvmap.formatOf(head);
+  return { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS, idForSku: csvmap.idsBySku(d.stock, d.catalog), remembered: head ? csvmap.remembered(head) : null,
+    shopifyKind: f && /^shopify-/.test(f.format || '') ? f.kind : null };
 }
 
 /** A store name for a file name: "sammsara-demo-" (letters, digits, dashes; '' when nothing is left). */

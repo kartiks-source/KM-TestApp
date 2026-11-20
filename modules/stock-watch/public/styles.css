@@ -677,3 +677,18 @@ table.fixed td:first-child { max-width: none; }
   .panel-head a { min-width: 44px; text-align: center; display: inline-block; }
   .wrap > .toolbar .colpick > summary.btn { min-width: 44px; justify-content: center; }
 }
+
+/* sprint3 E-data: CSV import preview + column mapping (SW-045, public/import-ui.js) */
+.imp-pv { display: grid; gap: 8px; margin: 10px 0; }
+.imp-pv p { margin: 0; }
+.imp-rules { margin: 0; padding-left: 18px; }
+.imp-map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; }
+.imp-map .field select { min-height: 44px; }
+.imp-map .imp-miss select { border-color: var(--lost); }
+.imp-sample { max-width: 100%; }
+.imp-sample th { position: static; cursor: default; }
+.imp-sample td { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.imp-sample tbody tr { cursor: default; }
+.imp-sample tr.imp-skip td { color: var(--faint); }
+@media (max-width: 1100px) { .imp-map { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .imp-map { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
