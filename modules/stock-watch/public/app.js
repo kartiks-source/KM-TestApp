@@ -49,8 +49,10 @@
   const pill = (s) => `<span class="st ${STATUS_CLS[s] || 'ok'}" title="${esc(s)}">${esc(SHORT[s] || s)}</span>`;
 
   /* ---------- server ---------- */
+  /* every call names the store this page shows (public/stores.js, ADR-0015): two tabs on two stores never cross */
+  const storeUrl = (path) => (window.SW_STORES ? SW_STORES.url(path) : path);
   async function api(path, opt = {}) {
-    const r = await fetch(path, { ...opt, headers: { ...(opt.body && typeof opt.body === 'string' && opt.json !== false ? { 'content-type': 'application/json' } : {}), ...(opt.headers || {}) } });
+    const r = await fetch(storeUrl(path), { ...opt, headers: { ...(opt.body && typeof opt.body === 'string' && opt.json !== false ? { 'content-type': 'application/json' } : {}), ...(opt.headers || {}) } });
     if (r.status === 401) { location.href = '/login'; throw new Error('Signed out'); }
     const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
     if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
@@ -67,6 +69,7 @@
     header(); render();
   }
   async function load() {
+    if (window.SW_STORES) await SW_STORES.ready;
     const [rep, set] = await Promise.all([api(`/api/report?days=${state.days}${whatQs()}`), api('/api/settings')]);
     state.report = rep; state.settings = set.settings; state.source = { kind: rep.source, lastSync: rep.lastSync, err: rep.lastSyncError }; state.shopify = set.shopify || {};
     state.runs = set.runs || [];   // SW-030
@@ -76,34 +79,29 @@
     freshness();
   }
 
-  /* ---------- stale-data banner (SW-019): "Data is X h old" when the last Shopify pull is over 45 minutes old ----------
-     Reads the unauthed GET /status when the server has it, else the Shopify lastSync that came with the report. */
+  /* ---------- stale-data banner (SW-019): "Data is X h old" when this store's last Shopify pull is over 45 minutes old ----------
+     From the report's freshness (this store only; /status covers every store, ADR-0015), aged on the page every minute. */
   const STALE_MIN = 45;
   const asTime = (v) => (typeof v === 'number' && v > 1e12 ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
   const ageText = (min) => (min < 90 ? `${Math.round(min)} min` : min < 48 * 60 ? `${n1(min / 60)} h` : `${n1(min / 1440)} days`);
-  async function freshness() {
-    let st = null;
-    try {
-      const r = await fetch('/status', { cache: 'no-store', credentials: 'same-origin' });
-      if ((r.headers.get('content-type') || '').includes('json')) st = await r.json();
-    } catch { /* no /status: use the report */ }
-    const sh = state.shopify || {};
-    const fromStatus = st && (asTime(st.lastSync) ?? asTime(st.shopify?.lastSync) ?? asTime(st.lastPull) ?? (Number.isFinite(st.ageMin) ? Date.now() - st.ageMin * 60e3 : null));
-    const last = fromStatus ?? asTime(sh.lastSync);
-    const connected = !!sh.source || st?.stale === true;
+  function freshness() {
+    const f = (state.report && state.report.freshness) || {}, sh = state.shopify || {};
+    const last = asTime(f.lastPull) ?? asTime(sh.lastSync);
+    const connected = !!f.shopify || !!sh.source;
     const age = last ? (Date.now() - last) / 60e3 : null;
-    const stale = connected && (st?.stale === true || (age != null && age > STALE_MIN));
+    const stale = connected && (f.stale === true || (age != null && age > STALE_MIN));
     const el = $('#stale');
     if (!stale) { el.hidden = true; return; }
-    const err = sh.lastError || st?.lastError || st?.shopify?.lastError;
+    const err = sh.lastError;
     el.innerHTML = `<b>${age != null ? `Data is ${ageText(age)} old.` : 'Data may be out of date.'}</b> <span>${last ? `Last Shopify pull ${dt(last)}` : 'No Shopify pull yet'}${err ? ` · ${esc(err)}` : ''}${sh.running ? ' · pulling now…' : ''}. Numbers may not show the latest stock and orders.</span> <a href="#data">Data &amp; settings</a>`;
     el.hidden = false;
   }
   setInterval(() => { if (state.report) freshness(); }, 60e3);
 
   function header() {
-    const r = state.report, s = state.settings;
-    $('#store-name').textContent = s.storeName || 'Store';
+    const r = state.report, s = state.settings, name = (r.store && r.store.name) || s.storeName || 'Store';
+    if (window.SW_STORES && SW_STORES.list().length) SW_STORES.rename(name);   // stores.js draws the pill (dot + name)
+    else { $('#store-name').textContent = name; document.title = `${name} · Stock-out Watch`; }
     $('#n-reorder').textContent = r.totals.orderToday || '';
     $('#n-stockouts').textContent = r.totals.stillOut || '';
     $('#n-stockouts').title = `${r.totals.stillOut} products still out of stock`;
@@ -490,7 +488,7 @@
       <section class="headline">${head}</section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', `/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`, pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', storeUrl(`/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`), pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
       ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.onOrder.remaining)} pcs</b><small>on order</small></div></header>
@@ -719,7 +717,7 @@
       : sh.source ? (sh.lastError ? `Shopify: ${esc(sh.lastError)}` : sh.lastSync ? `Connected to Shopify · last read ${dt(sh.lastSync)}` : 'Connected to Shopify · first read pending')
         : src.kind === 'live' ? 'Live data' : 'No data yet';
     return `
-      <section class="headline"><h1>Data &amp; settings</h1></section>
+      <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. Passwords are for every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
         <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
 
@@ -732,8 +730,8 @@
         <div class="toolbar"><button class="btn" id="sheet-save">Save and sync now</button></div></details>
       <details class="panel fold"><summary><b>Shopify Flow</b> <span class="muted">sends each change straight here</span></summary>
         <p class="muted">In Shopify Flow use the action <b>Send HTTP request</b> (POST) with the header <span class="mono">X-Ingest-Key</span> set to the key below; body = the same comma-separated line as the sheet, or JSON. One workflow per URL. Keep the key out of the URL.</p>
-        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base)}/ingest/stock</div></div>
-        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base)}/ingest/order</div></div>
+        <div class="field"><label>Stock changes (trigger: Product variant inventory quantity changed)</label><div class="code" id="u-stock">${esc(base + storeUrl('/ingest/stock'))}</div></div>
+        <div class="field"><label>Order lines (trigger: Order created → For each line item)</label><div class="code" id="u-order">${esc(base + storeUrl('/ingest/order'))}</div></div>
         <div class="field"><label>Header <span class="mono">X-Ingest-Key</span></label><div class="code" id="u-key">${maskKey(s.ingestKey)}</div><small>${s.ingestKeyAt ? `Last changed ${dt(s.ingestKeyAt)}` : 'Not changed since setup'}</small></div>
         <div class="toolbar"><button class="btn ghost" data-copy="u-stock">Copy stock URL</button><button class="btn ghost" data-copy="u-order">Copy order URL</button><button class="btn ghost" id="show-key">Show key</button><button class="btn ghost" id="copy-key">Copy key</button><button class="btn ghost" id="new-key">New key</button></div></details>
       <details class="panel fold"><summary><b>Upload a CSV</b> <span class="muted">one-off history</span></summary>
@@ -746,7 +744,7 @@
       <h2 class="sect">Settings</h2>
       <section class="panel">
         <div class="form">
-          ${field('storeName', 'Store name', s.storeName, 'Shown at the top', 'text')}
+          ${field('storeName', 'Store name', s.storeName || (state.report.store && state.report.store.name) || '', 'Shown in the store picker, the tab title and digests', 'text')}
           ${window.SW_ROLES ? SW_ROLES.field() : ''}
           <div class="field"><label for="f-tzOffsetMin">Time zone</label><select id="f-tzOffsetMin" data-setting="tzOffsetMin">${tzOpts.map(([v, l]) => `<option value="${v}" ${v === +s.tzOffsetMin ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small>Days and the sales-by-hour pattern follow this</small></div>
         </div>
@@ -762,6 +760,7 @@
       <form class="phone-only" method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`;
   }
 
+  const manyStores = () => !!(window.SW_STORES && SW_STORES.list().length > 1);
   const maskKey = (k) => `${'•'.repeat(12)}${esc(String(k || '').slice(-4))}`;
   const SKIP_WHY = { badTime: 'bad or future time', badNumber: 'bad number', noId: 'no variant ID', tooOld: 'older than 120 days' };
   const field = (k, label, v, hint, type = 'number') => `<div class="field"><label for="f-${k}">${esc(label)}</label><input id="f-${k}" data-setting="${k}" type="${type}" step="any" value="${esc(v)}"><small>${esc(hint)}</small></div>`;

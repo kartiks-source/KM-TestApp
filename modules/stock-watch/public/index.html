@@ -40,8 +40,8 @@
       <a class="brand" href="#overview" aria-label="Stock-out Watch home">
         <img src="/favicon.svg" alt="" width="26" height="26"><b>Stock-out Watch</b>
       </a>
-      <details class="colpick rolepick"><summary class="store-pill" title="Store · choose what you see"><span id="store-name">Store</span><span id="role-name" class="role-name"></span>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><div class="menu" id="role-menu"></div></details>
+      <details class="colpick rolepick"><summary class="store-pill" title="Store and view · choose what you see" aria-label="Store and view menu"><span id="store-name" class="store-name">Store</span><span id="role-name" class="role-name"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><div class="menu"><div id="store-menu"></div><div id="role-menu"></div></div></details>
       <div class="top-gap"></div>
       <span class="rlabel">Losses for</span><div class="range" role="group" aria-label="Show losses for">
         <button data-days="7">7 days</button><button data-days="14">14 days</button><button data-days="30" class="on">30 days</button><button data-days="60">60 days</button><button data-days="month" title="From the 1st of this month (store time)"><span class="wide-only">This </span>month</button>
@@ -51,6 +51,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14M10 16l-4-4 4-4M6 12h10"/></svg></button></form>
     </header>
 
+    <div class="storebar" id="storebar" hidden></div>
     <div class="stale" id="stale" role="status" hidden></div>
     <main id="view" class="wrap" aria-live="polite"><p class="muted pad">Loading…</p></main>
     <footer class="source" id="source"></footer>
@@ -63,6 +64,7 @@
     </div>
   </aside>
   <div class="toast" id="toast" hidden></div>
+  <script src="/stores.js"></script>
   <script src="/roles.js"></script>
   <script src="/digest-ui.js"></script>
   <script src="/app.js"></script>

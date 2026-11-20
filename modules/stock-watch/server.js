@@ -318,7 +318,6 @@ function pullAll() {
 /* ---------- freshness (SW-019): is the Shopify data recent? ---------- */
 const STALE_MIN = 45;          // three missed 15-minute pulls
 const BOOT_AT = Date.now();
-/** Age of the last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
 /** The current store's: age of its last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
 function freshness(now = Date.now()) {
   if (!keys.status().source) return { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: STALE_MIN };
