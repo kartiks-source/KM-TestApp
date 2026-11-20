@@ -6,6 +6,7 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 
 - **Auth** column: **open** (no login), **key** (ingest key header), **view** (any signed-in role: admin or view-only), **admin** (admin only).
 - Sign in with the `sw_session` cookie from `POST /login`, or HTTP Basic auth with any user name and the password. With no `ADMIN_PASSWORD` set (local only), every request is admin.
+- **People** (SW-062): a person's own password (Data → People) signs in the same ways, as admin or view, for their stores only: `?store=` outside their list → **403** `This store isn’t open to your sign-in` (also for unknown ids); `GET /api/stores` lists only theirs. `ADMIN_PASSWORD` (the owner) and `VIEW_PASSWORD` open every store.
 - A view-only session gets **403** `View-only sign-in: ask an admin to make this change` on every `POST/PUT/PATCH/DELETE /api/*`, before the route runs.
 - JSON answers are `{ "ok": true, … }` or `{ "ok": false, "error": "<plain sentence>" }`, with `cache-control: no-store`.
 - Writes marked ⚠ change or wipe stored data (also listed in `SECURITY.md` §Endpoints that change or wipe data).
@@ -61,7 +62,7 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 | `GET /api/product/:id` | report query values; `:id` = variant ID, URL-encoded | `{ ok, id, product, timeline[{t, stock}], dailyUnits[{day, units}], stockouts[] }`; `product` is null for an ID with no rows (still 200). Bad `%` encoding → 400 `Bad product ID in the address` |
 | `GET /api/groups` | none | `{ ok, lenses[], catalog }`: which lenses this catalog can offer |
 | `GET /api/groups?lens=` | `lens` = `product`, `type`, `collection`, `tag`; `all=1` shows catch-all collections; report query values | `{ ok, lens, overlap, groups[{ key, label, n, needOrder, sold, lost, lostProfit, orderValue, excessValue, ids[], trendPct, trendCall }], total, store, hidden[], storeTrendPct, catalog }`. `total` is null for `collection` / `tag` (a product can be in many). Unknown lens → 400 `Unknown group` |
-| `GET /api/settings` | none | `{ ok, store: { id, name }, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify, ops: { warnings[{ code, text }], readOnly } }` (`readOnly` = why this copy doesn't write, else null; SW-055). View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion }` (never a secret) |
+| `GET /api/settings` | none | `{ ok, store: { id, name }, settings, role, changes[], lastPlanChange, runs[], source, lastSync, lastSyncError, shopify, ops: { warnings[{ code, text }], readOnly } }` (`readOnly` = why this copy doesn't write, else null; SW-055). View sessions: no `ingestKey` in `settings`, `changes` empty. `shopify` = `{ source, store, secretName, kind, ready, missing[], lastSync, lastError, lastTry, running, progress, backfilled, scopes, apiVersion, writeScopes[] }` (never a secret; `writeScopes` = the `write_*` scopes the last pull's token had, SW-051) |
 | `GET /api/onorder` | none | `{ ok, onOrder: { variantId: { qty, eta, at, by } } }` |
 | `GET /api/decide` | none | `{ ok, decisions: { variantId: { d, base, at } } }` |
 | `GET /api/export/reorder.csv` | `filter` = `all` (default), `today`, `week`, `ordered`; `q` = search on name/SKU; report query values | CSV download `reorder-<store-name>-YYYY-MM-DD.csv` (UTF-8 BOM; the store name in lower case, dashes for anything else). Columns in `FORMATS.md` §PO CSV |
@@ -75,10 +76,22 @@ Store: `?store=<id>` (each store has its own key; without it, the first store). 
 | ⚠ `POST /api/onorder` | JSON ≤ 256 KB `{ items: [{ id, qty, eta }], by? }`; `qty` 1–1,000,000 whole; `eta` `YYYY-MM-DD` (end of that day, store time) or ms, within −1…+365 days; `qty: 0` or `clear: true` removes; ≤ 500 items | `{ ok, saved, removed }` | 400 `Nothing to mark`, bad qty/date/id, not JSON; 405 other methods |
 | ⚠ `POST /api/decide` | JSON ≤ 16 KB `{ id, decision }`; `decision` = `keep` \| `drop` \| `clear`, or null/'' to remove | `{ ok }` or `{ ok, removed }` | 404 `No such product` (not in the report); 400 bad decision, not JSON, over 5,000 decisions; 405 other methods |
 | ⚠ `POST /api/import?kind=stock\|order` | CSV text (≤ 25 MB) with a header row; `FORMATS.md` §CSV | `{ ok, read, added, skipped, skips: { badTime, badNumber, noId, tooOld } }`. On a demo store the demo goes first, with its Mark ordered and decisions (always; there is no option, SW-007) | 400 missing columns (named); 409 Shopify connected or a pull running; 413 |
-| `POST /api/sync` | none | `{ ok, stock, orders }` new rows from the Sheet links, or `{ ok, skipped: true }` with no links | 409 Shopify connected; 502 the Sheet fetch or parse failed (message says which tab) |
+| `POST /api/sync` | none | `{ ok, stock, orders }` new rows from the Sheet links, or `{ ok, skipped: true }` with no links | 409 Shopify connected; 502 the Sheet fetch or parse failed (message says which tab: off-Google redirect, > 3 redirects, > 20 MB, no answer in 20 s, HTTP error, bad CSV) |
 | `POST /api/shopify/sync` | none | `{ ok, stock, orders }` when the pull ends within 25 s, else 202 `{ ok, running: true }` (it carries on; poll `/api/settings`) | 400 Shopify isn't connected; 502 the pull failed |
 | ⚠ `POST /api/demo` | none | `{ ok, stock, orders }`: demo data loaded, decisions forgotten (backup first) | 409 Shopify connected; 409 the store holds real data (Clear first) |
 | ⚠ `POST /api/clear` | none | `{ ok }`: every row, Mark ordered record and decision gone (backup first, with `sideFiles`) | 409 a pull is running |
+
+## People (owner only, SW-062)
+
+Only the owner (`ADMIN_PASSWORD`, not a person) may call these; everyone else gets 403 `Only the owner (main admin password) can manage people`. Not store-scoped. Writes need `ADMIN_PASSWORD` set (else 409). Bodies: JSON ≤ 8 KB. A person: `{ id, name, role: 'admin'|'view', stores[], createdAt, updatedAt, lastSignInAt }` (never the hash).
+
+| Method · path | Auth | Params / body | Answer | Errors |
+|---|---|---|---|---|
+| `GET /api/people` | owner | none | `{ ok, people[], stores[{ id, name }], signIn }` | 403 |
+| ⚠ `POST /api/people` | owner | `{ name (≤ 60), role, stores[] (≥ 1, listed ids) }` | 201 `{ ok, person, password }`: the only time the password is sent | 400 no name / bad role / no or unknown store / not JSON; 400 over 200 people; 409 no `ADMIN_PASSWORD` or `access.json` unreadable |
+| ⚠ `PUT /api/people/<id>` | owner | any of `name`, `role`, `stores` | `{ ok, person }`; applies on their next request | 400 as above; 404 no such person |
+| ⚠ `POST /api/people/<id>/reset` | owner | none | `{ ok, person, password }`; the old password and its sessions stop working | 404 |
+| ⚠ `DELETE /api/people/<id>` | owner | none | `{ ok }`; their sessions end | 404 |
 
 ## Morning digest
 

@@ -52,10 +52,14 @@ Google Sheet CSV / upload ───┘
 | `src/sidefile.js` | `onorder.json` / `decisions.json` kept like `store.json`: a bad file is copied to `.corrupt-<time>` and never overwritten; `.bak` used instead; none → refuse to start (critic r2 X1) |
 | `src/onorder.js` | "Mark ordered" records (`DATA_DIR/onorder.json`, one per variant: qty, eta, at, by) + `GET/POST /api/onorder`; the engine counts them (LOGIC.md §6b) |
 | `src/access.js` | roles: admin / view password, role in the signed cookie, the 403 gate for view sessions (SW-029) |
+| `src/people.js` | per-store access (SW-062, ADR-0016): people the owner makes (name, admin/view, stores) in `DATA_DIR/access.json` (scrypt hashes), password `<id>-<random>` shown once, person session cookie `exp.p.<id>.<gen>.sig`, `pick()` keeps a person to their stores (403), `/api/people` routes (owner only). Tests: `test/people.test.js`, browser `test/ui-people.test.js` |
 | `src/audit.js` | settings change log `{at, by, key, old, new}` (SW-029) |
 | `src/runs.js` | sync progress ("Syncing · 2,340 orders") and the last 20 runs: start, time taken, rows, error, notes (SW-030) |
 | `src/keys.js` | where the Shopify key comes from: Performity POC API, Azure Key Vault or Railway variables; `access(storeId)`, caches per store; Performity calls paced (≥ 2.1 s, token calls per brand ≥ 6.1 s) |
-| `src/shopify.js` | read-only guard, stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget |
+| `src/shopify.js` | stock and order pulls (stock pull also returns the catalog), paced by Shopify's cost budget; every call through the read-only guard |
+| `src/gql-guard.js` | the read-only guard (SW-051): a GraphQL tokeniser (comments, strings, block strings as whole tokens); every top-level definition must be `query`, the `{` shorthand, or a fragment beside one. Tests: `test/gql-guard.test.js` |
+| `src/token-scopes.js` | token permissions once per pull (SW-051): `currentAppInstallation.accessScopes`; own app (vault / variables) with any `write_*` → pull refused; Performity token → `shopify.writeScopes`, Data note, logged once per store |
+| `src/sheet-fetch.js` | Sheet sync fetch (SW-052): link must be https docs.google.com; ≤ 3 redirects by hand, only to https docs.google.com / *.googleusercontent.com; ≤ 20 MB; 20 s. Tests: `test/sheet-fetch.test.js` |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
@@ -64,6 +68,7 @@ Google Sheet CSV / upload ───┘
 | `public/stores.js` | the store picker (ADR-0015, LOGIC §18): `SW_STORES.url(path)` adds `?store=` to every page call; pill menu + phone store bar with status dots (the phone bar also shows the role and holds the role list, `#role-menu-m`, filled by `SW_ROLES.paint()`) (classes `s-ok` / `s-stale` / `s-error`: `.stale` is the banner), list re-read every minute, menu scrolls inside the window; choosing sets `?store=`, `localStorage` and the `sw_store` cookie, then reloads. Browser test `test/ui-stores.test.js` |
 | `public/roles.js` | role home views (SW-020): what each RACI role removes from the default; also read by the digest |
 | `public/tz.js`, `public/ops.js`, `public/trial-input.js` | store time helper (SW-049); Data notice for capacity / read-only (SW-055); number boxes that keep raw text, read on Enter / leave, hint when invalid (SW-057; browser test `test/ui-trial.test.js`) |
+| `public/people.js` | Data → People (owner only, SW-062): add / edit / new password / remove; the new password is shown once with Copy |
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
@@ -118,6 +123,7 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Sprint 2 merged on `main` (C-access, D-helpers, A-groups, B-roles + integration fixes, see docs/DEVLOG.md): one `reportOpts()` for report, groups, drawer, CSV and digest; roles cover Sprint 1/2 controls per RACI.
 - Multi-store (ADR-0015, branch `feature/multistore`, 0.10.0, merged to main in 3ba75af): registry, per-store folders, migration, `?store=` everywhere, sequential pulls, per-store alerts / digest / backups; store picker in the top bar (`public/stores.js`, phone store bar). Show everything by default (ADR-0006 amendment): no role, Reorder → All, optional columns on (step aside when they don't fit), every Overview panel. Critic round fixed (ISO-1 migration once per DATA_DIR, SEC-1 no Performity call unless ready, UI-1..UI-6 picker; DEVLOG 2026-11-20).
 - 1.0.0-rc.1 (finish sprints, last gaps, DEVLOG 2026-11-20): version + SHA on `/health`, `/status`, footer (SW-056); `schemaVersion: 1` (SW-047); group-row sparks (SW-021); demo → live clears Mark ordered + decisions on every path, dead import checkbox gone (SW-007); digest settings in the change log (SW-029); ui-helpers at 360x740 too. CI: job `test` (npm test, Node 20/22) + job `ui` (npm run test:ui, smoke, roles smoke, screenshots artifact).
+- Sprint 3 C-access (branch `sprint3/C-access`): SW-051 tokeniser read-only guard + write-scope check, SW-052 fenced Sheet fetch, SW-062 per-store people (Data → People, `access.json`, ADR-0016).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
 

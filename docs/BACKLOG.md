@@ -222,6 +222,25 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Accept: doc routing table at the top of AGENTS.md; DEVLOG rotation (older than the newest 15 → `docs/devlog/2026-11.md`, linked); `npm run test:agent` (dot reporter); `.ignore`; LOGIC index; `docs/reviews/` README.
 - Status: Done. `scripts/rotate-devlog.js` (`npm run devlog:rotate`, tested in `test/devlog.test.js`). After the Sprint 3 merge DEVLOG will hold more than 15 entries again: the integrator runs `npm run devlog:rotate` once.
 
+## Sprint 3 · C-access (security)
+
+**SW-051 · Read-only guard tokeniser + refuse tokens with write scopes** (S · security)
+- Accept: the regex guard becomes a tokeniser (comments, strings, block strings skipped; every operation keyword `query` or none); tests with tricky inputs. Each pull reads `currentAppInstallation { accessScopes { handle } }`; our own apps (vault / variables) with any `write_*` are refused in plain words; Performity's token is not refused (ADR-0014) but Data says "Token also allows writes; this app only reads" and the log says it once.
+- Source: SEC-7, security idea.
+- Status: Done (`src/gql-guard.js`, `src/token-scopes.js`; `test/gql-guard.test.js`, `test/token-scopes.test.js`).
+
+**SW-052 · Sheet sync: manual redirects, host allow-list, size cap** (S · security)
+- Accept: redirects followed by hand (max 3), only to https `docs.google.com` / `*.googleusercontent.com`; body capped at 20 MB; 20 s timeout; tests.
+- Source: SEC-9.
+- Status: Done (`src/sheet-fetch.js`; `test/sheet-fetch.test.js`).
+
+**SW-062 · Per-store access** (M · security)
+- Accept: owner (`ADMIN_PASSWORD`) makes people in Data → People: name, admin or viewer, one or more stores, generated password (16+ chars) shown once or reset; scrypt hashes in `DATA_DIR/access.json`; a person's session carries their id; every route enforces their stores (`?store=` outside → 403, `/api/stores` filtered, picker shows only theirs, digest / exports scoped); remove ends their sessions; change log names them. ADR-0016. Owner and `VIEW_PASSWORD` as before.
+- Source: multi-store spec 20 Nov.
+- Status: Done (`src/people.js`, `public/people.js`; `test/people.test.js`, `test/ui-people.test.js`). Open: no self-service reset or email; `access.json` is not in the per-store backups (volume backups cover it; `.bak` keeps the previous copy).
+
+---
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -238,10 +257,7 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
 | SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
-| SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
-| SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |
 | SW-061 | Ads link: live spend on out-of-stock SKUs (needs Performity data) | M | product | product idea |
-| SW-062 | Per-store access: a brand's people see only their store (today every sign-in opens every store, ADR-0015) | M | security | multi-store spec 20 Nov |

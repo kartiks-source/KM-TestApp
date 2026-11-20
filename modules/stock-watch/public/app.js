@@ -753,9 +753,9 @@
       : sh.source ? (sh.lastError ? `Shopify: ${esc(sh.lastError)}` : sh.lastSync ? `Connected to Shopify · last read ${dt(sh.lastSync)}` : 'Connected to Shopify · first read pending')
         : src.kind === 'live' ? 'Live data' : 'No data yet';
     return `
-      <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. Passwords are for every store.</p>' : ''}</section>
+      <section class="headline"><h1>Data &amp; settings${manyStores() ? ` <span class="muted">· ${esc((state.report.store && state.report.store.name) || s.storeName)}</span>` : ''}</h1>${manyStores() ? '<p class="muted">Everything on this page is for this store only. The main passwords open every store.</p>' : ''}</section>
       <section class="panel"><div class="panel-head"><h2>${status}</h2>${sh.source ? '<button class="btn" id="shopify-sync">Pull from Shopify now</button>' : ''}</div>
-        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${runHistory()}</section>
+        <p class="muted">${inr.format(d.stockRows)} stock changes${d.firstStock ? ` (${dt(d.firstStock)} → ${dt(d.lastStock)})` : ''} · ${inr.format(d.orderRows)} order lines${d.firstOrder ? ` (${dt(d.firstOrder)} → ${dt(d.lastOrder)})` : ''}${d.excluded?.variants ? ` · Excluded: ${inr.format(d.excluded.variants)} archived/draft, ${inr.format(d.excluded.pcs)} pcs` : ''}</p>${sh.running ? `<p class="muted small" id="sync-progress">${esc(syncingText(sh.progress))}</p>` : ''}${(sh.writeScopes || []).length ? `<p class="muted small" id="write-note" title="${esc(sh.writeScopes.join(', '))}">Token also allows writes; this app only reads.</p>` : ''}${runHistory()}</section>
 
       ${window.SW_OPS ? SW_OPS.banner(state.ops) : ''}
       <h2 class="sect">Connect your data</h2>
@@ -791,6 +791,7 @@
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
       ${window.SW_DIGEST ? SW_DIGEST.panel() : ''}
+      ${window.SW_PEOPLE ? SW_PEOPLE.panel() : ''}
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
         <div class="toolbar">${sh.source || src.kind === 'live' ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
         <div id="clear-confirm"></div></details>

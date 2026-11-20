@@ -122,7 +122,7 @@ Nothing here is a secret or a number; clearing site data only resets choices.
 
 ## Files in `DATA_DIR` (`/data` on Railway)
 
-Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/stores/<id>/`, laid out exactly as one store's were before (`<id>` = Performity brand_id in lower case, a Key Vault store handle, or `sammsara-demo` / `second-demo`). Only `secret` and `stores.json` sit at the top, for every store. The table below is one store's folder, then the two shared files.
+Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/stores/<id>/`, laid out exactly as one store's were before (`<id>` = Performity brand_id in lower case, a Key Vault store handle, or `sammsara-demo` / `second-demo`). Only `secret`, `stores.json` and `access.json` (SW-062) sit at the top, for every store. The table below is one store's folder, then the two shared files.
 
 | File | Written by | Shape | In app backups? |
 |---|---|---|---|
@@ -138,6 +138,7 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | `.migrated-from-data-dir.json` | `src/migrate.js`, the home store only; its presence in any store folder means the move is done for good | `{ from: 'DATA_DIR', id, at, files: [{ path, sha256 }] }`: the old single-store files moved here, with their hashes (originals are deleted only while they still match) | no |
 | **top of `DATA_DIR`:** `secret` | `server.js` (mode 600) | 64 hex characters: the session cookie key, for every store | no (a new one signs everyone out) |
 | **top of `DATA_DIR`:** `instance.lock` | `src/lock.js` (SW-055) | `{ id, pid, host, startedAt, beatAt }`: the copy that writes; refreshed every 30 s, removed on a clean stop, taken over after 2 minutes without a refresh | no |
+| **top of `DATA_DIR`:** `access.json` (schema 1) | `src/people.js` (mode 600, SW-062) | `{ schemaVersion: 1, people: [{ id (8 chars a–z 2–9), name, role: 'admin'\|'view', stores: [store id], hash: 'scrypt$16384$8$1$<salt>$<key>' (base64url), gen (+1 per new password), createdAt, updatedAt, lastSignInAt }] }`. Written atomically (tmp + rename); the copy before each save is `access.json.bak`. A newer schemaVersion or a broken file: nobody from it signs in, it is never written over (fix or remove it). Changed only by the owner (Data → People) | no: it is for every store, so not in a store's backup; `access.json.bak` keeps the copy before the last change, and the Railway volume holds both |
 | **top of `DATA_DIR`:** `stores.json` | `src/stores.js` (Performity only) | `{ list: [{ id, name, shop }], at }`: the last good brand list, used while the API is down | no (re-read every 10 minutes) |
 | **top of `DATA_DIR`:** `stores/.migrating-<id>/` | `src/migrate.js` | a half-done copy left by a crash during the move; thrown away and redone on the next start | no |
 
@@ -164,7 +165,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
                 "spells": "?[ { from: 0, to: 0, status: 'DRAFT' } ]" } },
   "source": "empty|demo|live", "everLive": true,
   "lastSync": null, "lastSyncError": null,
-  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null },
+  "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null, "writeScopes": "?['write_products']" },
   "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)|server (env)", "key": "leadDays|…|digest.hour|digest.roles|digest.paused|digest.webhook", "old": 7, "new": 10 } ],
   "syncRuns":    [ { "kind": "shopify|sheet", "start": 0, "ms": 0, "stock": 0, "orders": 0, "lines": 0, "error": null, "notes": [] } ],
   "digest": { "hour": 9, "roles": ["ceo", "founder", "ops", "marketing", "finance"], "paused": false, "webhookSeen": "?everyone → host; ceo → host",
@@ -176,5 +177,6 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 - Rows older than 120 days are pruned, except per variant the newest stock row and the row that opened a stock-out still running (ADR-0010).
 - `catalog` is Shopify only, replaced whole on every stock pull; a variant that disappears stays as `DELETED` until it is 120 days gone. `spells` (optional) are the variant's past inactive spells, added when it turns active again (from = `inactiveSince`, to = the pull that saw it active); at most 20, each dropped 120 days after it ends (LOGIC §1). Older files without it load as before.
 - `settingsLog` keeps 200 entries, newest first; the ingest key shows as `(old key)` → `(new key)`. `syncRuns` keeps 20. `digest.log` keeps 50.
+- `shopify.writeScopes` (optional, SW-051): the `write_*` scopes the last pull's token had; only ever non-empty for Performity's token (our own apps with one are refused), shown on Data as "Token also allows writes; this app only reads". Older files without it load as `[]`.
 - Keys starting with `_` are in-memory indexes and never written.
 - A file is accepted as a store when it is a JSON object with `stock` and `orders` arrays (restore also needs `settings`).

@@ -23,11 +23,8 @@ const BACKFILL_DAYS = 60;            // read_orders sees 60 days; older needs re
 const OVERLAP = 30 * 60e3;           // re-read the last 30 minutes so late-indexed orders aren't missed
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** The read-only guard: only a query document, never a mutation or subscription. */
-function assertReadOnly(doc) {
-  const s = String(doc).replace(/#[^\n]*/g, '').replace(/"(?:\\.|[^"\\])*"/g, '""');
-  if (!/^\s*(query\b|\{)/.test(s) || /\b(mutation|subscription)\b/.test(s)) throw new Error('Blocked: this app only reads from Shopify');
-}
+/** The read-only guard: only query documents, never a mutation or subscription (a tokeniser, SW-051: src/gql-guard.js). */
+const { assertReadOnly } = require('./gql-guard');
 
 /** One GraphQL query. Retries throttling and a rejected (rotated) token once. */
 async function gql(doc, variables = {}, { fetchImpl = fetch, tries = 0 } = {}) {

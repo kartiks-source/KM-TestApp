@@ -31,4 +31,4 @@ Options considered:
 - Harder: every new per-store module must resolve its path through `scope.dir()`; code that runs outside a request (timers) must wrap itself in `scope.run`. Tests cover the throw when it doesn't.
 - Load: one process holds every opened store in memory. ADR-0003's move-to-Postgres trigger now counts the sum of all stores (watch `/status` `storeBytes`).
 - Pull cadence: N stores × a pull each, one at a time. With many brands a full round can exceed 15 minutes; the next round then starts when the last ends (no overlap). Revisit if a round regularly takes over 10 minutes.
-- Revisit when: a store needs its own password (per-store roles), or the registry needs stores that aren't Performity brands alongside ones that are.
+- Revisit when: a store needs its own password (per-store roles: done in ADR-0016), or the registry needs stores that aren't Performity brands alongside ones that are.

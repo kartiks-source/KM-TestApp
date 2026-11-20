@@ -686,3 +686,16 @@ table.fixed td:first-child { max-width: none; }
 /* SW-057: hint under a number that isn't valid (Plan settings, Advanced planning rules) */
 .trial-hint { display: block; color: var(--lost); font-size: 12px; margin-top: 2px; }
 input[aria-invalid="true"] { border-color: var(--lost); }
+/* sprint3 C-access: Data → People (SW-062) */
+.pp-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.pp-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.pp-who { min-width: 0; flex: 1 1 260px; overflow-wrap: anywhere; font-size: 13px; }
+.pp-who .muted { display: block; font-size: 12px; }
+.pp-role { font-size: 11px; font-weight: 600; color: var(--soft); background: var(--brand-wash2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; margin-left: 4px; }
+.pp-act { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-stores { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
+.pp-stores label { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; font-size: 13px; }
+.pp-pw { border: 1px solid var(--brand); border-radius: 8px; padding: 8px 12px; margin: 8px 0; background: var(--brand-wash2); }
+.pp-pw p { margin: 0 0 6px; }
+.pp-pw .code { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 760px) { .pp-stores label { min-height: 44px; } .pp-act .btn { flex: 1 1 auto; } }

@@ -46,6 +46,7 @@ test('runs: a Shopify pull shows live order counts, then lands in the history (a
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const orig = { pullStock: S.pullStock, pullOrders: S.pullOrders };
+  require('../src/token-scopes').check = async () => ({ handles: [], write: [] });   // SW-051 scope check: stubbed like the reads
   t.after(() => { Object.assign(S, orig); server.close(); process.env = saved; fs.rmSync(dir, { recursive: true, force: true }); });
 
   const now = Date.now();

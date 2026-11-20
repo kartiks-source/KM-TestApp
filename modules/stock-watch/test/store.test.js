@@ -219,6 +219,7 @@ test('server: Clear and import wait while a Shopify pull runs (409)', async () =
   const shopify = require('../src/shopify');
   const real = shopify.pullStock;
   let finish; shopify.pullStock = () => new Promise((r) => { finish = () => r({ rows: [], lastQty: {}, catalog: {} }); });
+  require('../src/token-scopes').check = async () => ({ handles: [], write: [] });   // SW-051 scope check: stubbed like the reads
   const { server, syncShopify } = require('../server');
   const run = syncShopify('test-store').catch(() => {});
   await new Promise((r) => server.listen(0, r));
