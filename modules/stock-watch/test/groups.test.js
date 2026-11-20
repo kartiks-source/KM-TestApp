@@ -91,3 +91,24 @@ test('lenses on offer follow the catalog; unknown lens refused', () => {
   assert.deepEqual(G.lensesFor(cat), ['product', 'type', 'collection', 'tag']);
   assert.throws(() => G.build([], {}, 'title'), /Unknown group/);
 });
+
+test('group trend colour follows the product rule: a fall is never green, a rise never red (critic r2 UI-3)', () => {
+  const wk = (b, r) => [0, 0, 0, 0, b / 2, b / 2, r / 2, r / 2].map((units) => ({ units, outDays: 0 }));
+  const rows = [
+    { id: 'a', name: 'a', type: 'Baskets', weeks: wk(100, 20), trendPct: -80 },
+    { id: 'b', name: 'b', type: 'Ottomans', weeks: wk(100, 105), trendPct: 5 },
+    { id: 'c', name: 'c', type: 'Lamps', weeks: wk(100, 150), trendPct: 50 },
+    ...[1, 2, 3, 4, 5].map((i) => ({ id: `z${i}`, name: `z${i}`, type: 'Rugs', weeks: wk(100, 60), trendPct: -40 })),
+  ];
+  const r = G.build(rows, {}, 'type');
+  assert.equal(r.storeTrendPct, -40, 'baseline = the typical product (median product trend), as on Products');
+  const by = Object.fromEntries(r.groups.map((g) => [g.label, g]));
+  assert.equal(by.Baskets.trendCall, 'down', '−80% vs typical −40%: falling and 40 points worse');
+  assert.equal(by.Ottomans.trendCall, 'up', '+5% vs typical −40%: rising and 45 points better (was grey, tooltip said "Falling…")');
+  assert.equal(by.Lamps.trendCall, 'up');
+  assert.equal(by.Rugs.trendCall, 'flat', 'in line with the typical product');
+  for (const g of r.groups) {
+    if (g.trendPct < 0) assert.notEqual(g.trendCall, 'up', g.label);
+    if (g.trendPct > 0) assert.notEqual(g.trendCall, 'down', g.label);
+  }
+});

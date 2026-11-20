@@ -400,7 +400,7 @@ Each group row adds up its variants' rows, with the same rules as the Products p
 | Sold, Sales lost, Profit lost | sums over the selected period; Profit lost blank when no variant has a unit cost |
 | Order ₹ | order value of the Need-order variants (the same "Order today ₹" as the Overview) |
 | Overstock ₹ | cash beyond need, overstocked variants only (section 7c) |
-| Trend | the variants' sales per in-stock day added up, last 14 days vs the 14 before (the halves of section 7d), from each variant's weekly blocks. A variant without data in both halves, or with under 3 in-stock days in either, is left out; under 6 units in all: no trend |
+| Trend | the variants' sales per in-stock day added up, last 14 days vs the 14 before (the halves of section 7d), from each variant's weekly blocks. A variant without data in both halves, or with under 3 in-stock days in either, is left out; under 6 units in all: no trend. **Colour** (critic r2 UI-3): the product rule of section 7d, against the same baseline (the typical product's trend, the median of product trends): green only when the group's own % rises and is 10+ points above it, red only when it falls and is 10+ points below; otherwise grey. The tooltip compares with the same typical product |
 
 **Totals.** Parent products and categories add up to the report totals (sales, lost, order ₹, overstock ₹, profit lost; tested). Collections and tags overlap: a product with two tags counts in both rows, so there is **no grand total**: the headline shows only the number of groups ("13 tags"), and a footnote gives the distinct store total (each variant once). "Products" counts variants everywhere (the Products page rows); the parent-product lens says "parent products" for its groups.
 

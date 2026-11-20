@@ -233,7 +233,8 @@
     const v = p.trendPct, cls = p.trendCall || 'flat', base = state.report.totals.storeTrendPct;
     const pct = (x) => `${x > 0 ? '+' : ''}${n1(x)}%`;
     const gap = base == null ? 0 : v - base;
-    const verdict = base == null ? (cls === 'up' ? 'Selling faster' : cls === 'down' ? 'Selling slower' : 'About flat')
+    const verdict = p.trendCall == null ? (v > 0 ? 'Rising' : v < 0 ? 'Falling' : 'Flat')   // no call (critic r2 UI-3): the sign only, never a comparison it didn't make
+      : base == null ? (cls === 'up' ? 'Selling faster' : cls === 'down' ? 'Selling slower' : 'About flat')
       : cls === 'up' ? 'Selling faster, and better than the typical product' : cls === 'down' ? 'Selling slower, and worse than the typical product'
         : gap >= 10 ? 'Falling, but less than the typical product' : gap <= -10 ? 'Rising, but less than the typical product' : 'In line with the typical product';
     return `<span class="tr ${cls}" title="${verdict}: ${pct(v)}${base != null ? ` vs typical ${pct(base)}` : ''}. Sales per in-stock day, last 14 days vs the 14 before; out-of-stock days are left out, so a stock-out doesn't look like falling demand.">${pct(v)}</span>`;
@@ -666,7 +667,7 @@
     ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
     { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
     { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
-    { k: 'trendPct', label: 'Trend', tip: 'The group’s sales per in-stock day, last 14 days vs the 14 before', f: trendOnly, val: (g) => g.trendPct ?? -999 },
+    { k: 'trendPct', label: 'Trend', tip: 'The group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendOnly, val: (g) => g.trendPct ?? -999 },
   ];
   function groupView() {
     const lens = state.lens, d = groupData();

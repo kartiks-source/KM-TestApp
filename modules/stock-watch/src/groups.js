@@ -15,6 +15,8 @@
  * the distinct store total (each variant once).
  */
 
+const { trendCall, storeTrend } = require('./engine');
+
 const LENSES = ['product', 'type', 'collection', 'tag'];
 const OVERLAP = new Set(['collection', 'tag']);
 const TODAY = ['Out now', 'Critical', 'Order now'];   // "Need order" = the app's one "Order today" count
@@ -117,7 +119,10 @@ function build(rows, catalog = {}, lens = 'product', { showAll = false } = {}) {
       add(G.get(key), r);
     }
   }
-  const groups = [...G.values()].map(finish)
+  /* trend colour: the products' own rule (LOGIC.md §7d) against the same baseline, the typical product (median
+     product trend), so a group's chip reads like a product's: a fall is never green, a rise never red (critic r2 UI-3) */
+  const base = storeTrend(rows);
+  const groups = [...G.values()].map(finish).map((g) => ({ ...g, trendCall: trendCall(g.trendPct, base) }))
     .sort((a, b) => (a.key === '') - (b.key === '') || b.lost - a.lost || b.sold - a.sold || String(a.label).localeCompare(String(b.label)));
   const overlap = OVERLAP.has(lens);
   let total = null;
@@ -128,7 +133,7 @@ function build(rows, catalog = {}, lens = 'product', { showAll = false } = {}) {
       if (g.lostProfit != null) total.lostProfit = (total.lostProfit || 0) + g.lostProfit;
     }
   }
-  return { lens, overlap, groups, total, store: sums(rows), hidden: hiddenList };
+  return { lens, overlap, groups, total, store: sums(rows), hidden: hiddenList, storeTrendPct: base };
 }
 
 /** Which lenses have something to show for this catalog (type is decided by the rows, client side). */
