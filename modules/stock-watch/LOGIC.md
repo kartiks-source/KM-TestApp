@@ -198,6 +198,8 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 
 ## 5. Totals on the Overview
 
+**`/api/v1/summary` (SW-050, §5c below)** gives other tools these same totals, unchanged.
+
 | Number | Rule |
 |---|---|
 | Sold | sum of quantity × price paid for every order line in the period. Totals are the sum of the product rows, so the Overview and the Products page always agree |
@@ -222,6 +224,24 @@ Say a product sold 28 units in 28 days but was out of stock for 7 of them, at an
 - When it can be wrong: *lost* yesterday uses today's in-stock rate, like every ₹ lost figure (section 4); stock-outs are timed to within 15 minutes with the Shopify pull alone, so one that started just before midnight can land on the wrong day.
 
 ---
+
+### 5c. Numbers for other tools: `/api/v1/summary` and `/api/v1/rows` (SW-050, `src/apiv1.js`)
+
+No new maths: the summary copies `totals` from the same report the page shows (same period and trial settings), and rows are the report's own `reorder[]`, `stockouts[]`, `products[]`.
+
+| Field | Is |
+|---|---|
+| `money.sold`, `money.lost`, `lostPct` | Sold, Lost to stock-outs, % of demand (above) |
+| `money.lostProfit` | profit lost (§7b) |
+| `money.stillOutPerDay` | ₹ a day the products out right now cost (§15a) |
+| `money.orderValueNow` / `orderValueAll` | order cost of the *Order today* rows / of every row to order (§6) |
+| `money.excessValue` | cash in excess stock (§7c) |
+| `counts.*` | `products` with data, `outNow` selling items out, `stillOut` open stock-outs, `orderToday` / `orderNow` / `orderWeek` rows by status (§6), `bestAtRisk` A items at risk (§7a), `overstocked` (§7c), `stockouts` episodes in the period |
+| `yesterday` | the Yesterday strip (§5a) |
+
+| Rule | Why | Considered instead |
+|---|---|---|
+| Rows are paged in variant-ID order (stock-outs: then start), the cursor = the last row's key, at most 500 a page | a ₹ order moves while someone pages, so rows would repeat or vanish between pages | offset pages in ₹ order |
 
 ## 6. Reorder status and quantity
 

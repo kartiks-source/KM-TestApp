@@ -43,7 +43,7 @@ Never put any of these in code, Markdown, logs, commit messages, chat or a Googl
 
 ## Endpoints that change or wipe data
 
-All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 on every one. Each acts on one store only: the one named by `?store=<id>` (else the `sw_store` cookie, else the first store). Each wipe of `store.json` is backed up first (`docs/RUNBOOK.md`); backups, the export and restore carry `onorder.json` and `decisions.json` as `sideFiles` (SW-005). Full request and response shapes: `modules/stock-watch/API.md`.
+Each also answers at `/api/v1/…` with exactly the same checks (SW-050: the path is rewritten before routing, after the cross-site check). All need the admin login except `/ingest/*`; a `VIEW_PASSWORD` session gets 403 on every one. Each acts on one store only: the one named by `?store=<id>` (else the `sw_store` cookie, else the first store). Each wipe of `store.json` is backed up first (`docs/RUNBOOK.md`); backups, the export and restore carry `onorder.json` and `decisions.json` as `sideFiles` (SW-005). Full request and response shapes: `modules/stock-watch/API.md`.
 
 | Endpoint | Effect | Undo |
 |---|---|---|

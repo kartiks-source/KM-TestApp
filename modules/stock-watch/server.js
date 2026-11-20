@@ -40,6 +40,7 @@ const stores = require('./src/stores');
 const migrate = require('./src/migrate');
 const version = require('./src/version');   // app version + commit SHA (SW-056)
 const csvmap = require('./src/csvmap');     // import preview + column mapping, Shopify exports (SW-045)
+const apiv1 = require('./src/apiv1');       // /api/v1: every /api route + summary and paginated rows (SW-050)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -465,6 +466,12 @@ async function storeApi(req, res, url, role, id) {
   const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
+  const v1 = apiv1.handle(req, url, () => {   // SW-050: /api/v1/summary, /api/v1/rows; the same report as /api/report
+    const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
+    const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
+    r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts()); return r;
+  }, { store: here, freshness, source: d.source });
+  if (v1) return send(res, v1.code, v1.body);
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
@@ -597,6 +604,7 @@ const server = http.createServer(async (req, res) => {
     if (isWrite(req) && (url.pathname.startsWith('/api/') || url.pathname === '/login' || url.pathname === '/logout') && crossSite(req)) {
       return fail(res, 403, 'Cross-site request refused');
     }
+    apiv1.rewrite(url);   // /api/v1/<x> answers as /api/<x> (SW-050); after the cross-site check, which covers both
     if (url.pathname === '/status') { const st = statusBody(); return send(res, st.code, st.body); }
     if (url.pathname === '/health') { const h = healthBody(); return send(res, h.code, h.body); }
     if (url.pathname === '/login' && req.method === 'GET') {

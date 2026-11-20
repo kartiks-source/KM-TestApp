@@ -204,6 +204,12 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Source: QA idea.
 - Status: Done (sprint3/E-data). LOGIC §1b, API `POST /api/import/preview` + `?map=`, FORMATS `mappings.json`. Open: order-level discount codes are not spread over lines; Shopify `Tags` not read (groups come from the catalog).
 
+**SW-050 · `/api/v1` + summary + paginated rows** (P2 · M · builder)
+- Why: other Catalys tools need the ₹ numbers without scraping the page's API, which may change.
+- Accept: every `/api/<x>` also at `/api/v1/<x>` (same auth, handler; old paths stay); `GET /api/v1/summary` headline only; `GET /api/v1/rows?view=reorder|stockouts|products&limit=&cursor=`, stable order, max 500; API.md documents v1 as the stable contract with examples; tests.
+- Source: architect A11, process F10.
+- Status: Done (sprint3/E-data). `src/apiv1.js`, ADR-0016, API §v1, LOGIC §5c, `test/apiv1.test.js`. Open: per-tool API keys (tools use the view password; SW-060).
+
 ## Later
 
 Ordered by money impact. Each becomes a full item when pulled into a sprint.
@@ -219,7 +225,6 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
 | SW-049 | One IANA time zone setting used by rows, engine and Sheet | S | builder | architect A12, SRE-12 |
-| SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
 | SW-051 | Read-only guard tokeniser + refuse tokens with write scopes | S | security | SEC-7, security idea |
 | SW-052 | Sheet sync: manual redirects, host allow-list, size cap | S | security | SEC-9 |
 | SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |

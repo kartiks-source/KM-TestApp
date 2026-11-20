@@ -1,6 +1,6 @@
 # API: Stock-out Watch (web app)
 
-Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. No `/api/v1` prefix yet (SW-050): routes may change between minor versions; check `CHANGELOG.md`.
+Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `server.js` `api()` and the route handlers in `src/backup.js`, `src/onorder.js`, `src/decide.js`, `src/digest-service.js`. Row and file formats: `FORMATS.md`. Secrets and auth model: root `SECURITY.md`. **Use `/api/v1/…` from other tools** (§v1 below, SW-050): it is the stable contract. The bare `/api/…` paths answer the same and stay for the page, but may change between minor versions; check `CHANGELOG.md`.
 
 ## Conventions
 
@@ -30,6 +30,37 @@ Every HTTP route `server.js` answers, version 1.0.0-rc.1. Source of truth: `serv
 |---|---|
 | `days` | `7`, `14`, `30`, `60` (default 30), or `month` = from the 1st of this month, store time |
 | `leadDays`, `coverDays`, `safetyDays`, `demandWindowDays`, `smallTopUpDays`, `minPerDay`, `tzOffsetMin` | trial values, not saved; clamped to 0–180, 1–365, 0–60, 7–90, 1–60, 0–100, −720–840. Blank or not a number = the saved value |
+
+## v1: the stable contract (SW-050, ADR-0016)
+
+For other Catalys tools and scripts. Source: `src/apiv1.js`.
+
+- **Every `/api/<x>` route above and below also answers at `/api/v1/<x>`**: same auth (cookie or Basic), same `?store=`, same view-only and cross-site checks, same handler, same answer. `/api/report` = `/api/v1/report`, `PUT /api/v1/settings` = `PUT /api/settings`, and so on. The old paths stay. `/ingest/*`, `/health`, `/status`, `/login` are not versioned.
+- **Stable means:** within v1, routes and fields are only added, never renamed, removed or changed in meaning. A breaking change gets `/api/v2/`, with v1 kept alongside for at least one minor version (noted in `CHANGELOG.md`).
+- Money is whole rupees (₹, `currency: "INR"`); times are ms since 1970 (UTC).
+
+Two routes exist only under v1:
+
+| Method · path | Auth | Params | Answer | Errors |
+|---|---|---|---|---|
+| `GET /api/v1/summary` | view | report query values (`days`, trial settings), `store` | headline numbers only, under 1.5 KB: `{ ok, store: { id, name }, generatedAt, days, from, period, currency, money: { sold, lost, lostProfit, stillOutPerDay, orderValueNow, orderValueAll, excessValue }, counts: { products, outNow, stillOut, orderToday, orderNow, orderWeek, bestAtRisk, overstocked, stockouts }, lostPct, storeTrendPct, yesterday: { day, sold, lost, ranOut, back }, source, fresh: { lastPull, ageMin, stale } }`. Each number = the same key in `/api/report` `totals` (LOGIC §5c) | 404 unknown store |
+| `GET /api/v1/rows` | view | `view` = `reorder` \| `stockouts` \| `products` (required); `limit` 1–500 (default 100; more is cut to 500); `cursor` = `next` from the previous page; report query values; `store` | `{ ok, store, view, generatedAt, days, total, limit, rows[], next }`. `rows[]` = the same row objects as `/api/report`'s `reorder[]` / `stockouts[]` / `products[]`, in a **stable order: variant ID as text, then (stock-outs) start time**, not ₹; `next` = null on the last page. A cursor is the key of the last row sent, so rows that change between pages are never repeated or skipped (a row added before the cursor is not seen until the next walk) | 400 bad `view` / `limit` / `cursor`; 404 unknown store |
+
+Examples (Basic auth with the admin or view password; any user name):
+
+```sh
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/summary?store=sammsara-demo'
+# {"ok":true,"store":{"id":"sammsara-demo","name":"Sammsara (demo)"},"days":30,"currency":"INR",
+#  "money":{"sold":12089172,"lost":1172509,"lostProfit":642859,"stillOutPerDay":19284,"orderValueNow":3577863,…},
+#  "counts":{"products":252,"outNow":8,"stillOut":14,"orderToday":77,…},"yesterday":{…},"source":"demo","fresh":{…}}
+
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/rows?view=reorder&limit=200'
+# {"ok":true,"view":"reorder","total":124,"limit":200,"rows":[{"id":"4710000003","name":"…","status":"Order today","orderQty":12,"orderValue":38400,…},…],"next":null}
+
+curl -u x:$VIEW_PASSWORD 'https://<host>/api/v1/rows?view=stockouts&limit=100&cursor=WyI0NzEwMDAwMDUyIiwxNzkzODAyODUwODkxXQ'
+```
+
+Walk every page: call with no `cursor`, then pass each answer's `next` until it is `null`.
 
 ## Open routes
 
