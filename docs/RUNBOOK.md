@@ -62,10 +62,10 @@ Deploys are a local `railway up` (no auto-deploy from GitHub yet; ADR-0012):
 
 1. `git checkout main && git pull && git status` → clean, and CI green on that commit (GitHub Actions "test").
 2. `npm test` locally.
-3. `railway up` from the repo root. Railway builds the root `Dockerfile`.
-4. Check `/health` is 200 and sign in once. Record the deployed SHA in `docs/DEVLOG.md`.
+3. `npm run stamp && railway up && rm modules/stock-watch/BUILD_SHA` from the repo root. `stamp` writes the commit to `modules/stock-watch/BUILD_SHA` (it refuses while there are uncommitted changes); the root `Dockerfile` copies it, so `/health`, `/status` and the page footer show `v<version> · <sha>` (SW-056). The file is deliberately not in `.gitignore` (`railway up` leaves out ignored files), so delete it afterwards. Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub; with neither, the footer says `dev`. Alternative: `railway variables --set BUILD_SHA=$(git rev-parse HEAD) --skip-deploys` before `railway up`.
+4. Check `/health` is 200 and its `version` / `sha` are the ones you meant to deploy (`curl -s <url>/health`), and sign in once. Record the deployed SHA in `docs/DEVLOG.md`.
 
-Roll back: Railway dashboard → Deployments → the previous deployment → Redeploy. The volume is not touched by a deploy or a rollback.
+Roll back: Railway dashboard → Deployments → the previous deployment → Redeploy. The volume is not touched by a deploy or a rollback. **Data written by a newer version:** `store.json` carries `schemaVersion` (SW-047, `FORMATS.md`); an older build refuses to start on a file with a higher schemaVersion (log: `… is schema N, written by a newer version of the app …`) rather than overwrite what it doesn't know. Today every release reads and writes schema 1, so rolling back within 1.x is safe; when a release bumps it, its CHANGELOG says so, and rolling back past it means restoring a backup taken before that deploy.
 
 ## Backups
 

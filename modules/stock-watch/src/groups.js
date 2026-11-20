@@ -57,7 +57,8 @@ function keysFor(row, catalog, lens, index) {
     : [{ key: '', label: index.hidden.size ? 'Not in any other collection' : 'Not in a collection' }];
 }
 
-const blank = (key, label) => ({ key, label, n: 0, needOrder: 0, sold: 0, lost: 0, lostProfit: null, orderValue: 0, excessValue: 0, ids: [], _tr: { rec: 0, bef: 0, units: 0 } });
+const blank = (key, label) => ({ key, label, n: 0, needOrder: 0, sold: 0, lost: 0, lostProfit: null, orderValue: 0, excessValue: 0, ids: [], _tr: { rec: 0, bef: 0, units: 0 },
+  _wk: Array.from({ length: 8 }, () => ({ units: 0, outDays: 0, outProducts: 0, products: 0 })) });
 
 /** Add one variant row to a group's sums. */
 function add(g, r) {
@@ -66,6 +67,14 @@ function add(g, r) {
   if (r.lostProfit != null) g.lostProfit = (g.lostProfit || 0) + r.lostProfit;
   if (TODAY.includes(r.status)) { g.needOrder++; g.orderValue += r.orderValue || 0; }
   if (r.overstock) g.excessValue += r.excessValue || 0;
+  /* spark (SW-021): the variants' weekly units added up, the same 8 blocks as a product's; a week no variant has
+     data for stays "no data" (null) */
+  if (Array.isArray(r.weeks) && r.weeks.length === 8) {
+    r.weeks.forEach((x, i) => {
+      if (!x || x.units == null) return;
+      const k = g._wk[i]; k.products++; k.units += x.units; k.outDays += x.outDays || 0; if (x.outDays > 0) k.outProducts++;
+    });
+  }
   /* trend: add up the variants' sales per in-stock day, last 14 days vs the 14 before (the same
      halves as each product's trend), from the weekly blocks; a variant without both halves is left out */
   const w = r.weeks;
@@ -80,15 +89,20 @@ function add(g, r) {
 
 function finish(g) {
   const { rec, bef, units } = g._tr;
-  const out = { ...g, trendPct: units >= TREND_MIN_UNITS && bef > 0 ? round(((rec - bef) / bef) * 100, 1) : null };
-  delete out._tr;
+  /* weeks: [{ units, outDays, outProducts, products }]: units summed; outDays = days out per product with data that week
+     (average, at least 0.1 when any was out, so the rose base means "some product was out", as on a product row);
+     outProducts = how many were out */
+  const weeks = g._wk.map((k) => (k.products ? { units: k.units, outDays: k.outProducts ? Math.max(0.1, round(k.outDays / k.products, 1)) : 0, outProducts: k.outProducts, products: k.products }
+    : { units: null, outDays: 0, outProducts: 0, products: 0 }));
+  const out = { ...g, weeks, trendPct: units >= TREND_MIN_UNITS && bef > 0 ? round(((rec - bef) / bef) * 100, 1) : null };
+  delete out._tr; delete out._wk;
   return out;
 }
 
 /** Sums over a set of variant rows (each once). */
 function sums(rows) {
   const g = blank('', ''); rows.forEach((r) => add(g, r));
-  const { key, label, ids, ...rest } = finish(g);
+  const { key, label, ids, weeks, ...rest } = finish(g);
   return rest;
 }
 

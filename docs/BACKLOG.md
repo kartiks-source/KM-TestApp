@@ -60,7 +60,7 @@ Goal: the numbers can be trusted at real store size, data can't be lost silently
 - Why: real rows added on top of demo stay labelled "demo" and are deleted on the next demo version bump.
 - Accept: the first real row (ingest, sheet, import) clears demo first and sets source to live. Demo loads at boot only if the store was never live (`everLive` persisted). Test: demo → ingest → restart with bumped demo version → real row still there.
 - Source: QA F6.
-- Status: Done (67e2345).
+- Status: Done (67e2345). Finish sprints (1.0.0-rc.1): demo → live by Flow, Sheet, CSV or Shopify also clears the demo's Mark ordered and decisions (one `store.endDemo()`; tested per path), and the dead "Remove the demo data first" import checkbox is gone.
 
 **SW-008 · Login can't be brute-forced; app never runs open in production** (P1 · S · security)
 - Why: Basic auth on `/api/*` has no attempt limit, the lockout trusts a client-set X-Forwarded-For, and a deploy without `ADMIN_PASSWORD` serves everything, including Clear and the ingest key.
@@ -135,7 +135,7 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Why: trend lives only in the drawer and an off-by-default column, so it doesn't inform reorder or overstock calls.
 - Accept: one combined cell (48×16 spark + chip) on Products, Reorder and group rows at ≥ 1400 px; below that a 40×12 inline spark in the name cell (no extra column); on phone cards at the header's right. Rose base kept for stock-out weeks. Hover labels show dates ("12–18 Nov: 54 sold, out 2.3 d"). Store baseline (the typical product's trend) shown in the Trend column header and in each chip's tooltip, not as a toolbar chip (amended 20 Nov 2026). Drawer shows the 8 weekly numbers under the spark. Overview "Moving" card: top 3 up / down by ₹ effect. No new page.
 - Source: DAWBU F8 + idea "Trend everywhere it decides".
-- Status: Done, with an accepted departure (critic round 1, S1): the store baseline (the typical product's trend) is in the Trend header and every chip's tooltip, not a toolbar chip. The chip colour already says "better or worse than typical", so a separate chip was noise. Group rows have the chip since critic round 2 (UI-3).
+- Status: Done, with an accepted departure (critic round 1, S1): the store baseline (the typical product's trend) is in the Trend header and every chip's tooltip, not a toolbar chip. The chip colour already says "better or worse than typical", so a separate chip was noise. Group rows have the chip since critic round 2 (UI-3) and the 8-week spark since 1.0.0-rc.1 (summed weekly units per group, rose when a variant was out; `groups.js` `weeks`, LOGIC §9a).
 
 **SW-022 · Group by product / category / collection / tag** (L · builder) — owner ask
 - Why: the client's team plans and sets targets on tags and collections (DAWBU). Today only productType exists.
@@ -147,7 +147,7 @@ Goal: each role sees its one decision first, with less on screen than today. See
 - Why: owners and ops check on phones.
 - Accept: mobile critic + fixer run at 390×844 and 360×740 on every Sprint 2 change: decision first, touch targets ≥ 44 px, no sideways scroll, 1280/1440 unchanged. Screenshots attached to the PR.
 - Source: owner ask, AGENTS rule 10.
-- Status: Partial. Done: mobile fixes M1–M10 at 390 and 360 (critic round 1, final integration). Open: `test/smoke/smoke.js` checks 390×844 only, not 360×740, and its screenshots go to a temp folder, not kept with the PR (finish-sprints, QA owner).
+- Status: Done. Mobile fixes M1–M10 at 390 and 360 (critic round 1, final integration); smoke and roles smoke run 390×844 and 360×740 with screenshots in `SMOKE_OUT` (CI uploads them); `test/ui-helpers.test.js` runs its phone checks at both sizes too (1.0.0-rc.1).
 
 **SW-024 · Plain "why" and dates on every reorder row** (S · builder)
 - Accept: Status column hidden when the tab already filters to one status; a Why cell instead ("Out 3 d · lost ₹18.7k" / "Runs out Fri 22 Nov · order by today · supplier takes 7 d"). Still-out headline shows "costing ₹X/day". Same sentence used in drawer, phone card and digest. LOGIC.md updated.
@@ -177,7 +177,7 @@ Goal: each role sees its one decision first, with less on screen than today. See
 **SW-029 · View-only password + settings change log** (S · security)
 - Accept: `VIEW_PASSWORD` session hides Data, Danger zone and Save; server rejects writes (403, tested). Settings changes logged {at, key, old, new}; last change shown under Plan settings.
 - Source: product F4, security idea "Sign out everywhere".
-- Status: Done (6b22541; 403 gate covers every `/api` write).
+- Status: Done (6b22541; 403 gate covers every `/api` write). Morning digest settings (hour, roles, pause) and a server webhook change are logged too (1.0.0-rc.1).
 
 **SW-030 · Sync progress and run history** (S · ops)
 - Accept: pill shows "Syncing · 2,340 orders"; Data page lists last 20 runs (time, duration, stock changes, lines, error, notes such as excluded archived items).
@@ -209,7 +209,7 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-044 | Paste-a-list lookup + saved lists | S | builder | DAWBU F9 |
 | SW-045 | Import preview with column mapping; accept Shopify export columns | M | builder | QA idea |
 | SW-046 | Storage move per ADR-0003 (node:sqlite) + cached report + gzip | L | builder | architect A6, SRE-10 |
-| SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1) | M | builder | architect A7, process F10 |
+| SW-047 | `schemaVersion` + migrations (FORMATS.md exists since 0.9.0: schema 1). **Done 1.0.0-rc.1:** `store.json` schemaVersion 1 written and read, `MIGRATIONS`, newer file refused | M | builder | architect A7, process F10 |
 | SW-048 | Shared `packages/stock-rules` per ADR-0008 | L | builder | architect A8 |
 | SW-049 | One IANA time zone setting used by rows, engine and Sheet | S | builder | architect A12, SRE-12 |
 | SW-050 | `/api/v1` + summary/paginated report (API.md exists since 0.9.0) | M | builder | architect A11, process F10 |
@@ -218,7 +218,7 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-053 | Non-root container (su-exec entrypoint), pinned image digest | S | ops | SRE-8 |
 | SW-054 | JSON logs + request log without query strings; boot config line | S | ops | SRE-11, SRE idea |
 | SW-055 | Single-instance lock file; KEEP_DAYS env; capacity warnings | S | ops | SRE ideas |
-| SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0) | S | ops | process F8, F2 |
+| SW-056 | Git tags, version + SHA in /health, /status and footer (semver + CHANGELOG.md since 0.9.0). **Done 1.0.0-rc.1:** version + SHA (`npm run stamp`, RUNBOOK). Open: tag `v<version>` on the deployed commit at the next deploy | S | ops | process F8, F2 |
 | SW-057 | Trial input keeps raw text while typing | S | builder | QA F10 |
 | SW-058 | Agent token savings: doc routing table, DEVLOG rotation, `test:agent` dot reporter, `.ignore`, LOGIC index, critic reports saved to `docs/reviews/` | S | builder | tokens T2–T11, process ideas |
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |

@@ -112,3 +112,36 @@ test('group trend colour follows the product rule: a fall is never green, a rise
     if (g.trendPct > 0) assert.notEqual(g.trendCall, 'down', g.label);
   }
 });
+
+test('group spark (SW-021): weekly units = the sum of its variants’ weeks; rose when a variant was out; no data stays null', () => {
+  for (const lens of ['product', 'type', 'tag']) {
+    const b = G.build(rep.products, cat, lens);
+    for (const grp of b.groups) {
+      assert.equal(grp.weeks.length, 8, `${lens} ${grp.label}`);
+      const rows = rep.products.filter((p) => grp.ids.includes(p.id));
+      grp.weeks.forEach((w, i) => {
+        const have = rows.filter((p) => p.weeks[i].units != null);
+        assert.equal(w.units, have.length ? have.reduce((s, p) => s + p.weeks[i].units, 0) : null, `${lens} ${grp.label} week ${i}`);
+        assert.equal(w.outProducts, have.filter((p) => p.weeks[i].outDays > 0).length);
+        assert.equal(w.outDays > 0, w.outProducts > 0, 'rose base exactly when a variant was out');
+      });
+    }
+  }
+  /* parent products add up to the store's weekly units */
+  const b = G.build(rep.products, cat, 'product');
+  for (let i = 0; i < 8; i++) assert.equal(b.groups.reduce((s, x) => s + (x.weeks[i].units || 0), 0), rep.products.reduce((s, p) => s + (p.weeks[i].units || 0), 0));
+  assert.equal('weeks' in b.store, false, 'store total carries no spark');
+});
+
+test('group spark: a week before any variant has data is "no data"; a variant without weeks adds nothing', () => {
+  const nd = { units: null, outDays: 0 }, w = (u, o = 0) => ({ units: u, outDays: o });
+  const rows = [
+    { id: 'a', name: 'A', weeks: [nd, nd, w(1), w(2), w(3), w(4), w(5), w(6, 2)] },
+    { id: 'b', name: 'B', weeks: [nd, w(5), w(0), w(0), w(1), w(1), w(1), w(1)] },
+    { id: 'c', name: 'C' },
+  ];
+  const [g1] = G.build(rows, { variants: { a: { productId: 'P' }, b: { productId: 'P' }, c: { productId: 'P' } } }, 'product').groups;
+  assert.deepEqual(g1.weeks.map((x) => x.units), [null, 5, 1, 2, 4, 5, 6, 7]);
+  assert.deepEqual(g1.weeks[7], { units: 7, outDays: 1, outProducts: 1, products: 2 });
+  assert.equal(g1.n, 3);
+});

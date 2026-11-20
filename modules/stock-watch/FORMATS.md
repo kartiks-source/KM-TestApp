@@ -1,8 +1,8 @@
 # Formats: Stock-out Watch (web app)
 
-Every row format the app reads and every file it writes, version 0.9.0. Parsing: `src/rows.js`. Storage: `src/store.js` and the sidecar modules. Routes: `API.md`. Rules on what the numbers mean: `LOGIC.md` (§1a for parsing and skips).
+Every row format the app reads and every file it writes, version 1.0.0-rc.1. Parsing: `src/rows.js`. Storage: `src/store.js` and the sidecar modules. Routes: `API.md`. Rules on what the numbers mean: `LOGIC.md` (§1a for parsing and skips).
 
-**schemaVersion:** none of the stored files carry one yet. Everything below is **schema 1**, the shape on disk since Sprint 1 (SW-002 catalog, SW-006 `src`). Adding `schemaVersion` and migrations is SW-047; until then, a change to a stored shape must stay readable by old code paths (new keys optional, old keys kept), and `store.load()` fills missing top-level keys with defaults.
+**schemaVersion (SW-047):** `store.json` carries `"schemaVersion": 1`, written on every save (since 1.0.0-rc.1). Schema 1 is the shape on disk since Sprint 1 (SW-002 catalog, SW-006 `src`); a file without the key is read as schema 0 (the same shape) and saved as 1. `src/store.js`: `SCHEMA_VERSION`, `MIGRATIONS[n]` turns schema n into n + 1, run in order on load. A file with a **higher** schemaVersion (written by a newer app, e.g. after a rollback) is **refused, never rewritten**: the server doesn't start and says to deploy the newer version; a `restore.json` with a higher schemaVersion is rejected. To change a stored shape: bump `SCHEMA_VERSION`, add the migration and its test (`test/store.test.js`), and keep new keys optional where you can. The side files (`onorder.json`, `decisions.json`, `catalog.json`) carry no version; they are plain maps whose entries only gain optional keys.
 
 ## Inbound rows
 
@@ -140,10 +140,13 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
 | **top of `DATA_DIR`:** `stores.json` | `src/stores.js` (Performity only) | `{ list: [{ id, name, shop }], at }`: the last good brand list, used while the API is down | no (re-read every 10 minutes) |
 | **top of `DATA_DIR`:** `stores/.migrating-<id>/` | `src/migrate.js` | a half-done copy left by a crash during the move; thrown away and redone on the next start | no |
 
+Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line, the git commit the build came from, written by `npm run stamp` at the repo root before `railway up` (docs/RUNBOOK.md). Read by `src/version.js` when neither `RAILWAY_GIT_COMMIT_SHA` nor `BUILD_SHA` is set in env; only 7–40 hex characters count.
+
 ### `store.json` (schema 1)
 
 ```
 {
+  "schemaVersion": 1,
   "settings": {
     "storeName": "Demo Store", "tzOffsetMin": 330,
     "leadDays": 7, "coverDays": 30, "safetyDays": 3, "demandWindowDays": 28, "smallTopUpDays": 7, "minPerDay": 0.2,
@@ -158,9 +161,9 @@ Several stores (ADR-0015): each store's files are in its own folder, `DATA_DIR/s
   "source": "empty|demo|live", "everLive": true,
   "lastSync": null, "lastSyncError": null,
   "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null },
-  "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)", "key": "leadDays", "old": 7, "new": 10 } ],
+  "settingsLog": [ { "at": 0, "by": "admin|view|admin (script)|server (env)", "key": "leadDays|…|digest.hour|digest.roles|digest.paused|digest.webhook", "old": 7, "new": 10 } ],
   "syncRuns":    [ { "kind": "shopify|sheet", "start": 0, "ms": 0, "stock": 0, "orders": 0, "lines": 0, "error": null, "notes": [] } ],
-  "digest": { "hour": 9, "roles": ["ceo", "founder", "ops", "marketing", "finance"], "paused": false,
+  "digest": { "hour": 9, "roles": ["ceo", "founder", "ops", "marketing", "finance"], "paused": false, "webhookSeen": "?everyone → host; ceo → host",
               "lastSent": { "<role>": "YYYY-MM-DD" }, "log": [ { "at": 0, "role": "", "trigger": "schedule|manual", "ok": true, "status": 200, "error": null, "note": "?" } ] }
 }
 ```

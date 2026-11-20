@@ -18,6 +18,7 @@ const scope = require('./scope');
 const store = require('./store');
 const R = require('../public/roles');
 const digest = require('./digest');
+const audit = require('./audit');
 
 const DAY = 864e5;
 const CATCH_UP_HOURS = 3;     // after a restart, a missed digest still goes out within 3 h of the set hour
@@ -56,18 +57,41 @@ function publicConf() {
   };
 }
 
-function applyPatch(b) {
+/* Every change goes to the store's settings change log (SW-029, src/audit.js) as digest.hour / digest.roles / digest.paused,
+ * and digest.webhook when the server's webhook hosts change (env, seen on the next digest call or scheduler tick). */
+const LOG_KEYS = { hour: 'digest.hour', roles: 'digest.roles', paused: 'digest.paused' };
+function applyPatch(b, by = 'admin') {
   const c = conf();
   if (b.webhookUrl !== undefined) return 'The webhook URL is set on the server (DIGEST_WEBHOOK_URL), not here';
+  const next = {};
   if (b.hour != null) {
     const h = Number(b.hour);
     if (!Number.isInteger(h) || h < 0 || h > 23) return 'Hour must be 0–23';
-    c.hour = h;
+    next.hour = h;
   }
-  if (Array.isArray(b.roles)) c.roles = SCHEDULED.filter((r) => b.roles.includes(r));
-  if (typeof b.paused === 'boolean') c.paused = b.paused;
+  if (Array.isArray(b.roles)) next.roles = SCHEDULED.filter((r) => b.roles.includes(r));
+  if (typeof b.paused === 'boolean') next.paused = b.paused;
+  const changes = [];
+  for (const [k, v] of Object.entries(next)) {
+    const was = c[k], same = Array.isArray(v) ? Array.isArray(was) && was.join(',') === v.join(',') : was === v;
+    if (!same) changes.push({ key: LOG_KEYS[k], old: Array.isArray(was) ? was.join(', ') : was ?? null, new: Array.isArray(v) ? v.join(', ') : v });
+    c[k] = v;
+  }
+  audit.record(store.load(), changes, by);
   store.save(true);
   return '';
+}
+
+/** Which hosts the digest goes to, from env ('' = none): "everyone → hooks.example; ceo → own.example". Hosts only, never a URL. */
+const hooksSeen = () => [env('DIGEST_WEBHOOK_URL') ? `everyone → ${hostOf(env('DIGEST_WEBHOOK_URL')) || '?'}` : '',
+  ...SCHEDULED.filter((r) => env(`DIGEST_WEBHOOK_URL_${r.toUpperCase()}`)).map((r) => `${r} → ${hostOf(webhookUrl(r)) || '?'}`)].filter(Boolean).join('; ');
+/** A webhook change made on the server (env) is logged once per store, by "server (env)". The first look only records it. */
+function noteWebhook() {
+  const c = conf(), now = hooksSeen();
+  if (c.webhookSeen === undefined) { c.webhookSeen = now; store.save(); return; }
+  if (c.webhookSeen === now) return;
+  audit.record(store.load(), [{ key: 'digest.webhook', old: c.webhookSeen || null, new: now || null }], 'server (env)');
+  c.webhookSeen = now; store.save();
 }
 
 /* links in digests: env first, else the address the app was last opened at (signed-in requests only; set
@@ -133,6 +157,7 @@ const running = new Map();   // store id → its tick in progress
 /** One scheduler step for the current store: if anything is due, pull fresh data first, then send each due role once. */
 function tick(ctx, now = Date.now()) {
   const key = scope.current() || '';
+  noteWebhook();
   if (running.has(key)) return running.get(key);
   const list = due(now);
   if (!list.length) return Promise.resolve([]);
@@ -162,12 +187,13 @@ function schedule(ctx, each = (fn) => fn()) {
  *   GET  /api/digest?role=ops        → { ok, role, roleName, title, lines, link, text }
  *   GET  /api/digest.txt?role=ops    → the text
  *   GET  /api/digest/settings        → hour, roles, paused, webhook host (never the URL), last 20 sends
- *   PUT  /api/digest/settings        { hour?, roles?, paused? }   (webhook URLs: env only → 400)
+ *   PUT  /api/digest/settings        { hour?, roles?, paused? }   (webhook URLs: env only → 400); changes logged (by = who)
  *   POST /api/digest/send?role=ops   → send now (no role: every ticked role), logged
  */
-async function handle(req, url, readBody, ctx) {
+async function handle(req, url, readBody, ctx, by = 'admin') {
   const p = url.pathname;
   if (p !== '/api/digest' && p !== '/api/digest.txt' && !p.startsWith('/api/digest/')) return null;
+  noteWebhook();
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   if (host) lastBase = `${req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'}://${host}`;
   const roleQ = url.searchParams.get('role') || '';
@@ -180,7 +206,7 @@ async function handle(req, url, readBody, ctx) {
   if (p === '/api/digest/settings' && req.method === 'PUT') {
     let b; try { b = JSON.parse((await readBody(req, 64e3)) || '{}'); } catch { return { code: 400, body: { ok: false, error: 'Body must be JSON' } }; }
     if (!b || typeof b !== 'object') return { code: 400, body: { ok: false, error: 'Body must be a JSON object' } };
-    const err = applyPatch(b);
+    const err = applyPatch(b, by);
     return err ? { code: 400, body: { ok: false, error: err } } : { code: 200, body: { ok: true, ...publicConf() } };
   }
   if (p === '/api/digest/send' && req.method === 'POST') {
@@ -194,4 +220,4 @@ async function handle(req, url, readBody, ctx) {
   return { code: 404, body: { ok: false, error: 'Not found' } };
 }
 
-module.exports = { handle, schedule, tick, due, send, make, checkUrl, publicConf, applyPatch, CATCH_UP_HOURS };
+module.exports = { handle, schedule, tick, due, send, make, checkUrl, publicConf, applyPatch, noteWebhook, CATCH_UP_HOURS };

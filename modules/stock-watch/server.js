@@ -38,6 +38,7 @@ const digests = require('./src/digest-service');
 const scope = require('./src/scope');
 const stores = require('./src/stores');
 const migrate = require('./src/migrate');
+const version = require('./src/version');   // app version + commit SHA (SW-056)
 
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 4400;   // PORT=0 picks a free port (tests)
 const PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -275,7 +276,7 @@ async function pullOne(id) {
   const run = runs.begin('shopify', started);
   progress.set(id, run);
   try {
-    if (store.load().source === 'demo') { store.replaceAll([], [], 'empty'); decide.clear(); }   // never mix demo with live data
+    store.endDemo();   // never mix demo with live data: rows, Mark ordered and decisions go (SW-007)
     if (store.load().settings.storeName && isDemoName(store.load().settings.storeName)) store.setSettings({ storeName: '' });   // the registry's name shows instead
     const s = await shopify.pullStock(store.load().shopify.lastQty);
     stores.noteShop(id, keys.status(id).store);
@@ -342,7 +343,8 @@ function storeList() {
 /** Unauthenticated /status for uptime monitors: 503 when any store's data is stale or saving fails. Totals over every
  *  store; no names, ids, keys or error text. */
 function statusBody() {
-  const out = { ok: true, stale: false, ageMin: null, lastPull: null, shopify: !!keys.status().source, running: pulls.size > 0, pullFailing: false,
+  const app = version.current();
+  const out = { ok: true, version: app.version, sha: app.short, stale: false, ageMin: null, lastPull: null, shopify: !!keys.status().source, running: pulls.size > 0, pullFailing: false,
     saveOk: true, source: null, storeBytes: 0, stockRows: 0, orderRows: 0, variants: 0, stores: 0, uptimeMin: Math.floor((Date.now() - BOOT_AT) / 60e3) };
   const sources = new Set();
   for (const s of stores.list()) {
@@ -370,7 +372,8 @@ function healthBody() {
   const h = store.healthAll();
   const problems = [...h.problems];
   for (const [id, e] of opened) if (e && !problems.includes(e.message)) problems.push(`store ${id}: ${e.message}`);
-  return problems.length ? { code: 503, body: { ok: false, error: problems.join('; ') } } : { code: 200, body: { ok: true } };
+  const app = version.current(), v = { version: app.version, sha: app.short };
+  return problems.length ? { code: 503, body: { ok: false, error: problems.join('; '), ...v } } : { code: 200, body: { ok: true, ...v } };
 }
 
 /* ---------- morning digest (SW-028): the report as of `now`, with yesterday; a fresh pull before sending ---------- */
@@ -451,7 +454,7 @@ async function storeApi(req, res, url, role, id) {
   if (backup.route(req, res, url)) return;   // GET /api/export/backup.json
   const oo = await onorder.handle(req, p, readBody, d.settings.tzOffsetMin);   // "Mark ordered" (LOGIC.md §6b)
   if (oo) return send(res, oo.code, oo.body);
-  const dg = await digests.handle(req, url, readBody, digestCtx);   // /api/digest… (SW-028); writes already refused above for view-only
+  const dg = await digests.handle(req, url, readBody, digestCtx, whoOf(req, role));   // settings changes go to the change log (SW-029)   // /api/digest… (SW-028); writes already refused above for view-only
   if (dg) return send(res, dg.code, dg.body, dg.type);
 
   /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
@@ -464,7 +467,7 @@ async function storeApi(req, res, url, role, id) {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
     r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts());   // SW-027
-    return send(res, 200, { ok: true, ...r, store: here, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness() });
+    return send(res, 200, { ok: true, ...r, store: here, source: d.source, lastSync: d.lastSync, lastSyncError: d.lastSyncError, shopify: shopifyStatus(), freshness: freshness(), app: version.current() });
   }
   if (p.startsWith('/api/product/') && req.method === 'GET') {
     let id; try { id = decodeURIComponent(p.slice('/api/product/'.length)); } catch { throw badRequest('Bad product ID in the address'); }
@@ -501,11 +504,10 @@ async function storeApi(req, res, url, role, id) {
     if (keys.status().source) return fail(res, 409, ONE_SOURCE);
     if (pulls.has(id)) return fail(res, 409, PULL_RUNNING);
     const kind = url.searchParams.get('kind') === 'order' ? 'order' : 'stock';
-    // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself (SW-007).
+    // Throws status 400 naming any missing column, before anything is stored. The store clears the demo itself, with its
+    // Mark ordered and decisions (store.endDemo, SW-007), as it does for Flow, Sheet and Shopify.
     const parsed = rows.fromCsv(await readBody(req), kind, { tzOffsetMin: d.settings.tzOffsetMin, keepDays: KEEP_DAYS });
-    const wasDemo = d.source === 'demo';
     const added = store.add(kind === 'stock' ? 'stock' : 'orders', parsed.rows, 'csv');
-    if (wasDemo && store.load().source !== 'demo') decide.clear();   // demo decisions go with the demo (SW-032)
     return send(res, 200, { ok: true, read: parsed.rows.length, added, skipped: parsed.skipped, skips: parsed.skips });
   }
   if (p === '/api/sync' && req.method === 'POST') {
@@ -666,7 +668,8 @@ async function main() {
   timers.push(digests.schedule(digestCtx, (fn) => eachStore(fn)));   // SW-028: every minute, each store; sends at its set hour
   timers.forEach((t) => t.unref());
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
-  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''} · ${list.length} store${list.length === 1 ? '' : 's'}`));
+  const app = version.current();
+  server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''} · ${list.length} store${list.length === 1 ? '' : 's'} · v${app.version} (${app.short || 'dev'})`));
 }
 if (require.main === module) main().catch((e) => { console.error(`Refusing to start: ${e.message}`); process.exit(1); });
 

@@ -30,6 +30,11 @@ Google Sheet CSV / upload ───┘
 | File | Role |
 |---|---|
 | `LOGIC.md` | how every number is worked out and why; read it before changing `src/engine.js` |
+| `CHANGELOG.md` | user-facing changes per version; the top heading = `package.json` version (`test/docs.test.js`) |
+| `API.md` | every route: auth, query, answer, errors |
+| `FORMATS.md` | every row format and stored file; `store.json` `schemaVersion` and how to migrate (SW-047) |
+| `.env.example` | every variable the code reads, blank |
+| `src/version.js` | app version (`package.json`) + build commit (`RAILWAY_GIT_COMMIT_SHA`, `BUILD_SHA` env, or the `BUILD_SHA` file from `npm run stamp`) for `/health`, `/status`, `/api/report` `app` and the footer (SW-056) |
 | `server.js` | HTTP server, API, Flow ingest, sheet sync, Shopify pull every 15 min (one store at a time, `pullAll`), demo loader; `openStore` / `inStore` / `eachStore` run work for one store |
 | `src/scope.js` | which store the current work is for: `run(id, fn)`, `id()`, `dir()` → `DATA_DIR/stores/<id>`; store id rule (uuid or `^[a-z0-9][a-z0-9-]{0,60}$`); `useDir()` for tests only |
 | `src/stores.js` | the store registry (ADR-0015): `list()`, `refresh()` (Performity brand list, last good one kept in `DATA_DIR/stores.json`), `pick(?store, cookie)` → id or 404/503 |
@@ -38,7 +43,7 @@ Google Sheet CSV / upload ───┘
 | `src/catalog.js` | variant → product ID, type, tags (from the SW-002 store catalog snapshot, no second copy) and collections + members (read-only, 24 h cache, resumable) in `DATA_DIR/catalog.json` (LOGIC.md §9b); demo IDs, tags and collections from `demo.catalog()` |
 | `src/engine.js` | all the maths (tested) |
 | `src/rows.js` | CSV / sheet / webhook → rows; refuses files without the required header columns, skips bad rows with a reason (LOGIC.md §1a); `csvCell` guards exports against formulas |
-| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
+| `src/store.js` | JSON-file storage on the `/data` volume, de-duplication, 120-day retention. `schemaVersion` written on every save; `MIGRATIONS` bring older files up on load; a newer file is refused (SW-047). `endDemo()`: demo → live drops demo rows, Mark ordered and decisions, for every source (SW-007). Only a missing file starts blank; a bad file is copied to `store.json.corrupt-<time>`, `store.json.bak` (previous good save) is used, else the server refuses to start. Writes fsync before rename; a failed write retries (5 s, 30 s, 2 min) and turns `/health` 503 |
 | `src/backup.js` | backups of `store.json` + `sideFiles` (`onorder.json`, `decisions.json`) in `/data/backups` (daily + before every replace/clear, 14 each), restore from `/data/restore.json` on start (side files too), `GET /api/export/backup.json`. Restore steps: `docs/RUNBOOK.md` |
 | `src/sidefile.js` | `onorder.json` / `decisions.json` kept like `store.json`: a bad file is copied to `.corrupt-<time>` and never overwritten; `.bak` used instead; none → refuse to start (critic r2 X1) |
 | `src/onorder.js` | "Mark ordered" records (`DATA_DIR/onorder.json`, one per variant: qty, eta, at, by) + `GET/POST /api/onorder`; the engine counts them (LOGIC.md §6b) |
@@ -57,7 +62,7 @@ Google Sheet CSV / upload ───┘
 | `public/digest-ui.js` | Overview Share menu (copy / WhatsApp) and Data → Morning digest settings |
 | `src/demo.js` + `src/demo-catalog.json` | 60-day demo on Sammsara's public catalog (255 variants); stock and sales invented |
 | `public/` | the page (plain JS, no build step), styled like the Performity app: tokens at the top of `styles.css` |
-| `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store`, `backup`, `docs`; multi-store: `stores` (ids, registry incl. the stand-in API with 2 brands, migration), `multistore` (real server, two demo stores never mix, 404s, cookie, view-only), `scheduler` (one pull at a time); browser (`npm run test:ui` at the root, Playwright): `ui-helpers`, `ui-stores` (picker desktop + 390/360, one store, defaults); module tests point a module at one folder with `scope.useDir()`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
+| `test/` | `node --test` (`npm test`): `engine`, `shopify`, `rows` (parsing, table-driven), `server` (spawns the real server on a free port + temp DATA_DIR: auth, limiter, headers, ingest, 400s), `store` (incl. schemaVersion, demo → live on every path), `backup`, `docs` (fences, SECURITY.md, CHANGELOG = version), `version`; multi-store: `stores` (ids, registry incl. the stand-in API with 2 brands, migration), `multistore` (real server, two demo stores never mix, 404s, cookie, view-only), `scheduler` (one pull at a time); browser (`npm run test:ui` at the root, Playwright): `ui-helpers` (phone checks at 390x844 and 360x740, group sparks, footer version), `ui-stores` (picker desktop + 390/360, one store, defaults); module tests point a module at one folder with `scope.useDir()`; `parity.test.js` checks the Google Sheet's maths against `engine.js`. `test/smoke/` is a Playwright smoke run on demand, not part of `npm test` |
 
 ## Shopify access (decided 19 Nov 2026)
 
@@ -83,14 +88,18 @@ Google Sheet CSV / upload ───┘
 ## Running in production
 
 - Runs under tini (Dockerfile). SIGTERM/SIGINT: timers stop, a running Shopify pull gets up to 25 s (`STOP_WAIT_MS`), the store is written, then the process exits.
-- `/health`: 200, or 503 while saving fails. Railway health check set in root `railway.json`.
-- `/status` (no login, for an uptime monitor): `{ok, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, uptimeMin}`; 503 when the last Shopify pull is > 45 min old or saving fails. No names, keys or error text. `/api/report` carries the same `freshness` for the stale-data banner (UI: stream E).
+- `/health`: 200, or 503 while saving fails; carries `version` + `sha`. Railway health check set in `.railway/railway.ts`.
+- `/status` (no login, for an uptime monitor): `{ok, version, sha, stale, ageMin, lastPull, shopify, running, pullFailing, saveOk, source, storeBytes, stockRows, orderRows, variants, uptimeMin}`; 503 when the last Shopify pull is > 45 min old or saving fails. No names, keys or error text. `/api/report` carries the same `freshness` for the stale-data banner (UI: stream E).
 
 ## Commands
 
 ```bash
 npm start          # http://localhost:4400 (demo data on first run)
-npm test
+npm test           # unit + server tests, no dependencies (browser tests skip)
+# at the repo root (Playwright 1.65.1: npm ci, or PLAYWRIGHT_PATH=…; PLAYWRIGHT_CHANNEL=chrome for installed Chrome):
+npm run test:ui    # test/ui-helpers + test/ui-stores in a real browser (1280–1920, 390x844, 360x740)
+npm run test:smoke # test/smoke/smoke.js + roles-smoke.js (SMOKE_OUT=folder keeps the screenshots)
+npm run stamp      # before `railway up`: writes BUILD_SHA so /status and the footer name the commit (docs/RUNBOOK.md)
 ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET=… npm start
 ```
 
@@ -102,7 +111,8 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Sprint 1 (E-ui): plan bar Save/Reset fixed (SW-011); "Mark ordered" for ticked Reorder rows (bulk bar; phone cards have the tick too) and in the drawer, with an Ordered tab (SW-012; the per-row button went in critic round 1, S2: one control per row); trend bars in the Products/Reorder rows, phone cards and drawer, Overview "Moving" card by ₹ effect (SW-021; group rows wait for SW-022).
 - Sprint 2 D-helpers (branch `sprint2/D-helpers`): SW-024 Why cell + order-by + still-out ₹/day, SW-025 reorder CSV as a PO (`?filter=&q=`, vendor, unit cost, variant ID), SW-026 Pause / Push chips on Products, SW-032 slow-seller Decide bucket.
 - Sprint 2 merged on `main` (C-access, D-helpers, A-groups, B-roles + integration fixes, see docs/DEVLOG.md): one `reportOpts()` for report, groups, drawer, CSV and digest; roles cover Sprint 1/2 controls per RACI.
-- Multi-store (ADR-0015, branch `feature/multistore`, 0.10.0, not merged to main): registry, per-store folders, migration, `?store=` everywhere, sequential pulls, per-store alerts / digest / backups; store picker in the top bar (`public/stores.js`, phone store bar). Show everything by default (ADR-0006 amendment): no role, Reorder → All, optional columns on (step aside when they don't fit), every Overview panel. Critic round fixed (ISO-1 migration once per DATA_DIR, SEC-1 no Performity call unless ready, UI-1..UI-6 picker; DEVLOG 2026-11-20).
+- Multi-store (ADR-0015, branch `feature/multistore`, 0.10.0, merged to main in 3ba75af): registry, per-store folders, migration, `?store=` everywhere, sequential pulls, per-store alerts / digest / backups; store picker in the top bar (`public/stores.js`, phone store bar). Show everything by default (ADR-0006 amendment): no role, Reorder → All, optional columns on (step aside when they don't fit), every Overview panel. Critic round fixed (ISO-1 migration once per DATA_DIR, SEC-1 no Performity call unless ready, UI-1..UI-6 picker; DEVLOG 2026-11-20).
+- 1.0.0-rc.1 (finish sprints, last gaps, DEVLOG 2026-11-20): version + SHA on `/health`, `/status`, footer (SW-056); `schemaVersion: 1` (SW-047); group-row sparks (SW-021); demo → live clears Mark ordered + decisions on every path, dead import checkbox gone (SW-007); digest settings in the change log (SW-029); ui-helpers at 360x740 too. CI: job `test` (npm test, Node 20/22) + job `ui` (npm run test:ui, smoke, roles smoke, screenshots artifact).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
 

@@ -15,8 +15,32 @@ const crypto = require('node:crypto');
 const { stockKey, orderKey } = require('./rows');
 const { DEFAULT_SETTINGS } = require('./engine');
 const scope = require('./scope');
+const onorder = require('./onorder');   // Mark ordered and decisions made on demo data go with it (SW-007)
+const decide = require('./decide');
 
 const KEEP_DAYS = 120;
+/*
+ * schemaVersion (SW-047, FORMATS.md): the shape of store.json. Written on every save. On load, an older file is
+ * brought up step by step (MIGRATIONS[n] turns schema n into n + 1; a file without the key is schema 0, the
+ * Sprint 1 shape, which is schema 1 minus the key). A file from a newer app is refused, never read or rewritten:
+ * this code would drop what it doesn't know (e.g. after a rollback, deploy the newer version again).
+ */
+const SCHEMA_VERSION = 1;
+const MIGRATIONS = {
+  0: (d) => d,   // 0 → 1: same shape, the key is new
+};
+/** The store brought up to SCHEMA_VERSION (in place). Throws on a newer schema or a version with no migration. */
+function migrate(d, label = 'store.json') {
+  let v = d.schemaVersion == null ? 0 : d.schemaVersion;
+  if (!Number.isInteger(v) || v < 0) throw new Error(`${label} has a bad schemaVersion (${JSON.stringify(d.schemaVersion)})`);
+  if (v > SCHEMA_VERSION) throw new Error(`${label} is schema ${v}, written by a newer version of the app; this one reads up to schema ${SCHEMA_VERSION}. Deploy the newer version (nothing was changed)`);
+  while (v < SCHEMA_VERSION) {
+    if (!MIGRATIONS[v]) throw new Error(`${label}: no migration from schema ${v}`);
+    MIGRATIONS[v](d); v++;
+  }
+  d.schemaVersion = SCHEMA_VERSION;
+  return d;
+}
 const RETRY_MS = [5e3, 30e3, 120e3];   // a failed save is tried again after 5 s, 30 s, then every 2 min
 
 /* one state per store folder: { dir, file, bak, db, saveTimer, loadError, saveTries, lastSaveError, lastSaveAt, lastPrune } */
@@ -36,7 +60,7 @@ function _forget() { for (const st of states.values()) clearTimeout(st.saveTimer
 const blankShopify = () => ({ lastQty: {}, ordersCursor: null, lastSync: null, lastError: null, lastTry: null });
 
 function blank() {
-  return { settings: { ...DEFAULT_SETTINGS, ingestKey: crypto.randomBytes(16).toString('hex'), sheetStockCsv: '', sheetOrderCsv: '' },
+  return { schemaVersion: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS, ingestKey: crypto.randomBytes(16).toString('hex'), sheetStockCsv: '', sheetOrderCsv: '' },
     stock: [], orders: [], catalog: {}, source: 'empty', lastSync: null, lastSyncError: null, shopify: blankShopify() };
 }
 
@@ -75,6 +99,10 @@ function load() {
     console.error(`store: store.json${where} can't be read (${e.message}); copied to ${path.basename(aside)} and loaded store.json.bak instead.`);
     data = bak;
   }
+  try { migrate(data, `store.json${where}`); } catch (e) {   // a newer app's file: refuse, never overwrite (SW-047)
+    st.loadError = new StoreLoadError(`${e.message}. Not starting, so nothing is overwritten.`);
+    throw st.loadError;
+  }
   const db = st.db = data;
   db.settings = { ...blank().settings, ...db.settings };
   db.shopify = { ...blankShopify(), ...db.shopify };
@@ -88,14 +116,25 @@ function load() {
 
 /*
  * Demo data never mixes with real data (SW-007): the first real rows to arrive (Flow, Sheet, CSV,
- * Shopify) clear the demo first. everLive is kept for good, so demo data never comes back at start-up.
+ * Shopify) clear the demo first: its rows, and what was done on it, "Mark ordered" (onorder.json) and the
+ * slow-seller decisions (decisions.json), so no demo PO lowers a real order quantity and no demo "drop"
+ * hides a real product. Every path goes through here: add() / replaceOrders() call goLive(), and the
+ * Shopify pull calls endDemo() before it reads anything. everLive is kept for good, so demo data never
+ * comes back at start-up.
  */
+function endDemo(d = load()) {
+  if (d.source !== 'demo') return false;
+  d.stock = []; d.orders = []; d._stockKeys = new Set(); d._orderKeys = new Set(); d.shopify = blankShopify(); d.catalog = {};
+  d.source = 'empty';
+  if (Object.keys(onorder.all()).length) onorder.clear();
+  decide.clear();
+  save();
+  console.log('store: real data arrived, demo data cleared (rows, Mark ordered, decisions)');
+  return true;
+}
 function goLive(d, rows) {
   if (!rows.length) return;
-  if (d.source === 'demo') {
-    d.stock = []; d.orders = []; d._stockKeys = new Set(); d._orderKeys = new Set(); d.shopify = blankShopify();
-    console.log('store: real data arrived, demo data cleared');
-  }
+  endDemo(d);
   if (d.source !== 'live') d.source = 'live';
   d.everLive = true;
 }
@@ -270,4 +309,4 @@ function setSync(info) { Object.assign(load(), info); save(); }
 
 function setShopify(patch) { const d = load(); d.shopify = { ...d.shopify, ...patch }; save(); return d.shopify; }
 
-module.exports = { SOURCES, load, add, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };
+module.exports = { SCHEMA_VERSION, migrate, SOURCES, load, add, endDemo, setCatalog, prune, pruneStock, replaceAll, replaceOrders, setSettings, setSync, setShopify, save, saveAll, health, healthAll, StoreLoadError, file, bakFile, KEEP_DAYS, _forget };

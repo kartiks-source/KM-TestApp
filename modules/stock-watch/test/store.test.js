@@ -361,3 +361,105 @@ test('server: /status 503 when the last Shopify pull is over 45 min old, 200 whe
     } finally { await stop(s); }
   }
 });
+
+/* ---------- SW-047: schemaVersion written and read ---------- */
+
+test('schemaVersion: a new store is written with schemaVersion 1', () => {
+  const dir = tmpDir(); const s = freshStore(dir);
+  s.load(); assert.equal(s.save(true), true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8')).schemaVersion, s.SCHEMA_VERSION);
+  assert.equal(s.SCHEMA_VERSION, 1);
+});
+
+test('schemaVersion: a file without it (Sprint 1 shape) loads as schema 1, rows kept, and is saved with it', () => {
+  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  fs.writeFileSync(file, JSON.stringify({ settings: { leadDays: 9 }, stock: [], orders: [{ t: Date.now(), order: '#1', variantId: '1', qty: 1, price: 5 }], source: 'live' }));
+  const s = freshStore(dir);
+  const d = s.load();
+  assert.equal(d.schemaVersion, 1); assert.equal(d.orders.length, 1); assert.equal(d.settings.leadDays, 9);
+  s.save(true);
+  const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(j.schemaVersion, 1); assert.equal(j.orders.length, 1);
+});
+
+test('schemaVersion: a file from a newer app is refused and never overwritten', () => {
+  const dir = tmpDir(); const file = path.join(dir, 'store.json');
+  const text = JSON.stringify({ schemaVersion: 2, settings: {}, stock: [], orders: [], source: 'live', future: { x: 1 } });
+  fs.writeFileSync(file, text);
+  const s = freshStore(dir);
+  assert.throws(() => s.load(), (e) => e instanceof s.StoreLoadError && /schema 2.*reads up to schema 1/.test(e.message));
+  assert.equal(s.health().ok, false);
+  assert.equal(fs.readFileSync(file, 'utf8'), text);
+  assert.throws(() => s.migrate({ schemaVersion: 'x' }), /bad schemaVersion/);
+});
+
+test('server: a store file from a newer app → refuses to start, file untouched', async () => {
+  const dir = tmpDir(); const file = SF(dir, 'second-demo');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const text = JSON.stringify({ schemaVersion: 99, settings: {}, stock: [], orders: [], source: 'live' });
+  fs.writeFileSync(file, text);
+  const r = await runToExit(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Refusing to start.*schema 99/);
+  assert.equal(fs.readFileSync(file, 'utf8'), text);
+});
+
+/* ---------- SW-007: demo → live also drops Mark ordered and decisions made on the demo, in every path ---------- */
+
+test('demo → live by Flow, Sheet, CSV or Shopify: demo rows, Mark ordered and decisions all go', () => {
+  const onorder = require('../src/onorder'); const decide = require('../src/decide');
+  const now = Date.now(), real = [{ t: now, order: '#R', variantId: '9', qty: 1, price: 10 }];
+  const paths = {
+    flow: (s) => s.add('orders', real.map((r) => ({ ...r })), 'flow'),
+    sheet: (s) => s.add('stock', [{ t: now, variantId: '9', before: 1, now: 3 }], 'sheet'),
+    csv: (s) => s.add('orders', real.map((r) => ({ ...r })), 'csv'),
+    shopifyOrders: (s) => s.replaceOrders(['#R'], real.map((r) => ({ ...r })), 'shopify'),
+    shopifyPull: (s) => s.endDemo(),   // pullOne() calls it before reading anything
+  };
+  for (const [name, go] of Object.entries(paths)) {
+    const dir = tmpDir(); const s = freshStore(dir); onorder.reset(); decide.reset();
+    s.replaceAll([{ t: now, variantId: 'demo1', before: 1, now: 2 }], [{ t: now, order: '#d', variantId: 'demo1', qty: 1, price: 1 }], 'demo');
+    assert.equal(onorder.mark([{ id: 'demo1', qty: 5, eta: now + 864e5 }]).ok, true);
+    assert.equal(decide.set('demo1', 'drop', 0.1).ok, true);
+    go(s);
+    assert.deepEqual(onorder.all(), {}, `${name}: Mark ordered cleared`);
+    assert.deepEqual(decide.all(), {}, `${name}: decisions cleared`);
+    assert.ok(!s.load().stock.concat(s.load().orders).some((r) => r.src === 'demo'), `${name}: no demo rows`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'onorder.json'), 'utf8')), {}, `${name}: on disk too`);
+  }
+});
+
+test('a live store keeps its Mark ordered and decisions when more real rows arrive', () => {
+  const onorder = require('../src/onorder'); const decide = require('../src/decide');
+  const s = freshStore(tmpDir()); onorder.reset(); decide.reset();
+  s.add('orders', [{ t: Date.now(), order: '#1', variantId: '9', qty: 1, price: 10 }], 'flow');
+  onorder.mark([{ id: '9', qty: 5, eta: Date.now() + 864e5 }]); decide.set('9', 'keep', 1);
+  s.add('orders', [{ t: Date.now(), order: '#2', variantId: '9', qty: 1, price: 10 }], 'flow');
+  assert.equal(s.endDemo(), false);
+  assert.ok(onorder.all()['9']); assert.ok(decide.all()['9']);
+});
+
+test('server: demo → Flow ingest or CSV import drops demo Mark ordered and decisions', async () => {
+  for (const via of ['flow', 'import']) {
+    const dir = tmpDir(); const s = await startServer(dir);
+    try {
+      const rep = await (await fetch(s.base + '/api/report')).json();
+      const id = String(rep.products[0].id), slow = rep.decide[0];
+      const eta = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10);
+      assert.equal((await fetch(s.base + '/api/onorder', { method: 'POST', body: JSON.stringify({ items: [{ id, qty: 3, eta }] }) })).status, 200);
+      if (slow) assert.equal((await fetch(s.base + '/api/decide', { method: 'POST', body: JSON.stringify({ id: slow.id, decision: 'keep' }) })).status, 200);
+      if (via === 'flow') {
+        const key = (await (await fetch(s.base + '/api/settings')).json()).settings.ingestKey;
+        assert.equal((await fetch(s.base + '/ingest/order', { method: 'POST', headers: { 'x-ingest-key': key }, body: JSON.stringify({ order: '#REAL', variant_id: '777', qty: 1, price: 9 }) })).status, 200);
+      } else {
+        const csv = `Time,Order,Variant ID,SKU,Qty,Unit price\n${new Date().toISOString().slice(0, 16).replace('T', ' ')},#REAL,777,S,1,9\n`;
+        const r = await fetch(s.base + '/api/import?kind=order', { method: 'POST', headers: { 'content-type': 'text/csv' }, body: csv });
+        assert.equal(r.status, 200, await r.clone().text());
+      }
+      assert.deepEqual((await (await fetch(s.base + '/api/onorder')).json()).onOrder, {}, `${via}: Mark ordered gone`);
+      assert.deepEqual((await (await fetch(s.base + '/api/decide')).json()).decisions, {}, `${via}: decisions gone`);
+      const after = await (await fetch(s.base + '/api/report')).json();
+      assert.equal(after.source, 'live');
+    } finally { await stop(s); }
+  }
+});

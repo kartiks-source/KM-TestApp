@@ -1,6 +1,24 @@
 # Changelog: Stock-out Watch (web app)
 
-User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet; `/status` does not show a version yet (SW-056).
+User-facing changes, newest first. Semver: minor when a number's rule changes or a feature lands, patch for fixes. The version in `package.json` matches the top heading. Versions before 0.9.0 were reconstructed from `docs/DEVLOG.md` on 20 Nov 2026 (no tags existed); dates are the DEVLOG dates. Per DEVLOG, nothing from 0.6.0 on has been deployed yet. Since 1.0.0-rc.1, `/health`, `/status` and the page footer show the version and the build's commit (SW-056); `test/docs.test.js` checks the top heading matches `package.json`.
+
+## 1.0.0-rc.1 · 2026-11-20 · release candidate: Sprint 1 + Sprint 2 + several stores
+
+The first version meant for production, once the open items in `docs/BACKLOG.md` (Performity IP allow-list, first real store compared against Shopify admin) are closed. What it is, in one place:
+
+- **Decisions:** what to reorder today and how many (in-stock sales rate, lead time, cover, buffer; Mark ordered counts open POs), the ₹ and profit lost to every stock-out, cash stuck in overstock, slow sellers to keep / drop / clear, Pause / Push lists for marketing, a plain "why" and order-by date on every row, a reorder CSV usable as a PO (Sprints 1–2: SW-003, SW-012, SW-024–026, SW-032).
+- **Seeing it:** trend bars and % in every decision row, now group rows too; Group by parent product, category, collection or tag; Yesterday strip and This month; role home views that only remove UI; everything shown by default; a morning digest per role by webhook, or Copy / WhatsApp (SW-020–022, SW-027, SW-028).
+- **Data:** Shopify read-only (Performity token API, Key Vault or variables), Flow, Google Sheet or CSV, one source per store; a catalog snapshot for current stock; demo data that never mixes with real data (SW-002, SW-006, SW-007, ADR-0014).
+- **Several stores** (0.10.0, ADR-0015): one app, a store picker with status dots, each store's data in its own folder, pulls one store at a time.
+- **Safe to run:** safe saves and quarantine of bad files, daily and before-wipe backups, restore on start, login limiter, view-only password, settings change log, security headers, `/health` and `/status` for monitors, stale-data banner (SW-004, SW-005, SW-008–010, SW-016–019, SW-029).
+
+New in this release:
+
+- Added: `/health`, `/status` and the page footer show the app version and the commit it was built from (`v1.0.0-rc.1 · abc1234`; `dev` for an unstamped build). Deploy step: `npm run stamp` before `railway up` (SW-056, `docs/RUNBOOK.md`).
+- Added: `store.json` carries `schemaVersion: 1`. Older files load and are saved with it; a file or `restore.json` from a newer version is refused and never overwritten (SW-047, `FORMATS.md`).
+- Added: group rows (Group by) show the 8-week trend bars like product rows: desktop Trend cell, phone card header (SW-021).
+- Fixed: real data arriving on a demo store (Flow, Sheet, CSV or Shopify) now also clears the demo's Mark ordered and slow-seller decisions, so a demo PO never lowers a real order. Removed the CSV upload's "Remove the demo data first" checkbox, which did nothing (SW-007).
+- Changed: morning digest settings (hour, who gets it, pause) and a change of the server's digest webhook show in the settings change log (SW-029).
 
 ## 0.10.0 · 2026-11-20 · several stores, everything shown by default
 

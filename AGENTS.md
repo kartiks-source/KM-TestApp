@@ -11,11 +11,18 @@ docs/DEVLOG.md            what changed, when, and why (newest first)
 docs/DECISIONS.md         decisions that apply across modules
 docs/ORCA.md              how to run several agents in parallel with Orca
 docs/RUNBOOK.md           deploy, rollback, backups, restore, what to do when something breaks
+docs/BACKLOG.md           the work, by SW-number; docs/DEFINITION-OF-DONE.md (DoR, DoD, PR checklist); docs/adr/ (ADRs)
 SECURITY.md               every secret, where it lives, how to rotate it; auth model; destructive endpoints
-.github/workflows/test.yml  CI: npm test on every push and PR
+.github/workflows/test.yml  CI on every push and PR: job `test` (npm test, Node 20 + 22, no install) and job `ui`
+                          (npm ci → Playwright 1.65.1 + Chromium: npm run test:ui, smoke, roles smoke; screenshots artifact)
+package.json              root scripts: test, test:ui (browser tests), test:smoke (smoke + roles smoke), stamp (BUILD_SHA before deploy)
+.railway/railway.ts       Railway as code: region, one replica, /health check, /data volume
 modules/<name>/           one folder per module, with its own AGENTS.md
   AGENTS.md               the module's context: purpose, data flow, files, status, next steps
   LOGIC.md                how every number is worked out and why: rule, reason, alternatives, limits
+  CHANGELOG.md            user-facing changes per version (semver; top heading = package.json version, tested)
+  API.md, FORMATS.md      every route; every row format and stored file (schemaVersion) (web app modules)
+  .env.example            every variable the code reads, blank (no real values, ever)
   CLAUDE.md               imports AGENTS.md for Claude Code
 Dockerfile                builds the module deployed on Railway (now: stock-watch)
 ```
@@ -32,7 +39,7 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 3. **Log every change** in `docs/DEVLOG.md`: date, module, what changed and why, and anything left open. Newest first, a few lines each. Add the same line to the shared dev log page, Catalys Modules: Dev Log (https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq), which the team reads.
 4. **Explain the logic** in the module's `LOGIC.md`: every number the user sees, with its rule, why we chose it, what else we considered and when it can be wrong. Change it in the same commit as the rule, so anyone who questions a number can check it.
 5. **Record decisions** that outlive one change (data access, hosting, security) in `docs/DECISIONS.md`, with the date and who decided.
-6. **Tests before push:** `npm test` at the root runs every module's tests. Add a test for each new behaviour.
+6. **Tests before push:** `npm test` at the root runs every module's tests (plain Node, browser tests skip). UI changes also run `npm run test:ui` and `npm run test:smoke` (Playwright: `npm ci` at the root, or `PLAYWRIGHT_PATH`; `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome); CI's `ui` job runs both. Add a test for each new behaviour.
 7. **No secrets in git, ever.** Keys go in Railway variables or Azure Key Vault. Never in code, Markdown, logs or Google Sheets.
 8. **Shopify is read-only** in every module. Only GraphQL queries are allowed through; no mutations, and no webhooks registered under someone else's app.
 9. **One agent, one worktree, one branch.** When several agents run at once in Orca, each gets its own worktree (see `docs/ORCA.md`). Merge to `main` only after tests pass.
@@ -47,7 +54,7 @@ Dockerfile                builds the module deployed on Railway (now: stock-watc
 
 ## Deploy
 
-- Deploy is manual: from a clean, pushed `main` with CI green, run `railway up` at the repo root (Railway project `stock-watch`, service `web`): https://web-production-6dd42b8d.up.railway.app. Pushing to `main` does **not** deploy (ADR-0012). Steps, rollback, backups and restore: `docs/RUNBOOK.md`. Secrets and auth: `SECURITY.md`.
+- Deploy is manual: from a clean, pushed `main` with CI green, run `npm run stamp && railway up && rm modules/stock-watch/BUILD_SHA` at the repo root (the stamp puts the commit on `/health`, `/status` and the footer) (Railway project `stock-watch`, service `web`): https://web-production-6dd42b8d.up.railway.app. Pushing to `main` does **not** deploy (ADR-0012). Steps, rollback, backups and restore: `docs/RUNBOOK.md`. Secrets and auth: `SECURITY.md`.
 - Railway builds the root `Dockerfile`, which copies `modules/stock-watch`.
 - Variables are listed in `modules/stock-watch/AGENTS.md`.
 

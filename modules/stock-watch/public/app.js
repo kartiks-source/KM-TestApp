@@ -118,7 +118,7 @@
     $('#source').innerHTML = `${badge}<span>${inr.format(d.stockRows)} stock changes · ${inr.format(d.orderRows)} order lines</span>`
       + (d.lastStock ? `<span>Last stock change: ${dt(d.lastStock)}</span>` : '')
       + (src.err ? `<span class="badge err">Sheet sync: ${esc(src.err)}</span>` : src.lastSync ? `<span>Sheet synced: ${dt(src.lastSync)}</span>` : '')
-      + shopifyBadge();
+      + shopifyBadge() + appVersion(r.app);
     $$('.range button').forEach((b) => b.classList.toggle('on', b.dataset.days === String(state.days)));
     if (viewOnly()) { $('#tabs a[data-view="data"]').hidden = true; pill.removeAttribute('href'); }   // view-only: no Data page (SW-029)
   }
@@ -175,17 +175,30 @@
     return `<details class="fold-in"><summary>Last ${list.length} sync${list.length === 1 ? '' : 's'} · latest ${dt(last.start)}, ${took(last.ms)}, ${last.error ? 'failed' : 'OK'}</summary><div class="log">${list.map(runLine).join('')}</div></details>`;
   }
 
+  /* which build is running (SW-056): version + commit, last in the footer; "dev" when the build carries no SHA */
+  const appVersion = (a) => (a && a.version ? `<span class="ver" title="App version and the commit it was built from${a.sha ? ` (${esc(a.sha)})` : ': none recorded, a local or unstamped build'}">v${esc(a.version)} · ${esc(a.short || 'dev')}</span>` : '');
+
   /* ---------- view-only sign-in and the settings change log (SW-029) ---------- */
   const viewOnly = () => state.role === 'view';
-  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key' };
+  const SETTING_LABEL = { ...Object.fromEntries(ASSUME.map(([k, l]) => [k, l.replace(/ \((days|per day)[^)]*\)$/, '')])), storeName: 'Store name', tzOffsetMin: 'Time zone (min from UTC)', sheetStockCsv: 'Stock log link', sheetOrderCsv: 'Order log link', ingestKey: 'Flow key',
+    'digest.hour': 'Digest hour', 'digest.roles': 'Digest goes to', 'digest.paused': 'Digest paused', 'digest.webhook': 'Digest webhook' };   // digest: SW-028 settings in the same log
   const shortVal = (v) => (v == null || v === '' ? '–' : String(v).length > 40 ? String(v).slice(0, 37) + '…' : String(v));
   const changeText = (c) => `${esc(SETTING_LABEL[c.key] || c.key)}: ${esc(shortVal(c.old))} → <b>${esc(shortVal(c.new))}</b>`;
   function changeLog() {
     const list = state.changes || [];
-    return `<details class="fold-in"><summary>Advanced: change log</summary>${list.length
+    return `<details class="fold-in" id="change-log"><summary>Advanced: change log</summary>${list.length
       ? `<div class="log">${list.map((c) => `<div class="ep"><span class="muted">${dt(c.at)}</span><span>${changeText(c)}</span><span class="muted">by ${esc(c.by)}</span></div>`).join('')}</div>`
       : '<p class="muted small">No settings changed yet.</p>'}</details>`;
   }
+
+  /* digest settings are saved by digest-ui.js: re-read the log in place, so the change shows without closing anything */
+  document.addEventListener('sw:settings-changed', async () => {
+    try {
+      const set = await api('/api/settings'); state.changes = set.changes || [];
+      const el = $('#change-log'); if (!el) return;
+      const open = el.open; el.outerHTML = changeLog(); if (open) $('#change-log').open = true;
+    } catch { /* the next load shows it */ }
+  });
 
   /* ---------- planning assumptions: change a number, every figure updates; save when happy ---------- */
   function planBar() {
@@ -212,7 +225,9 @@
     const a = local(weekStart(i)), b = local(weekEnd(i));
     return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}` : `${a.getUTCDate()} ${MON[a.getUTCMonth()]}–${b.getUTCDate()} ${MON[b.getUTCMonth()]}`;
   };
-  const weekTip = (x, i) => (x.units == null ? `${WEEK_LABEL(i)}: no data yet` : `${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outDays ? `, out ${n1(x.outDays)} d` : ''}`);
+  const weekTip = (x, i) => (x.units == null ? `${WEEK_LABEL(i)}: no data yet` : `${WEEK_LABEL(i)}: ${inr.format(x.units)} sold${x.outProducts != null   // a group row (SW-021): how many of its products were out
+    ? (x.outProducts ? `, ${inr.format(x.outProducts)} of ${inr.format(x.products)} product${x.products === 1 ? '' : 's'} out part of the week` : '')
+    : x.outDays ? `, out ${n1(x.outDays)} d` : ''}`);
   function spark(p, w = 64, h = 20) {
     const wk = p.weeks || []; if (!wk.length) return '';
     const max = Math.max(1, ...wk.map((x) => x.units || 0)), bw = w / wk.length, gap = bw > 6 ? 1 : 0.5;
@@ -671,7 +686,7 @@
     ...(hasCost ? [{ k: 'lostProfit', label: 'Profit lost', r: 1, tip: 'Units lost × (price paid − unit cost)', val: (g) => g.lostProfit ?? -1, f: (g) => (g.lostProfit ? `<span class="lostv">${money(g.lostProfit)}</span>` : '–') }] : []),
     { k: 'orderValue', label: 'Order ₹', r: 1, tip: 'Cash to order today for this group', f: (g) => (g.orderValue ? `<b>${money(g.orderValue)}</b>` : '–') },
     { k: 'excessValue', label: 'Overstock ₹', r: 1, tip: 'Cash in stock beyond need, overstocked products only', f: (g) => (g.excessValue ? `<span class="plumv">${money(g.excessValue)}</span>` : '–') },
-    { k: 'trendPct', label: 'Trend', tip: 'The group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendOnly, val: (g) => g.trendPct ?? -999 },
+    { k: 'trendPct', label: 'Trend', tip: 'Units sold per week by the group’s products, last 8 weeks (rose = one or more of them out part of that week); % = the group’s sales per in-stock day, last 14 days vs the 14 before. Green = rising and 10 points or more better than the typical product; red = falling and 10 points or more worse', f: trendCell, val: (g) => g.trendPct ?? -999 },
   ];
   function groupView() {
     const lens = state.lens, d = groupData();
@@ -690,7 +705,7 @@
     return `${head(d.overlap ? sub : `${sub} · <b>${inr.format(t.needOrder)}</b> to order today · <span class="nw">${money(t.sold)} sold</span> · <span class="lostv">${money(t.lost)} lost</span>`)}
       ${allBtn ? `<div class="toolbar"><div class="chips">${allBtn}</div></div>` : ''}
       <div class="groups">${table('groups', GROUP_COLS(lens, state.report.totals.hasCost), rows, 'Nothing to group yet.', (g) => `
-        <header><h3><span class="pname">${esc(g.label)}</span></h3><div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
+        <header><h3><span class="pname">${esc(g.label)}</span></h3>${mspark(g)}<div class="mq"><b class="lostv">${money(g.lost)}</b><small>sales lost</small></div></header>
         <div class="mfacts"><span><b>${inr.format(g.n)}</b> ${g.n === 1 ? 'product' : 'products'}</span><span><b>${inr.format(g.needOrder)}</b> of ${inr.format(g.n)} to order${g.orderValue ? ` · ${money(g.orderValue)}` : ''}</span><span><b>${money(g.sold)}</b> sold</span>${g.excessValue ? `<span class="plumv">${money(g.excessValue)} overstock</span>` : ''}${trendOnly(g)}</div>`)}</div>
       <p class="gnote">${note} Click a row to see its products.${fresh ? ` ${fresh}` : ''}</p>`;
   }
@@ -740,7 +755,7 @@
         <p class="muted">Columns, with a header row. Stock: <span class="mono">Time, Variant ID, SKU, Product, Variant, Stock before, Stock now, Price</span>. Orders: <span class="mono">Time, Order, Variant ID, SKU, Qty, Unit price</span>. Dates day first: <span class="mono">15/11/2026 10:30</span> or <span class="mono">2026-11-15 10:30</span>.</p>
         <div class="form"><div class="field"><label for="imp-kind">File holds</label><select id="imp-kind"><option value="stock">Stock changes</option><option value="order">Order lines</option></select></div>
           <div class="field"><label for="imp-file">CSV file</label><input type="file" id="imp-file" accept=".csv,text/csv"></div></div>
-        <label class="muted"><input type="checkbox" id="imp-replace" ${src.kind === 'demo' ? 'checked' : ''}> Remove the demo data first</label>
+        ${src.kind === 'demo' ? '<p class="muted small">Uploading replaces the demo data, with anything marked ordered or decided on it.</p>' : ''}
         <div><button class="btn" id="imp-go">Upload</button></div></details>
 
       <h2 class="sect">Settings</h2>
@@ -924,7 +939,7 @@
       if (t.id === 'imp-go') {
         const f = $('#imp-file').files[0]; if (!f) { toast('Choose a CSV file first'); return; }
         t.disabled = true;
-        const j = await api(`/api/import?kind=${$('#imp-kind').value}${$('#imp-replace').checked ? '&replaceDemo=1' : ''}`, { method: 'POST', body: await f.text(), json: false, headers: { 'content-type': 'text/csv' } });
+        const j = await api(`/api/import?kind=${$('#imp-kind').value}`, { method: 'POST', body: await f.text(), json: false, headers: { 'content-type': 'text/csv' } });
         const why = Object.entries(SKIP_WHY).filter(([k]) => j.skips?.[k]).map(([k, l]) => `${j.skips[k]} ${l}`).join(', ');
         toast(`Read ${j.read} rows, ${j.added} new${j.skipped ? `, ${j.skipped} skipped (${why})` : ''}`); await load();
       }

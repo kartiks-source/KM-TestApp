@@ -113,6 +113,38 @@ test('settings never show the webhook URL, only its host; never stored', () => {
   assert.doesNotMatch(JSON.stringify(store.load()), /SECRET123/);   // not in the store (data volume), so not in GET /api/settings either
 });
 
+test('digest settings changes go to the store’s change log (SW-029): hour, roles, pause; nothing for a no-op save', () => {
+  const audit = require('../src/audit');
+  const n0 = audit.recent(store.load(), 200).length;
+  assert.equal(S.applyPatch({ hour: 9, paused: false }), '');   // same as now
+  assert.equal(audit.recent(store.load(), 200).length, n0, 'no change, no entry');
+  assert.equal(S.applyPatch({ hour: 7, paused: true, roles: ['ops', 'founder'] }, 'admin (script)'), '');
+  const top = audit.recent(store.load(), 3);
+  assert.deepEqual(top.map((e) => e.key).sort(), ['digest.hour', 'digest.paused', 'digest.roles']);
+  assert.ok(top.every((e) => e.by === 'admin (script)'));
+  assert.deepEqual(top.find((e) => e.key === 'digest.hour'), { ...top.find((e) => e.key === 'digest.hour'), old: 9, new: 7 });
+  assert.equal(top.find((e) => e.key === 'digest.roles').new, 'founder, ops');   // in the app's role order
+  assert.equal(top.find((e) => e.key === 'digest.paused').old, false);
+  assert.equal(S.applyPatch({ hour: 9, paused: false, roles: S.publicConf().scheduled.map((x) => x.role) }), '');   // back to the defaults
+});
+
+test('a webhook changed on the server (env) is logged once by "server (env)", host only, never the URL', () => {
+  const audit = require('../src/audit');
+  S.noteWebhook();   // current env seen
+  const n0 = audit.recent(store.load(), 200).length;
+  S.noteWebhook();
+  assert.equal(audit.recent(store.load(), 200).length, n0, 'unchanged: nothing logged');
+  process.env.DIGEST_WEBHOOK_URL_CEO = 'https://own.example.com/x?token=CEOSECRET';
+  try {
+    S.noteWebhook(); S.noteWebhook();
+    const log = audit.recent(store.load(), 200);
+    assert.equal(log.length, n0 + 1, 'logged once');
+    assert.equal(log[0].key, 'digest.webhook'); assert.equal(log[0].by, 'server (env)');
+    assert.match(log[0].new, /ceo → own\.example\.com/);
+    assert.doesNotMatch(JSON.stringify(store.load()), /CEOSECRET/);
+  } finally { delete process.env.DIGEST_WEBHOOK_URL_CEO; S.noteWebhook(); }
+});
+
 test('per-role recipients: DIGEST_WEBHOOK_URL_<ROLE> wins for that role, the others use DIGEST_WEBHOOK_URL', () => {
   const other = 'https://hooks.example.com/ceo?token=CEOSECRET';
   process.env.DIGEST_WEBHOOK_URL_CEO = other;
@@ -198,6 +230,10 @@ test('routes: digest JSON + text, bad role 400, settings PUT validates, send-now
     assert.equal((await fetch(`${base}/api/digest/settings`, { method: 'PUT', body: JSON.stringify({ webhookUrl: 'http://x.example' }) })).status, 400);
     const s = await (await fetch(`${base}/api/digest/settings`)).json();
     assert.doesNotMatch(JSON.stringify(s), /SECRET123/);
+    assert.equal((await fetch(`${base}/api/digest/settings`, { method: 'PUT', body: JSON.stringify({ hour: 6 }) })).status, 200);
+    const log = (await (await fetch(`${base}/api/settings`)).json()).changes;   // the change log under Settings (SW-029)
+    assert.deepEqual({ key: log[0].key, old: log[0].old, new: log[0].new, by: log[0].by }, { key: 'digest.hour', old: 9, new: 6, by: 'admin' });
+    await fetch(`${base}/api/digest/settings`, { method: 'PUT', body: JSON.stringify({ hour: 9 }) });
     const before = got.length;
     const sent = await (await fetch(`${base}/api/digest/send?role=buyer`, { method: 'POST' })).json();
     assert.equal(sent.ok, true); assert.equal(got.length, before + 1); assert.equal(got.at(-1).body.role, 'buyer');

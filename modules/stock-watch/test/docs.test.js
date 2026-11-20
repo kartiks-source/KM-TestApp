@@ -61,3 +61,12 @@ test('SECURITY.md names every secret variable the code reads and every write rou
   }
   assert.doesNotMatch(sec, /Planned hardening|Known gaps|SW-008 makes it|Hardening to a random key|when they land/, 'auth text describes the code as it is');
 });
+
+/* SW-056: the version people see (/health, /status, footer) is the one the CHANGELOG describes. */
+test('CHANGELOG.md top heading = package.json version', () => {
+  const MOD = path.join(__dirname, '..');
+  const v = JSON.parse(fs.readFileSync(path.join(MOD, 'package.json'), 'utf8')).version;
+  const top = fs.readFileSync(path.join(MOD, 'CHANGELOG.md'), 'utf8').match(/^## (\S+) · /m);
+  assert.ok(top, 'CHANGELOG has a "## <version> · <date>" heading');
+  assert.equal(top[1], v);
+});

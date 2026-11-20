@@ -44,6 +44,17 @@ test('restore on boot: a file that is not a store is rejected and the current st
   fs.rmSync(path.join(SD, 'store.json')); clean();
 });
 
+test('restore on boot: a backup from a newer app (schemaVersion above ours) is rejected (SW-047)', () => {
+  fs.mkdirSync(SD, { recursive: true });
+  fs.writeFileSync(path.join(SD, 'store.json'), JSON.stringify({ settings: {}, stock: [], orders: [], source: 'live' }));
+  const before = fs.readFileSync(path.join(SD, 'store.json'), 'utf8');
+  fs.writeFileSync(path.join(SD, 'restore.json'), JSON.stringify({ schemaVersion: store.SCHEMA_VERSION + 1, settings: {}, stock: [], orders: [], source: 'live' }));
+  const r = backup.restorePending(T);
+  assert.equal(r.restored, false);
+  assert.equal(fs.readFileSync(path.join(SD, 'store.json'), 'utf8'), before);
+  fs.rmSync(path.join(SD, 'store.json')); fs.rmSync(r.rejected); clean();
+});
+
 test('empty and demo stores are not backed up', () => {
   store.replaceAll([], [], 'empty');
   assert.equal(backup.daily(T), null);

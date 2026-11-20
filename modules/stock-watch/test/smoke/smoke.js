@@ -165,7 +165,7 @@ async function run(browser, base, vp, own) {
     const csv = `Time,Variant ID,SKU,Product,Variant,Stock before,Stock now,Price\n${new Date().toISOString()},smoke-1,SMOKE-1,Smoke test item,,5,4,499\n`;
     await page.setInputFiles('#imp-file', { name: 'smoke.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
     await page.selectOption('#imp-kind', 'stock');
-    await page.setChecked('#imp-replace', false);
+    if (await page.$('#imp-replace')) throw new Error('the dead "Remove the demo data first" checkbox is back (SW-007: the store always clears the demo)');
     await page.click('#imp-go');
     await page.waitForFunction(() => /Read \d+ rows/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 5000 });
     check(vp.name, 'CSV import', true, await page.textContent('#toast'));

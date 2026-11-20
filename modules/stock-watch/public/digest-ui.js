@@ -79,6 +79,7 @@
         t.disabled = true;
         $('#digest-body').innerHTML = body(await api('/api/digest/settings', { method: 'PUT', body: JSON.stringify(patch) }));
         toast('Digest settings saved');
+        document.dispatchEvent(new Event('sw:settings-changed'));   // app.js re-reads the change log (SW-029)
       }
       if (t.id === 'dg-send') {
         t.disabled = true; t.textContent = 'Sending…';

@@ -112,13 +112,14 @@ function restorePending(now = Date.now()) {
   let ok = false, off = 330;
   try {
     const d = JSON.parse(fs.readFileSync(RESTORE, 'utf8'));
-    ok = !!d && Array.isArray(d.stock) && Array.isArray(d.orders) && !!d.settings && typeof d.settings === 'object';
+    ok = !!d && Array.isArray(d.stock) && Array.isArray(d.orders) && !!d.settings && typeof d.settings === 'object'
+      && !(d.schemaVersion > store.SCHEMA_VERSION);   // a newer app's backup: this one would drop what it doesn't know (SW-047)
     if (ok && Number.isFinite(d.settings.tzOffsetMin)) off = d.settings.tzOffsetMin;
   } catch { ok = false; }
   if (!ok) {
     const bad = `${RESTORE}.rejected-${now}`;
     fs.renameSync(RESTORE, bad);
-    console.error(`restore: ${path.basename(bad)} is not a Stock-out Watch store (needs stock, orders, settings); kept the current store`);
+    console.error(`restore: ${path.basename(bad)} is not a Stock-out Watch store this version can read (needs stock, orders, settings; schema ≤ ${store.SCHEMA_VERSION}); kept the current store`);
     return { restored: false, rejected: bad };
   }
   let kept = null;

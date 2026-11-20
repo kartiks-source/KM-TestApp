@@ -97,16 +97,20 @@ test('Products → Slow sellers to decide: Keep hides the row, Undo brings it ba
   await pg.context().close();
 });
 
-test('Phone 390: new small buttons are at least 44 px tall; sort label names the list order', opts, async () => {
-  const pg = await page(390, 844);
-  await pg.goto(base + '/#products'); await pg.waitForSelector('[data-filter-products="pause"]');
-  await pg.click('[data-filter-products="pause"]');
-  const hs = await pg.$$eval('.mktbar .btn.xs', (b) => b.map((x) => x.getBoundingClientRect().height));
-  assert.ok(hs.length && hs.every((h) => h >= 44), `button heights ${hs}`);
-  assert.equal(await pg.$eval('.phone select[data-msort] option[value=""]', (o) => o.textContent), 'Out first, then fewest days left');
-  assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no sideways scroll');
-  assert.deepEqual(pg.errors, []);
-  await pg.context().close();
+const PHONES = [[390, 844], [360, 740]];   // SW-023: every phone check at both sizes
+
+test('Phone 390 and 360: new small buttons are at least 44 px tall; sort label names the list order', opts, async () => {
+  for (const [w, h] of PHONES) {
+    const pg = await page(w, h);
+    await pg.goto(base + '/#products'); await pg.waitForSelector('[data-filter-products="pause"]');
+    await pg.click('[data-filter-products="pause"]');
+    const hs = await pg.$$eval('.mktbar .btn.xs', (b) => b.map((x) => x.getBoundingClientRect().height));
+    assert.ok(hs.length && hs.every((x) => x >= 44), `${w}: button heights ${hs}`);
+    assert.equal(await pg.$eval('.phone select[data-msort] option[value=""]', (o) => o.textContent), 'Out first, then fewest days left');
+    assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}: no sideways scroll`);
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
 });
 
 test('Products filters: no duplicate lists; overstock tile opens Push these (critic r2 S1)', opts, async () => {
@@ -125,16 +129,54 @@ test('Products filters: no duplicate lists; overstock tile opens Push these (cri
   await pg.context().close();
 });
 
-test('Marketing phone home leads with its decision: "Pause promotion on N products", cards lead with Back in stock (critic r2 M1)', opts, async () => {
-  const pg = await page(390, 844);
-  await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
-  const r = await (await fetch(base + '/api/report?days=30')).json();
-  const n = r.products.filter((p) => p.mkt === 'pause').length;
-  assert.equal(await pg.textContent('.headline h1'), `Pause promotion on ${n.toLocaleString('en-IN')} products`);
-  const card = await pg.$eval('.phone .mcard header', (h) => ({ st: h.querySelector('.st')?.textContent || '', order: !!h.querySelector('.st.g-today') }));
-  assert.match(card.st, /^(Lands|Late|Not ordered|Slow seller)/, `card badge: ${card.st}`);
-  assert.equal(card.order, false, 'no "Order today" badge on the marketing list');
-  assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no sideways scroll');
+test('Marketing phone home (390 and 360) leads with its decision: "Pause promotion on N products", cards lead with Back in stock (critic r2 M1)', opts, async () => {
+  for (const [w, h] of PHONES) {
+    const pg = await page(w, h);
+    await pg.goto(base + '/?role=marketing'); await pg.waitForSelector('[data-filter-products="pause"].on');
+    const r = await (await fetch(base + '/api/report?days=30')).json();
+    const n = r.products.filter((p) => p.mkt === 'pause').length;
+    assert.equal(await pg.textContent('.headline h1'), `Pause promotion on ${n.toLocaleString('en-IN')} products`);
+    const card = await pg.$eval('.phone .mcard header', (x) => ({ st: x.querySelector('.st')?.textContent || '', order: !!x.querySelector('.st.g-today') }));
+    assert.match(card.st, /^(Lands|Late|Not ordered|Slow seller)/, `${w}: card badge: ${card.st}`);
+    assert.equal(card.order, false, 'no "Order today" badge on the marketing list');
+    assert.ok(await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${w}: no sideways scroll`);
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+});
+
+test('Group rows carry a spark like product rows (SW-021): desktop Trend cell, phone card header; fits 1280–1920, 390, 360', opts, async () => {
+  for (const [w, h] of [[1280, 800], [1440, 900], [1920, 1080], ...PHONES]) {
+    const pg = await page(w, h);
+    await pg.goto(base + '/#products'); await pg.waitForSelector('#f-view');
+    await pg.selectOption('#f-view', 'type');
+    await pg.waitForFunction(() => document.querySelectorAll('.groups table tbody tr, .groups .mcard').length > 0);
+    if (w >= 1000) {
+      const m = await pg.evaluate(() => { const b = document.querySelector('.groups .tbl.desk'), t = b.querySelector('table');
+        return { sparks: t.querySelectorAll('tbody .trc svg.spark').length, rows: t.tBodies[0].rows.length, tw: t.getBoundingClientRect().width, bw: b.clientWidth, page: document.documentElement.scrollWidth - innerWidth,
+          tip: t.querySelector('tbody .trc svg.spark title')?.textContent || '' }; });
+      assert.equal(m.sparks, m.rows, `${w}: a spark on every group row`);
+      assert.ok(m.tw <= m.bw + 1, `${w}: groups table ${m.tw} fits ${m.bw}`);
+      assert.equal(m.page, 0, `${w}: no sideways scroll`);
+      assert.match(m.tip, /\d+ sold|no data yet/, `${w}: week tooltip`);
+    } else {
+      const m = await pg.evaluate(() => ({ sparks: [...document.querySelectorAll('.groups .phone .mcard header .mspark')].filter((x) => getComputedStyle(x).display !== 'none').length,
+        cards: document.querySelectorAll('.groups .phone .mcard').length, page: document.documentElement.scrollWidth - innerWidth }));
+      if (w > 380) assert.ok(m.sparks > 0, `${w}: group cards show the spark`);   // ≤ 380 px: sparks step aside on every card, as on product cards
+      assert.equal(m.page, 0, `${w}: no sideways scroll`);
+    }
+    assert.deepEqual(pg.errors, []);
+    await pg.context().close();
+  }
+});
+
+test('Footer names the build (SW-056); Data → Upload a CSV has no demo checkbox, it says the demo goes (SW-007)', opts, async () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const pg = await page();
+  await pg.goto(base + '/#data'); await pg.waitForSelector('#imp-go', { state: 'attached' });
+  assert.match(await pg.textContent('#source .ver'), new RegExp(`^v${pkg.version.replace(/\./g, '\\.')} · ([0-9a-f]{7}|dev)$`));
+  assert.equal(await pg.$('#imp-replace'), null, 'no checkbox');
+  assert.match(await pg.textContent('#imp-go >> xpath=ancestor::details'), /Uploading replaces the demo data/);
   assert.deepEqual(pg.errors, []);
   await pg.context().close();
 });
