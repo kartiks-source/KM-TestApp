@@ -319,7 +319,7 @@ async function pullOne(id) {
     });
     runs.finish(store.load(), run);
     store.setShopify({ lastSync: Date.now(), lastTry: started, lastError: null });
-    if (!store.load().shopify.historyRebuiltAt) await history.run().catch((e) => console.warn('history:', e.message));   // SW-063: once per store, never fails the pull
+    if (history.due(store.load().shopify)) await history.run().catch((e) => console.warn('history:', e.message));   // SW-063: once per store and rules version (1.1.1 redoes 1.1.0's), never fails the pull
     await catalog.refreshCollections().catch((e) => console.warn('collections:', e.message));   // Group by (SW-022): once a day, resumable
     log.info('shopify pull done', { store: id, stockChanges: stock, orderLines: orders, seconds: Math.round((Date.now() - started) / 1000) });
     alert.syncResult(true, '', { store: storeName(id), key: id }).catch(() => {});
