@@ -50,7 +50,7 @@ jobs:
       - name: System libraries only (Chromium from cache)
         if: steps.pw-cache.outputs.cache-hit == 'true'
         run: npx --no-install playwright install-deps chromium
-      - name: Browser tests (test/ui-helpers.test.js)
+      - name: Browser tests (test/ui-helpers + ui-stores)
         run: npm run test:ui
       - name: Smoke (1440x900, 390x844, 360x740)
         if: ${{ !cancelled() }}
