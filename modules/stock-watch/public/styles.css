@@ -677,3 +677,52 @@ table.fixed td:first-child { max-width: none; }
   .panel-head a { min-width: 44px; text-align: center; display: inline-block; }
   .wrap > .toolbar .colpick > summary.btn { min-width: 44px; justify-content: center; }
 }
+
+/* sprint3 A-money: SW-040 suppliers + PO drafts, SW-041 budget cut line (public/money.js) */
+.mbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.mbar .bud { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 0 0 0 10px; }
+.mbar .bud span { color: var(--soft); font-weight: 500; white-space: nowrap; }
+.mbar .bud input { border: 0; background: transparent; width: 120px; padding: 6px 10px 6px 0; outline-offset: 2px; }
+.mbar .lost { color: var(--lost); }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: var(--card); }
+.seg button { border: 0; background: transparent; padding: 5px 10px; font-size: 13px; font-weight: 500; color: var(--ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button.on { background: var(--brand-wash); color: var(--brand); }
+.tbl tr.overb td, .mcard.overb { opacity: .45; }
+.tbl tr.cutline td { background: var(--amber-soft); color: var(--amber); font-weight: 600; font-size: 12.5px; padding: 6px 12px; position: static; box-shadow: none; white-space: normal; max-width: none; }
+div.cutline { background: var(--amber-soft); color: var(--amber); font-weight: 600; font-size: 12.5px; padding: 8px 12px; border-radius: 8px; }
+.pos { display: flex; flex-direction: column; gap: 8px; }
+.podraft { display: block; padding: 0; }
+.podraft > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 14px; }
+.podraft > summary::-webkit-details-marker { display: none; }
+.po-n, .po-t { display: flex; flex-direction: column; min-width: 0; }
+.po-n b, .po-n small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-t { text-align: right; }
+.po-a { display: flex; gap: 6px; }
+.po-lines { width: 100%; border-collapse: collapse; font-size: 13px; }
+.po-lines th { text-align: left; font-weight: 500; color: var(--soft); font-size: 12px; padding: 6px 14px; border-top: 1px solid var(--line); }
+.po-lines td { padding: 6px 14px; border-top: 1px solid var(--line); cursor: pointer; }
+.po-lines .r { text-align: right; white-space: nowrap; }
+.podraft > p { padding: 0 14px 10px; margin: 0; }
+.small { font-size: 12px; }
+.sup-list { display: flex; flex-direction: column; gap: 6px; }
+.sup-row { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; padding: 6px 0; border-top: 1px solid var(--line); }
+.sup-row label { display: flex; flex-direction: column; font-size: 12px; color: var(--soft); gap: 2px; }
+.sup-name { display: flex; flex-direction: column; min-width: 0; }
+.sup-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sup-row input, .sup-map input, .sup-csv select { border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; background: var(--card); min-width: 0; width: 100%; }
+.sup-map input { width: auto; flex: 1 1 160px; }
+.sup-csv input[type=file] { max-width: 100%; min-width: 0; }
+.sup-csv select { width: auto; }
+.sup-map, .sup-csv { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 760px) {
+  .mbar .bud { flex: 1 1 160px; } .mbar .bud input { width: 100%; min-height: 42px; }
+  .seg button { min-height: 44px; padding: 0 12px; }
+  .podraft > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .po-a { grid-column: 1 / -1; } .po-a .btn { min-height: 44px; flex: 1; justify-content: center; }
+  .po-lines th, .po-lines td { padding: 6px 8px; }
+  .sup-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sup-name { grid-column: 1 / -1; }
+  .sup-row input, .sup-map input, .sup-csv select { min-height: 44px; }
+  .mbar .btn.xs { min-height: 44px; }
+}

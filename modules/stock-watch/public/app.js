@@ -478,7 +478,8 @@
     const week = r.reorder.filter((p) => p.status === 'Order this week').length;
     const open = onOrderRows(r.products), ordered = f === 'ordered';
     const groups = [['today', 'Order today', t.orderToday], ['week', 'This week', week], ...(open.length || ordered ? [['ordered', 'Ordered', open.length]] : []), ['all', 'All', r.reorder.length]];
-    const rows = (ordered ? open : r.reorder.filter((p) => f === 'all' || group(p.status) === f)).filter((p) => !q || `${p.name} ${p.sku}`.toLowerCase().includes(q));
+    let rows = (ordered ? open : r.reorder.filter((p) => f === 'all' || group(p.status) === f)).filter((p) => !q || `${p.name} ${p.sku}`.toLowerCase().includes(q));
+    if (window.SW_MONEY && !ordered) rows = SW_MONEY.rows(rows);   // SW-041: a budget ranks by profit kept per ₹ (money.js)
     const canPick = (p) => !viewOnly() && !p.onOrder && p.orderQty > 0;   // view-only sign-in can't mark ordered (SW-029)
     const pickable = rows.filter(canPick);
     const cols = ordered ? [
@@ -493,6 +494,7 @@
       { k: 'why', label: 'Why', tip: 'Out: how long, and the sales lost in this stock-out so far (Sales lost = the whole period). Otherwise: when it runs out, the last day to order so it lands in time (lead time + buffer before), and the supplier lead time', f: (p) => whyCell(p, true), val: (p) => (p.stock <= 0 ? -1e15 + (p.outSince || 0) : p.orderBy ?? 1e15) },
       { k: 'orderQty', label: 'Order (pcs)', r: 1, f: (p) => `<b>${inr.format(p.orderQty)}</b>` },
       { k: 'orderValue', label: 'Order cost', r: 1, tip: 'Order quantity × unit cost (× average price paid if cost is unknown)', f: (p) => money(p.orderValue) },
+      ...(window.SW_MONEY ? SW_MONEY.cols() : []),   // SW-041
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
@@ -513,9 +515,10 @@
       <section class="headline">${head}</section>
       ${planBar()}
       <div class="toolbar"><div class="chips">${groups.map(([k, l, c]) => `<button class="chip ${f === k ? 'on' : ''}" data-filter-reorder="${k}">${l}<span class="c">${c}</span></button>`).join('')}</div>
-        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', storeUrl(`/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}`), pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+        <input class="search" id="q-reorder" placeholder="Search…" title="Search product or SKU" value="${esc(state.q.reorder)}">${colPicker('reorder', cols)}${dlMenu('reorder', storeUrl(`/api/export/reorder.csv?days=${state.days}${whatQs()}&filter=${f}&q=${encodeURIComponent(state.q.reorder)}${window.SW_MONEY && !ordered ? SW_MONEY.qs() : ''}`), pickable.length ? `<button class="linkbtn" id="pick-all">Tick all ${pickable.length} in view</button>` : '')}</div>
+      ${window.SW_MONEY && !ordered ? SW_MONEY.bar(rows) : ''}
       ${picked.length ? `<div class="bulk" role="region" aria-label="Ticked rows"><b>${picked.length} ticked</b><span class="muted">${money(picked.reduce((a, id) => a + (r.reorder.find((p) => p.id === id)?.orderValue || 0), 0))} at the suggested quantities · lands ${dateShort(Date.now() + r.settings.leadDays * 864e5)}</span><button class="btn" id="pick-mark">Mark ${picked.length} ordered</button><button class="btn ghost" id="pick-clear">Clear</button></div>` : ''}
-      ${table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
+      ${window.SW_MONEY && !ordered && SW_MONEY.bySupplier() ? SW_MONEY.poView(rows) : table('reorder', cols.filter((c) => showCol('reorder', c)), rows, ordered ? 'Nothing on order. Marked orders show here until they land.' : 'Nothing to order in this view.', (p) => (ordered ? `
         <header><h3>${nameCell(p, false)}</h3><div class="mq"><b>${inr.format(p.onOrder.remaining)} pcs</b><small>on order</small></div></header>
         <div class="mfacts">${landsCell(p)}${bestTag(p)}</div>` : `
         <header>${canPick(p) ? `<label class="mpick"><input type="checkbox" class="pick" data-pick="${esc(p.id)}" aria-label="Tick ${esc(p.name)}" ${state.pick.has(p.id) ? 'checked' : ''}></label>` : ''}<h3>${nameCell(p, false)}</h3>${mspark(p)}<div class="mq"><b>${inr.format(p.orderQty)} pcs</b><small class="mv">${money(p.orderValue)}</small></div></header>
@@ -781,6 +784,7 @@
         <div><button class="btn" id="save-settings">Save settings</button></div>
       </section>
       ${window.SW_DIGEST ? SW_DIGEST.panel() : ''}
+      ${window.SW_MONEY ? SW_MONEY.panel() : ''}
       <details class="panel fold danger"><summary><b>Danger zone</b></summary>
         <div class="toolbar">${sh.source || src.kind === 'live' ? '' : '<button class="btn ghost" id="load-demo">Reload demo data</button>'}<button class="btn ghost" id="clear-all">Clear all data</button></div>
         <div id="clear-confirm"></div></details>
@@ -872,6 +876,7 @@
     render._caret = null;
     fitTables();
     fitChart();
+    window.SW_MONEY?.after(state.view);   // SW-041: dim rows over budget, draw the cut line
   }
   /* final r2 M1: fade the chips row's edge only on a side that has more chips to scroll to */
   function chipEdges(c) {
@@ -956,7 +961,7 @@
       if (t.id === 'pick-clear') { state.pick.clear(); render(); return; }
       if (t.id === 'pick-mark') {
         const lead = state.report.settings.leadDays, eta = isoDay(Date.now() + lead * 864e5);
-        const items = state.report.reorder.filter((p) => state.pick.has(p.id) && !p.onOrder && p.orderQty > 0).map((p) => ({ id: p.id, qty: p.orderQty, eta }));
+        const items = state.report.reorder.filter((p) => state.pick.has(p.id) && !p.onOrder && p.orderQty > 0).map((p) => ({ id: p.id, qty: p.orderQty, eta: p.leadDays != null ? isoDay(Date.now() + p.leadDays * 864e5) : eta }));   // SW-040: the supplier's lead time
         if (!items.length) return; t.disabled = true;
         await markOrdered(items, items.length === 1 ? `Marked ordered: ${inr.format(items[0].qty)} pcs, lands ${dateShort(Date.now() + lead * 864e5)}` : `Marked ${items.length} ordered, landing ${dateShort(Date.now() + lead * 864e5)}`); return;
       }
@@ -1065,6 +1070,7 @@
   }
 
   state.view = (location.hash || '#overview').slice(1);
+  window.SW_MONEY?.init({ state, api, toast, money, esc, inr, storeUrl, copy, viewOnly, dateShort, render, reload: reloadReport });   // Sprint 3 A-money (money.js)
   window.SW_ROLES?.start(state);   // land on the chosen role's home page (SW-020)
   load().catch((e) => { $('#view').innerHTML = `<p class="pad">Couldn’t load: ${esc(e.message)}</p>`; });
 })();
