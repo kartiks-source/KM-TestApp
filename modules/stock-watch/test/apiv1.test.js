@@ -58,6 +58,14 @@ test.after(async () => {
 });
 const req = (p, opt = {}, pw = PW) => fetch(srv.base + p, { ...opt, headers: { ...(pw ? basic(pw) : {}), ...(opt.headers || {}) } });
 const json = async (r) => ({ status: r.status, ...(await r.json()) });
+/** Two calls a moment apart: open stock-outs keep costing, so money may differ by a rupee or two. */
+function near(x, y, where) {
+  assert.deepEqual(Object.keys(x).sort(), Object.keys(y).sort(), where);
+  for (const k of Object.keys(y)) {
+    if (typeof y[k] === 'number' && typeof x[k] === 'number') assert.ok(Math.abs(x[k] - y[k]) <= Math.max(2, Math.abs(y[k]) * 0.001), `${where} ${k}: ${x[k]} vs ${y[k]}`);
+    else assert.deepEqual(x[k], y[k], `${where} ${k}`);
+  }
+}
 const strip = (j) => { const { generatedAt, from, ops, catalog, ...rest } = j; return rest; };   // time-stamped on each call; ops = live disk % (SW-055); catalog = snapshot status that can refresh between two calls on a slow runner
 
 test('every GET route answers the same at /api and /api/v1 (old paths stay)', async () => {
@@ -65,7 +73,7 @@ test('every GET route answers the same at /api and /api/v1 (old paths stay)', as
   for (const p of ['/api/stores', '/api/report?days=7', `/api/product/${encodeURIComponent(id)}`, '/api/groups', '/api/groups?lens=type', '/api/settings', '/api/onorder', '/api/decide', '/api/digest?role=ops', '/api/digest/settings']) {
     const a = await json(await req(p)), b = await json(await req(p.replace('/api/', '/api/v1/')));
     assert.equal(a.status, 200, p); assert.equal(b.status, 200, `v1 ${p}`);
-    if (p.startsWith('/api/report')) { assert.deepEqual(b.totals, a.totals, p); continue; }   // the report holds "now" (days left move)
+    if (p.startsWith('/api/report')) { near(b.totals, a.totals, p); continue; }   // the report holds "now" (days left move)
     if (p.startsWith('/api/product/')) { assert.deepEqual(b.product.id, a.product.id, p); assert.equal(b.timeline.length, a.timeline.length); continue; }   // timeline ends at "now"
     assert.deepEqual(strip(b), strip(a), p);
   }
