@@ -21,3 +21,4 @@ One file per decision, Nygard format (`0000-template.md`). Number in order; neve
 | 0015 | Several stores in one app: a folder per store, picked from the top bar | Accepted |
 | 0016 | Per-store access: people made by the owner, scrypt hashes in DATA_DIR/access.json | Accepted |
 | 0017 | `/api/v1` is the stable contract for other tools | Accepted |
+| 0018 | Supplier terms per store; budget cut is one line by profit kept per ₹ | Accepted |

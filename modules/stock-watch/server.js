@@ -33,6 +33,9 @@ const audit = require('./src/audit');
 const runs = require('./src/runs');
 const helpers = require('./src/helpers');   // why / order-by, PO CSV, Pause/Push, Decide (LOGIC.md §15)
 const decide = require('./src/decide');
+const suppliers = require('./src/suppliers');   // SW-040: supplier table + SKU map (suppliers.json)
+const supplierRules = require('./src/supplier-rules');
+const budget = require('./src/budget');   // SW-041: cash budget cut line
 const period = require('./src/period');
 const digests = require('./src/digest-service');
 const scope = require('./src/scope');
@@ -204,7 +207,7 @@ function openStore(id) {
     scope.run(id, () => {
       if (stores.home()?.id === id) migrate.run(scope.root(), id);
       backup.prepare();
-      store.load(); onorder.all(); decide.all();
+      store.load(); onorder.all(); decide.all(); suppliers.all();
     });
     opened.set(id, null);
   } catch (e) { opened.set(id, e); throw e; }
@@ -224,6 +227,9 @@ function storeName(id = scope.id()) {
   if (e && e.demo) return nm && !isDemoName(nm) ? nm : e.name;
   return nm && !isDemoName(nm) ? nm : (e ? e.name : id);
 }
+
+/** SW-040: each variant's supplier and terms for the current store (src/supplier-rules.js resolve). */
+const supplierOf = (d) => supplierRules.resolve(d.stock, d.catalog, suppliers.all());
 
 /* ---------- Google Sheet sync (published CSV links of the Stock log / Order log tabs) ---------- */
 async function syncSheet() {
@@ -257,6 +263,7 @@ function loadDemo() {
   const own = demo.STORES.find((x) => x.id === scope.id()) || demo.STORES[0];
   const g = demo.generate({ now: Date.now(), ...own.opts });
   store.replaceAll(g.stock, g.orders, 'demo');
+  try { suppliers.seedDemo(demo.SUPPLIERS); } catch (e) { console.warn('demo suppliers not saved:', e.message); }   // SW-040: demo terms, only when the store has none (a read-only volume must not stop start-up)
   decide.clear();   // SW-032: decisions belong to the data they were made on
   const s = store.load().settings;
   store.setSettings({ demoVersion: demo.VERSION, ...(isDemoName(s.storeName) ? { storeName: own.name } : {}) });
@@ -404,7 +411,7 @@ const digestCtx = {
     /* today's digest: the same options as /api/report (catalog snapshot, Mark ordered); a past "7 days before" comparison
        uses the rows as they stood then, plus only the catalog's inactive flags from before then (today's stock and price
        would be wrong for a past date; without the flags an archived-while-out variant never ends its stock-out, §17) */
-    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all() } : { catalog: period.catalogAsOf(d.catalog, now) };
+    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all(), suppliers: supplierOf(d) } : { catalog: period.catalogAsOf(d.catalog, now), suppliers: supplierOf(d) };
     const r = helpers.enrich(engine.report(rowsAt.stock, rowsAt.orders, d.settings, { days, now, ...live }));   // still-out ₹/day, Pause list: the page's numbers (§15)
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
@@ -487,7 +494,8 @@ async function storeApi(req, res, url, role, id) {
 
   /* SW-032: decisions are based on, and checked against, sales per day on the saved settings (never trial values) */
   /* Every report-shaped answer (report, groups, product, CSV) uses the same options, so their numbers agree. */
-  const reportOpts = (extra = {}) => ({ ...span, catalog: d.catalog, onOrder: onorder.all(), ...extra });   // span: { days } or { from } (SW-027)
+  const sups = supplierOf(d);   // SW-040: each variant's supplier and terms (lead time, MOQ, case pack)
+  const reportOpts = (extra = {}) => ({ ...span, catalog: d.catalog, onOrder: onorder.all(), suppliers: sups, ...extra });   // span: { days } or { from } (SW-027)
   const savedRates = () => new Map(engine.report(d.stock, d.orders, d.settings, { days: 30, catalog: d.catalog, onOrder: onorder.all() }).products.map((x) => [String(x.id), x.perDay]));
   const dc = await decide.handle(req, p, readBody, (id) => savedRates().get(id));
   if (dc) return send(res, dc.code, dc.body);
@@ -497,6 +505,13 @@ async function storeApi(req, res, url, role, id) {
     r.period = periodKind; r.yesterday = period.yesterdayFor(d.stock, d.orders, S, r, reportOpts()); return r;
   }, { store: here, freshness, source: d.source });
   if (v1) return send(res, v1.code, v1.body);
+  const sp = await suppliers.handle(req, url, readBody, {   // SW-040: Data → Suppliers (writes: admin only, gated above)
+    resolved: () => sups,
+    products: () => engine.report(d.stock, d.orders, d.settings, reportOpts()).products.filter((x) => x.status !== 'Inactive').map((x) => ({ id: x.id, sku: x.sku, name: x.name })),
+    log: (changes) => { if (changes.length) { audit.record(d, changes, whoOf(req, role)); store.save(true); } },
+    fileName: (kind) => `${kind === 'map' ? 'supplier-map' : 'suppliers'}-${fileSlug(here.name)}${helpers.fileDate(Date.now(), TZ.zoneOf(d.settings))}.csv`,
+  });
+  if (sp) return send(res, sp.code, sp.body, sp.type, sp.headers);
   if (p === '/api/report' && req.method === 'GET') {
     const S = settingsFor(url, d.settings), trial = Object.keys(LIMITS).some((k) => S[k] !== d.settings[k]);
     const r = helpers.enrich(engine.report(d.stock, d.orders, S, reportOpts()), { decisions: decide.all(), rates: trial ? savedRates() : null });
@@ -574,8 +589,16 @@ async function storeApi(req, res, url, role, id) {
   if (p === '/api/export/reorder.csv' && req.method === 'GET') {
     /* SW-025: usable as a PO: the tab filter and search on the page, vendor, unit cost, variant ID (LOGIC.md §15b) */
     const r = helpers.enrich(engine.report(d.stock, d.orders, settingsFor(url, d.settings), reportOpts()));
-    const lines = helpers.poLines(r, { filter: url.searchParams.get('filter') || 'all', q: url.searchParams.get('q') || '', vendors: helpers.vendorMap(d.stock, d.catalog) });
-    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="reorder-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, TZ.zoneOf(r.settings))}.csv"` });
+    /* SW-040: Vendor = the product's supplier (SKU map, else Shopify vendor); ?supplier=<name> = that supplier's PO draft (lines to order only) */
+    const filter = url.searchParams.get('filter') || 'all';
+    const one = url.searchParams.has('supplier') ? supplierRules.cleanName(url.searchParams.get('supplier')).toLowerCase() : null;
+    /* SW-041: ?budget=<₹> keeps only the rows above the cut line of the same view (src/budget.js, LOGIC.md §6d) */
+    const B = filter === 'ordered' ? null : budget.parse(url.searchParams.get('budget'));
+    const fit = B == null ? null : budget.cut(helpers.reorderRows(r.reorder, { filter, q: url.searchParams.get('q') || '' }), B).fit;
+    const keep = one == null && !fit ? null : (x) => (one == null || (x.orderQty > 0 && String(x.supplier || '').toLowerCase() === one)) && (!fit || fit.has(String(x.id)));
+    const lines = helpers.poLines(r, { filter, q: url.searchParams.get('q') || '', vendors: Object.fromEntries(Object.entries(sups).map(([k, v]) => [k, v.name])), keep });
+    const what = one == null ? 'reorder' : `po-${fileSlug(url.searchParams.get('supplier')).replace(/-$/, '') || 'no-supplier'}`;
+    return send(res, 200, helpers.csvText(lines), 'text/csv; charset=utf-8', { 'content-disposition': `attachment; filename="${what}-${fileSlug(here.name)}${helpers.fileDate(r.generatedAt, TZ.zoneOf(r.settings))}.csv"` });
   }
   return fail(res, 404, 'Not found');
 }

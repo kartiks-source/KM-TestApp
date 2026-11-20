@@ -53,7 +53,7 @@ const tabOf = (s) => (ORDER_TODAY.includes(s) ? 'today' : s === 'Order this week
  *   outLost = this open stock-out's ₹ lost; without it the sentence leaves ₹ out (the Sales lost column has the period's).
  */
 function why(p, S, now, outSince = null, outLost = null) {
-  const off = TZ.zoneOf(S), lead = +S.leadDays || 0, safety = +S.safetyDays || 0;
+  const off = TZ.zoneOf(S), lead = +(p.leadDays ?? S.leadDays) || 0, safety = +S.safetyDays || 0;   // the supplier's lead time when set (SW-040)
   const res = { why: '', runsOut: null, orderBy: null, outSince: null, costPerDay: 0 };
   if (p.status === 'Inactive') { res.why = 'Archived or not tracked'; return res; }
   if (p.status === 'Ordered' && p.onOrder && p.onOrder.eta) { res.why = `Ordered · lands ${dateShort(p.onOrder.eta, off)}`; return res; }
@@ -83,7 +83,7 @@ function why(p, S, now, outSince = null, outLost = null) {
  */
 function mktList(p, S) {
   if (p.status === 'Inactive' || p.stock == null) return null;
-  if (p.stock <= 0 || (p.daysLeft != null && p.daysLeft < (+S.leadDays || 0))) return 'pause';
+  if (p.stock <= 0 || (p.daysLeft != null && p.daysLeft < (+(p.leadDays ?? S.leadDays) || 0))) return 'pause';
   if (p.overstock) return 'push';
   return null;
 }
@@ -93,7 +93,7 @@ function backIn(p, S, now) {
   const off = TZ.zoneOf(S);
   if (p.onOrder && p.onOrder.eta) return p.onOrder.late ? `Late · was due ${dateShort(p.onOrder.eta, off)}` : `Lands ${dateShort(p.onOrder.eta, off)}`;
   if (p.status === 'Slow seller' && !(p.orderQty > 0)) return 'Slow seller · not reordered';   // not on the reorder list, so no date
-  return `Not ordered · earliest ${dateShort(now + (+S.leadDays || 0) * DAY, off)}`;
+  return `Not ordered · earliest ${dateShort(now + (+(p.leadDays ?? S.leadDays) || 0) * DAY, off)}`;
 }
 
 /**
@@ -152,6 +152,7 @@ function enrich(r, { decisions = {}, rates = null } = {}) {
     decide: decide.length, decided: decided.length,
   });
   r.decide = decide; r.decided = decided;
+  require('./budget').annotate(r);   // SW-041: profit kept per ₹ on every reorder row (LOGIC.md §6d)
   return r;
 }
 
@@ -213,9 +214,9 @@ const PO_HEAD = ['Vendor', 'Product', 'SKU', 'Variant ID', 'Order qty', 'Unit co
  * Lines (header first) for the PO CSV. Same rows and order as the page, grouped by vendor (A–Z, unknown last)
  * so each supplier's lines sit together. Unit cost is blank when unknown; Order value then uses price (LOGIC.md §6).
  */
-function poLines(r, { filter, q, vendors = {} } = {}) {
+function poLines(r, { filter, q, vendors = {}, keep = null } = {}) {   // keep(p): an extra row filter (SW-040 supplier, SW-041 budget)
   const off = TZ.zoneOf(r.settings);
-  const rows = reorderRows(filter === 'ordered' ? r.products : r.reorder, { filter, q });
+  const rows = reorderRows(filter === 'ordered' ? r.products : r.reorder, { filter, q }).filter((p) => !keep || keep(p));
   const vOf = (p) => (Object.hasOwn(vendors, String(p.id)) ? String(vendors[String(p.id)] || '') : '');
   const sorted = rows.map((p, i) => [p, i]).sort(([a, i], [b, j]) => {
     const x = vOf(a), y = vOf(b);

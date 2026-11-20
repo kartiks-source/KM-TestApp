@@ -121,7 +121,8 @@ test('GET /api/v1/rows: every row once across pages, stable order, limit ≤ 500
     const key = (x) => `${x.id}|${view === 'stockouts' ? x.start : ''}`;
     assert.equal(new Set(seen.map(key)).size, seen.length, `${view}: no repeats`);
     const ids = seen.map((x) => String(x.id)); assert.deepEqual(ids, [...ids].sort(), `${view}: ID order`);
-    assert.deepEqual(Object.keys(seen[0]).sort(), Object.keys(r[view][0]).sort(), `${view}: the same row shape as /api/report`);
+    const ref = r[view].find((x) => key(x) === key(seen[0]));   // the same row: some fields are only on some rows (SW-040 packExtra)
+    assert.deepEqual(Object.keys(seen[0]).sort(), Object.keys(ref).sort(), `${view}: the same row shape as /api/report`);
   }
   const big = await json(await req('/api/v1/rows?view=stockouts&limit=100000'));
   assert.equal(big.limit, 500); assert.equal(big.rows.length, Math.min(500, r.stockouts.length));

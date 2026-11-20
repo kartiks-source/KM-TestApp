@@ -16,7 +16,7 @@ const { HOUR, DAY } = require('./engine');
 const TZ = require('./tz');   // the demo brand is in India
 const CATALOG = require('./demo-catalog.json').items;
 
-const VERSION = 'sammsara-6';           // bump to make running servers rebuild their demo data
+const VERSION = 'sammsara-7';           // bump to make running servers rebuild their demo data (7: vendors, SW-040)
 const STORE_NAME = 'Sammsara (demo)';
 /* the demo stores shown when no Shopify key is set (multi-store, ADR-0015): id, name, generate() options */
 const STORES = [
@@ -25,6 +25,25 @@ const STORES = [
 ];
 
 const variantId = (i) => String(4710000000 + i * 97);   // demo variant IDs, shared with catalog()
+
+/* SW-040: invented vendors (Shopify product.vendor) by product type, named after Indian craft towns, and their
+   terms (lead time, MOQ, case pack) seeded into suppliers.json with the demo. Not Sammsara's real suppliers. */
+const VENDORS = [
+  [/table$|console|ottoman/i, 'Jodhpur Furniture Co.'],
+  [/candle|hurricane|lamp/i, 'Moradabad Metal Arts'],
+  [/platter|tray|bar set|gift/i, 'Agra Marble Works'],
+  [/bath|tissue|basket|planter|vase/i, 'Khurja Ceramics'],
+  [/cushion/i, 'Panipat Textiles'],
+];
+const vendorOf = (type) => (VENDORS.find(([re]) => re.test(type || '')) || [null, 'Jaipur Décor House'])[1];
+const SUPPLIERS = [
+  { name: 'Jodhpur Furniture Co.', leadDays: 21, moq: 2, pack: null },
+  { name: 'Moradabad Metal Arts', leadDays: 12, moq: 12, pack: 6 },
+  { name: 'Agra Marble Works', leadDays: 14, moq: null, pack: 4 },
+  { name: 'Khurja Ceramics', leadDays: 9, moq: 12, pack: 12 },
+  { name: 'Panipat Textiles', leadDays: 7, moq: 20, pack: 10 },
+  { name: 'Jaipur Décor House', leadDays: null, moq: 6, pack: 6 },
+];
 
 function rng(seed) {      // mulberry32: same demo every time
   let a = seed >>> 0;
@@ -71,15 +90,15 @@ function generate({ now = Date.now(), days = 60, seed = 11, priceMix = 1, every 
     const cover = style === 'heavy' ? 110 + r() * 140 : style === 'abandoned' ? 4 + r() * 6 : 12 + r() * 22;
     return {
       id: variantId(i), sku: c.sku || `SAM-${String(i + 1).padStart(4, '0')}`, product: c.product, variant: c.variant,
-      type: c.type, price: c.price, cost: Math.round(c.price * (0.38 + r() * 0.17)), perDay, style, qty: Math.max(1, Math.round(perDay * cover)), outSince: null, trickles: 0,
+      type: c.type, vendor: vendorOf(c.type), price: c.price, cost: Math.round(c.price * (0.38 + r() * 0.17)), perDay, style, qty: Math.max(1, Math.round(perDay * cover)), outSince: null, trickles: 0,
     };
   });
 
   const change = (it, t, delta) => {
     const before = it.qty; it.qty = Math.max(0, it.qty + delta);
-    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price, type: it.type, cost: it.cost });
+    if (it.qty !== before) stock.push({ t, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before, now: it.qty, price: it.price, type: it.type, vendor: it.vendor, cost: it.cost });
   };
-  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price, type: it.type, cost: it.cost });
+  for (const it of items) stock.push({ t: start, variantId: it.id, sku: it.sku, product: it.product, variant: it.variant, before: it.qty, now: it.qty, price: it.price, type: it.type, vendor: it.vendor, cost: it.cost });
 
   const sell = (it, t, q) => Math.min(it.qty, q);
   const paidFor = (it) => Math.round(it.price * (r() < 0.3 ? 0.9 : r() < 0.08 ? 0.8 : 1));
@@ -176,4 +195,4 @@ function catalog() {
   return demoCatalog;
 }
 
-module.exports = { generate, catalog, VERSION, STORE_NAME, STORES };
+module.exports = { generate, catalog, VERSION, STORE_NAME, STORES, SUPPLIERS, vendorOf };

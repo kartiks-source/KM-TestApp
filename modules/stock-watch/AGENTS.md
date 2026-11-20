@@ -63,6 +63,10 @@ Google Sheet CSV / upload ───┘
 | `src/token-scopes.js` | token permissions once per pull (SW-051): `currentAppInstallation.accessScopes`; own app (vault / variables) with any `write_*` → pull refused; Performity token → `shopify.writeScopes`, Data note, logged once per store |
 | `src/sheet-fetch.js` | Sheet sync fetch (SW-052): link must be https docs.google.com; ≤ 3 redirects by hand, only to https docs.google.com / *.googleusercontent.com; ≤ 20 MB; 20 s. Tests: `test/sheet-fetch.test.js` |
 | `src/helpers.js` | decision helpers on top of the report (LOGIC.md §15): why sentence + order-by date, still-out cost/day, PO CSV lines, Pause/Push lists, slow-seller Decide bucket. Pure, tested (`test/helpers.test.js`; HTTP in `test/helpers-server.test.js`; browser in `test/ui-helpers.test.js`, skipped unless `PLAYWRIGHT_PATH` points at a playwright package, `PLAYWRIGHT_CHANNEL=chrome` to use installed Chrome) |
+| `src/supplier-rules.js` | SW-040, pure: which supplier a variant has (SKU map, else Shopify vendor), `roundOrder` (up to MOQ, then case pack), supplier CSV in/out (LOGIC.md §6c) |
+| `src/suppliers.js` | SW-040: `suppliers.json` per store (side file, in backups), demo terms seeded / cleared, routes `/api/suppliers*`, `/api/export/suppliers.csv` |
+| `src/budget.js` | SW-041, pure: profit kept per ₹ on reorder rows (`annotate`, called by `helpers.enrich`), `rank` + one cut line `cut`; reorder CSV `?budget=` (LOGIC.md §6d) |
+| `public/money.js` | Sprint 3 A-money UI, own script tag: Data → Suppliers, Reorder List / By supplier (PO draft per supplier, Copy + CSV), Budget ₹ (cut line, rows over budget dimmed). Hooks in app.js: `SW_MONEY.init/rows/cols/bar/qs/poView/after/panel`. Browser test `test/ui-money.test.js` |
 | `src/decide.js` | slow-seller decisions (keep/drop/clear) in `DATA_DIR/decisions.json`; `GET/POST /api/decide` |
 | `src/period.js` | "This month" period and the Yesterday strip (SW-027) |
 | `src/digest.js` | morning digest text per role, pure (SW-028) |
@@ -129,6 +133,8 @@ ADMIN_PASSWORD=x SHOPIFY_STORE=brand SHOPIFY_CLIENT_ID=… SHOPIFY_CLIENT_SECRET
 - Sprint 3 C-access (branch `sprint3/C-access`): SW-051 tokeniser read-only guard + write-scope check, SW-052 fenced Sheet fetch, SW-062 per-store people (Data → People, `access.json`, ADR-0016).
 - Waiting on: Key Vault access from the dev team (vault URL, tenant, app ID, secret, token format), and Performity's repo to align conventions.
 - Group by (SW-022, branch `sprint2/A-groups`): "View: Products ▾" on Products; `GET /api/groups?lens=product|type|collection|tag[&all=1]` (no lens: lenses on offer). Variants come from `store.catalog` (SW-002); `/api/groups` uses the same report options as `/api/report` (integration).
+
+- Sprint 3 A-money (branch `sprint3/A-money`): SW-040 suppliers (terms, SKU map, MOQ / case-pack rounding, supplier lead time, By supplier PO drafts) and SW-041 Budget ₹ cut line. ADR-0018. `test/ui-money.test.js` is not yet in the root `test:ui` script (module `npm test` runs it, skipped without Playwright).
 
 ## Next
 

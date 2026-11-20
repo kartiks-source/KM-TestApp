@@ -9,6 +9,7 @@
  * Output: report() → totals, daily sold vs lost, reorder list, every stock-out, per-product summary.
  */
 
+const { roundOrder } = require('./supplier-rules');   // SW-040: MOQ and case pack (LOGIC.md §6c)
 const HOUR = 36e5;
 const DAY = 864e5;
 const TZ = require('./tz');   // the store's time zone (SW-049)
@@ -383,8 +384,11 @@ function report(stock, orders, settings = {}, opts = {}) {
       });
     });
 
-    const oo = p.stock == null ? null : onOrderNow(own(opts.onOrder, p.id), p.changes, now, p.stock, perDay, S.leadDays);
-    const pl = p.stock == null ? null : planWithOrder({ stock: p.stock, perDay, lead: S.leadDays, cover: S.coverDays, safety: S.safetyDays }, oo);
+    /* SW-040 (LOGIC.md §6c): the product's supplier; its lead time, when set, replaces the store's */
+    const sup = own(opts.suppliers, p.id) || null, lead = sup && sup.leadDays != null ? sup.leadDays : S.leadDays;
+    const oo = p.stock == null ? null : onOrderNow(own(opts.onOrder, p.id), p.changes, now, p.stock, perDay, lead);
+    let pl = p.stock == null ? null : planWithOrder({ stock: p.stock, perDay, lead, cover: S.coverDays, safety: S.safetyDays }, oo);
+    if (pl && sup) pl = { ...pl, qty: roundOrder(pl.qty, sup).qty, rawQty: pl.qty };   // up to the MOQ, then whole case packs
     const selling = perDay > 0 && perDay >= S.minPerDay;
     const row = {
       id: p.id, name, sku: p.sku, stock: p.stock, perDay: round(perDay, 2), price: Math.round(price),
@@ -398,6 +402,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       type: p.type || '', onOrder: oo,
     };
     Object.defineProperty(row, '_plan', { value: { pl, perDay, unitValue: p.cost || price, demand: perDay * (price || 0) }, enumerable: false });
+    if (sup) { row.supplier = sup.name; if (sup.leadDays != null) row.leadDays = lead; }
     row.lostPct = row.sold + row.lost ? round((row.lost / (row.sold + row.lost)) * 100, 1) : 0;
     /* profit: needs a unit cost (Shopify's inventory item cost, or a cost column) */
     row.cost = p.cost ? Math.round(p.cost) : null;
@@ -405,7 +410,7 @@ function report(stock, orders, settings = {}, opts = {}) {
     row.lostProfit = p.cost ? Math.round(unitsLost * Math.max(0, price - p.cost)) : null;
     /* excess stock: pieces beyond what the next lead + cover + safety days need; "overstocked" when
        stock covers more than twice that, or the product hasn't sold at all */
-    const need = perDay * (S.leadDays + S.coverDays + S.safetyDays);
+    const need = perDay * (lead + S.coverDays + S.safetyDays);
     const have = p.stock > 0 ? p.stock : 0;
     row.excessUnits = Math.max(0, Math.floor(have - need));
     row.excessValue = Math.round(row.excessUnits * (p.cost || price || 0));
@@ -453,6 +458,11 @@ function report(stock, orders, settings = {}, opts = {}) {
 
   /* an order quantity only where an order is due (Order today / This week); "OK" never asks you to order */
   for (const p of products) if (!['Out now', 'Critical', 'Order now', 'Order this week'].includes(p.status)) { p.orderQty = 0; p.orderValue = 0; }
+  /* SW-040: units the MOQ / case pack added, and their cash (LOGIC.md §6c) */
+  for (const p of products) {
+    const raw = p._plan.pl && p._plan.pl.rawQty;
+    if (raw != null && p.orderQty > raw) { p.packExtra = p.orderQty - raw; p.packExtraValue = Math.round(p.packExtra * p._plan.unitValue); }
+  }
 
   const rank = (s) => STATUS.indexOf(s);
   reorder.sort((a, b) => rank(a.status) - rank(b.status) || (a.abc || 'C').localeCompare(b.abc || 'C') || b.lost - a.lost || b.perDay - a.perDay);
@@ -487,6 +497,7 @@ function report(stock, orders, settings = {}, opts = {}) {
       bestAtRisk: products.filter((p) => p.abc === 'A' && ['Out now', 'Critical', 'Order now'].includes(p.status)).length,
       orderValueNow: reorder.filter((p) => ['Out now', 'Critical', 'Order now'].includes(p.status)).reduce((s, p) => s + p.orderValue, 0),
       orderValueAll: reorder.reduce((s, p) => s + p.orderValue, 0),
+      packExtraValue: reorder.reduce((s, p) => s + (p.packExtraValue || 0), 0),
       overstocked: products.filter((p) => p.overstock).length,
       excessValue: products.filter((p) => p.overstock).reduce((s, p) => s + p.excessValue, 0),
       storeTrendPct: baseTrend,
@@ -523,7 +534,7 @@ function productDetail(id, stock, orders, settings = {}, opts = {}) {
   for (const k of TZ.dayKeys(now - (days - 1) * DAY, now, zone)) units[k] = 0;
   for (const o of lines) if (o.t >= from) { const k = dayKey(o.t, zone); if (k in units) units[k] += num(o.qty); }
   /* same numbers as the main report (the store-wide hourly pattern), this product only */
-  const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder });
+  const r = report(stock, orders, S, { now, from, catalog: opts.catalog, onOrder: opts.onOrder, suppliers: opts.suppliers });
   const c = own(opts.catalog, String(id));
   if (!timeline.length && c && c.stock != null) timeline.push({ t: from, stock: num(c.stock) }, { t: now, stock: num(c.stock) });   // never moved: flat at its stock now
   return { id, product: r.products.find((p) => String(p.id) === String(id)) || null, timeline,
