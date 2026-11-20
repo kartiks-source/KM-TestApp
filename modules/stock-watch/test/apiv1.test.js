@@ -97,7 +97,7 @@ test('v1 auth is the same: 401 signed out, view-only can read but never write, c
 test('GET /api/v1/summary: headline ₹ and counts equal the report totals; small; ?store= and report values honoured', async () => {
   const r = await json(await req('/api/report?days=7')), s = await json(await req('/api/v1/summary?days=7'));
   assert.equal(s.status, 200); assert.equal(s.currency, 'INR'); assert.equal(s.days, 7);
-  for (const k of Object.keys(s.money)) assert.equal(s.money[k], r.totals[k], k);
+  for (const k of Object.keys(s.money)) assert.ok(Math.abs(s.money[k] - r.totals[k]) <= Math.max(2, Math.abs(r.totals[k]) * 0.001), `${k}: ${s.money[k]} vs ${r.totals[k]}`);   // two calls a moment apart: an open stock-out keeps costing
   for (const k of Object.keys(s.counts)) assert.equal(s.counts[k], r.totals[k], k);
   assert.deepEqual(s.store, { id: 'sammsara-demo', name: 'Sammsara (demo)' });
   assert.deepEqual(Object.keys(s.fresh), ['lastPull', 'ageMin', 'stale']);
