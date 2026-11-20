@@ -608,3 +608,5 @@ table.fixed td:first-child { max-width: none; }
   .storepick .menu .linkbtn.on { background: var(--brand-wash); }
   .storepick .menu .linkbtn.on b { color: var(--brand); }
 }
+/* show everything: an optional column that doesn't fit this screen steps aside (fitTables in app.js), never a sideways scroll */
+.tbl .sq { display: none; }

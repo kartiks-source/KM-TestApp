@@ -7,7 +7,8 @@
 
   const state = {
     days: 30, view: 'overview', report: null, settings: null, source: null,
-    filter: { reorder: 'today', stockouts: 'all', products: 'all' }, q: { reorder: '', stockouts: '', products: '' },
+    filter: { reorder: 'all', stockouts: 'all', products: 'all' },   // show everything by default; a role (roles.js) or a tab narrows it
+    q: { reorder: '', stockouts: '', products: '' },
     sort: { reorder: null, stockouts: null, products: null },
     what: {},                                   // trial values for the planning assumptions (not saved)
     pick: new Set(),                            // Reorder rows ticked for Mark ordered
@@ -265,7 +266,7 @@
     cols = cols.filter(colVisible);
     const W = state.colW[colKey(id)], fixed = W && cols.every((c) => W[c.k]);
     if (fixed) { const sum = cols.reduce((a, c) => a + W[c.k], 0), room = tableRoom(); if (sum > room) cols.forEach((c) => { W[c.k] = Math.max(40, Math.floor((W[c.k] * room) / sum)); }); }
-    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}" tabindex="0" aria-sort="${s && s.k === c.k ? (s.dir > 0 ? 'ascending' : 'descending') : 'none'}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
+    const desk = `<div class="tbl desk"><table data-table="${id}" class="${fixed ? 'fixed' : ''}" ${fixed ? `style="width:${cols.reduce((a, c) => a + W[c.k], 0)}px"` : ''}><thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}${c.pr ? ' p' + c.pr : ''}" data-k="${c.k}"${c.opt ? ' data-opt="1"' : ''} tabindex="0" aria-sort="${s && s.k === c.k ? (s.dir > 0 ? 'ascending' : 'descending') : 'none'}"${c.tip ? ` title="${esc(c.tip)}"` : ''}${fixed ? ` style="width:${W[c.k]}px"` : ''}>${esc(c.label)}${s && s.k === c.k ? (s.dir > 0 ? ' ↑' : ' ↓') : ''}<span class="rz" title="Drag to resize · double-click to reset all columns"></span></th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}" tabindex="0">${cols.map((c) => `<td class="${c.r ? 'r' : ''}${c.nw ? ' nw' : ''}${c.pr ? ' p' + c.pr : ''}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (!card) return desk + more;
     const cur = s ? `${s.k}|${s.dir}` : '';
@@ -355,9 +356,10 @@
   const trendCell = (p) => `<span class="trc">${spark(p, 48, 16)}${trendOnly(p)}</span>`;
   const mspark = (p) => ((p.weeks || []).some((w) => w.units > 0) ? `<span class="mspark">${spark(p, 48, 16)}</span>` : '');   // M9: no sales in 8 weeks = a row of rose dashes; the Why line says it
 
-  /* columns picker: optional columns stay hidden until chosen; the choice is remembered */
-  const colsOn = (() => { try { return JSON.parse(localStorage.getItem('sw-cols') || '{}'); } catch { return {}; } })();
-  const showCol = (id, c) => (!c.opt || (colsOn[id] || []).includes(c.k)) && !window.SW_ROLES?.hidesCol(id, c.k);   // a role view can remove default columns (SW-020)
+  /* columns picker: every column is on by default (show everything); untick to hide one, remembered on this browser.
+     Optional columns that don't fit the screen step aside on their own (fitTables), last first, so the page never scrolls sideways. */
+  const colsOff = (() => { try { return JSON.parse(localStorage.getItem('sw-cols-off') || '{}'); } catch { return {}; } })();
+  const showCol = (id, c) => (!c.opt || !(colsOff[id] || []).includes(c.k)) && !window.SW_ROLES?.hidesCol(id, c.k);   // a role view can remove default columns (SW-020)
   function colPicker(id, cols) {
     const opt = cols.filter((c) => c.opt); if (!opt.length) return '';
     return `<details class="colpick desk"><summary class="btn ghost">Columns</summary><div class="menu">${opt.map((c) => `<label><input type="checkbox" data-col="${id}|${c.k}" ${showCol(id, c) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div></details>`;
@@ -828,15 +830,30 @@
     render._caret = null;
     fitTables();
   }
-  /* critic r2 UI-2: when the columns don't fit (ones the user added from Columns…), the table scrolls sideways inside its
-     box with a note, instead of clipping them out of reach; the default columns fit from 1180 px, so the page never scrolls */
+  /* Show everything, never scroll the page sideways: when the columns don't fit, the optional ones step aside, the last
+     first, until the table fits; a small note names them (untick in Columns… to choose others). Only if the table still
+     doesn't fit (a user-widened column) does it scroll sideways inside its box (critic r2 UI-2). */
   function fitTables() {
     $$('.tbl.desk').forEach((b) => {
-      const t = b.querySelector('table'), over = !!t && b.clientWidth > 0 && t.getBoundingClientRect().width > b.clientWidth + 1;
-      b.classList.toggle('scrollx', over);
-      const hint = b.previousElementSibling && b.previousElementSibling.classList.contains('sx-hint') ? b.previousElementSibling : null;
-      if (over && !hint) b.insertAdjacentHTML('beforebegin', '<div class="sx-hint">More columns than fit: scroll the table sideways →</div>');
-      else if (!over && hint) hint.remove();
+      const t = b.querySelector('table'); if (!t || !t.tHead) return;
+      t.querySelectorAll('.sq').forEach((el) => el.classList.remove('sq'));
+      const over = () => b.clientWidth > 0 && t.getBoundingClientRect().width > b.clientWidth + 1;
+      const aside = [];
+      if (!t.classList.contains('fixed')) {
+        const ths = [...t.tHead.rows[0].cells];
+        for (let i = ths.length - 1; i >= 0 && over(); i--) {
+          if (!ths[i].dataset.opt || getComputedStyle(ths[i]).display === 'none') continue;
+          ths[i].classList.add('sq');
+          for (const row of t.tBodies[0]?.rows || []) row.cells[i]?.classList.add('sq');
+          aside.unshift(ths[i].textContent.replace(/[↑↓]/g, '').trim());
+        }
+      }
+      const still = over();
+      b.classList.toggle('scrollx', still);
+      const prev = b.previousElementSibling && b.previousElementSibling.classList.contains('sx-hint') ? b.previousElementSibling : null;
+      const text = still ? 'More columns than fit: scroll the table sideways →' : aside.length ? `Not shown at this width: ${aside.join(', ')} (wider screen, or untick others in Columns)` : '';
+      if (!text) { if (prev) prev.remove(); return; }
+      if (prev) prev.textContent = text; else b.insertAdjacentHTML('beforebegin', `<div class="sx-hint">${esc(text)}</div>`);
     });
   }
   function route() { closeDrawer(); render._animate = true; state.view = (location.hash || '#overview').slice(1) in VIEWS ? (location.hash || '#overview').slice(1) : 'overview'; render(); window.scrollTo(0, 0); }
@@ -938,10 +955,10 @@
     if (e.target.id === 'f-view') { state.lens = e.target.value; state.limit.products = 0; state.limit.groups = 0; render(); return; }
     if (e.target.id === 'f-more') { state.filter.products = e.target.value || 'all'; state.limit.products = 0; render(); return; }
     if (e.target.dataset && e.target.dataset.col) {
-      const [id, k] = e.target.dataset.col.split('|'); const on = new Set(colsOn[id] || []);
-      if (e.target.checked) on.add(k); else on.delete(k);
-      colsOn[id] = [...on]; try { localStorage.setItem('sw-cols', JSON.stringify(colsOn)); } catch { /* private window */ }
-      render(); $(`.colpick`)?.setAttribute('open', ''); return;
+      const [id, k] = e.target.dataset.col.split('|'); const off = new Set(colsOff[id] || []);
+      if (e.target.checked) off.delete(k); else off.add(k);
+      colsOff[id] = [...off]; try { localStorage.setItem('sw-cols-off', JSON.stringify(colsOff)); } catch { /* private window */ }
+      render(); $('#view .colpick.desk')?.setAttribute('open', ''); return;   // the Columns menu, not the store menu
     }
     const id = e.target.dataset && e.target.dataset.msort;
     if (!id) return;

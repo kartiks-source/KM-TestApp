@@ -28,6 +28,8 @@ Requires Node 20 or newer.
 | **Products** | Every product. Click one for its stock-level chart (out-of-stock periods shaded), units sold per day, and its stock-outs. |
 | **Data & settings** | Data status, demo reload and clear, CSV upload, Google Sheet links, Shopify Flow webhook URLs, and the settings (all for the store chosen in the top bar). |
 
+**Everything shows by default.** No role is chosen ("All"), Reorder opens on its All tab, every optional column is on (untick in Columns…; on a narrow laptop the right-most ones step aside and a note names them), and Overview shows every panel. A role under the store pill only removes things.
+
 **Stores.** The store pill in the top bar lists every store with a dot: green = data fresh, amber = last good pull over 45 minutes ago, red = the last pull or sync failed. Choosing one opens it (`?store=<id>` in the address, remembered on this browser). With one store the pill shows just its name. Every page, export, digest and setting is for the chosen store.
 
 ## How the numbers work

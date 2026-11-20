@@ -376,7 +376,7 @@ These two flags are the habits that turn one stock-out into many. They're counte
 | Category | the product type from Shopify (or the CSV/Flow `type` column) |
 | Trend | weekly bars + % change (section 7d); its own column at 1400 px and wider, small bars in the name cell below that |
 
-Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them. **Columns added from Columns…** that don't fit make that one table scroll sideways inside its box, with a note above it ("More columns than fit: scroll the table sideways"); before, they were cut off out of reach (critic r2 UI-2). The default columns fit every Reorder and Products tab from 1181 px up (tested at 1280 and 1400; Reorder → All keeps Sales lost on screen: its name column gives up ~60 px to Status, critic r2 UI-1), so the page itself never scrolls sideways.
+Tables are built to fit the screen without sideways scrolling: on laptops narrower than 1400px the lower-priority columns (Units, Outs, Units lost) step aside, and under 1180px Category and the SKU do too. Every column is still in the CSV, and hovering a column header explains it. Column edges can be dragged to resize, like a spreadsheet; widths are remembered in that browser, and double-clicking an edge resets them. **Optional columns are on by default** (show everything, ADR-0006 amendment 20 Nov); Columns… unticks one, remembered on that browser. When they don't all fit, optional columns **step aside**, the right-most first, until the table fits, and a note above it names them ("Not shown at this width: Sells / day, Times out"); a wider screen, or unticking others, brings them back. Only a column someone dragged wider can still make that one table scroll sideways inside its box, with a note ("More columns than fit: scroll the table sideways"); before, columns were cut off out of reach (critic r2 UI-2). The default columns fit every Reorder and Products tab from 1181 px up (tested at 1280 and 1400; Reorder → All keeps Sales lost on screen: its name column gives up ~60 px to Status, critic r2 UI-1), so the page itself never scrolls sideways.
 
 ## 9a. Group by: product, category, collection, tag (SW-022)
 
@@ -563,7 +563,7 @@ One click stores **Keep**, **Drop** or **Clear** (out-of-stock rows: Keep / Drop
 
 ## 16. Role home views (SW-020, `public/roles.js`)
 
-No number changes with a role: a role view only **removes** parts of today's default screen (ADR-0006) and picks the page you land on. No role chosen = today's view.
+No number changes with a role: a role view only **removes** parts of today's default screen (ADR-0006) and picks the page you land on. No role chosen = **All** (the default): every page, every panel, every column. Reorder opens on its **All** tab unless a role lands elsewhere.
 
 | Role | Lands on | Removed (everything else stays) |
 |---|---|---|
@@ -575,7 +575,7 @@ No number changes with a role: a role view only **removes** parts of today's def
 | Finance | Overview | Stock-outs in the menu; tiles "sales lost" and "best sellers at risk"; Biggest losses list; daily chart; Mark ordered; Pause chip |
 | Warehouse | Reorder → Ordered (SW-012: every open order, late first; headline "N on order · M due this week · K late", §6b) | Overview, Stock-outs, Products in the menu; period picker; plan settings; explainer; Order cost and Sales lost columns; Mark ordered |
 
-- Chosen from the store menu (top left), **Show me** on Data & settings (phones), or a link `/?role=ceo` (`?role=all` = everything). Remembered per browser.
+- Chosen from the store menu (top left), **Show me** on Data & settings (phones), or a link `/?role=ceo` (`?role=all` = All, the default). Remembered per browser.
 - **Landing:** a role opens on its home page and tab when the address has no `#page` or has `#<its home>` (digest links: `/?role=marketing#products` → Products → Pause promotion). Any other `#page` opens as asked. `landing()` in `public/roles.js`, tested.
 - **Mark ordered** (SW-012) follows RACI "Place the PO": founder (A), buyer (R) and ops (C, "also sees Mark ordered") keep the ticks, bulk bar and drawer form; the others lose them (the drawer still shows what is on order). The Ordered tab shows whenever it is the open tab, even with nothing ordered, so the warehouse never lands on a missing tab. Pause / Push chips go for roles that are "–" on ads (buyer, finance: Pause; warehouse has no Products page).
 - RACI "the A's number first": a role that drops the "to order today" tile also drops "Order ₹X today" from the Overview headline, so it starts with "Stock-outs cost ₹Y".
