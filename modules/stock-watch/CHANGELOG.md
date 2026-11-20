@@ -4,6 +4,9 @@ User-facing changes, newest first. Semver: minor when a number's rule changes or
 
 ## 1.1.1 · 2026-11-20 · number validation fixes
 
+- Sales rate shown in words: "5 a day", "3 a week", "1 every 2 weeks" (the maths keeps the exact rate).
+- Shopify is read every 2 hours (was 15 minutes), so fewer Performity token calls; `SYNC_MINUTES` changes it. Stock-out hours still come from Shopify's change log.
+
 Every number checked against Shopify for Sammsara (LOGIC §1c, §3, §5, §6, What counts as a sale).
 - Past stock-outs: the rebuild from Shopify's change log skipped one day in every seven (8 of 61 days), which made phantom stock-outs and left 31 of 253 products out. It now reads every day, splits the first read's own hour with the order lines, and checks itself against your orders: a product with orders while it was supposedly out is left out, and a rebuild that fails the check for over 1% of orders is not used. Stores rebuilt by 1.1.0 are rebuilt again on the next pull. Data shows the check.
 - ₹ sold is now Shopify's **net sales, ex GST** (it included GST, 5.7–7.3% high). ₹ lost and profit lost follow. Orders of the last 60 days are read again once after the update.

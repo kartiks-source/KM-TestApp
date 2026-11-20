@@ -199,7 +199,7 @@ test('Reorder: every tab fits its box at 1280 and 1400 (All keeps Sales lost on 
 });
 
 test('Columns: every optional column is on by default; ones that do not fit step aside (named in a note), never a sideways scroll; unticking is remembered', opts, async () => {
-  const OPT = { reorder: ['In stock', 'Sells / day', 'Times out'], products: ['Category', 'Sells / day', 'Units sold', 'Share of demand lost', 'Times out', 'Overstock ₹', 'Profit lost', 'Margin'] };
+  const OPT = { reorder: ['In stock', 'Sells', 'Times out'], products: ['Category', 'Sells', 'Units sold', 'Share of demand lost', 'Times out', 'Overstock ₹', 'Profit lost', 'Margin'] };
   for (const w of [1280, 1440, 1920]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
     const pg = await ctx.newPage(); const errors = []; pg.on('pageerror', (e) => errors.push(e.message));

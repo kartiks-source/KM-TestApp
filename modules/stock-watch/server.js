@@ -64,7 +64,11 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // same
 const VIEW_PASSWORD = process.env.VIEW_PASSWORD || '';
 const PASSWORDS = { admin: PASSWORD, view: VIEW_PASSWORD };
 const PUBLIC = path.join(__dirname, 'public');
-const SYNC_EVERY = 15 * 60e3;
+// How often to pull (minutes). Default 120: each pull asks Performity for a token, and the user
+// wants few token calls (20 Nov 2026). Exact stock-out hours still come from Shopify's change log
+// (SW-063), so a 2-hour pull doesn't blur ₹ lost. SYNC_MINUTES env overrides (5..1440).
+const SYNC_MIN = Math.min(1440, Math.max(5, Number(process.env.SYNC_MINUTES) || 120));
+const SYNC_EVERY = SYNC_MIN * 60e3;
 const STORE_COOKIE = 'sw_store';   // the store last chosen in the picker (public/stores.js); ?store= wins
 const KEEP_DAYS = 120;   // same as src/store.js: older rows would be pruned on save, so they're reported as skipped
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -357,7 +361,7 @@ function pullAll() {
 }
 
 /* ---------- freshness (SW-019): is the Shopify data recent? ---------- */
-const STALE_MIN = 45;          // three missed 15-minute pulls
+const STALE_MIN = Math.max(45, SYNC_MIN * 2 + 15);   // two missed pulls (+15 min slack)
 const BOOT_AT = Date.now();
 /** The current store's: age of its last good Shopify pull. Stale when it's more than 45 min old (or none 45 min after start). Off without Shopify. */
 function freshness(now = Date.now()) {
@@ -782,7 +786,7 @@ async function main() {
   if (!instance.acquire()) log.warn('read-only', { why: instance.reason() });
   await stores.refresh();   // Performity: the brand list (the last good one when the API is down)
   const list = stores.list();
-  if (!list.length) console.warn(`No store yet (${stores.info().lastError || 'empty brand list'}); retried every 15 minutes.`);
+  if (!list.length) console.warn(`No store yet (${stores.info().lastError || 'empty brand list'}); retried every ${SYNC_MIN} minutes.`);
   /* every store opens now: the home store takes the old single-store files (src/migrate.js, once ever), pending restores apply;
      a store that can't be read stops the start, so nothing is overwritten (SW-004, critic r2 X1) */
   for (const s of list) {

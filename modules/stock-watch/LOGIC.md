@@ -186,6 +186,8 @@ This matches the DAWBU dashboard's definition (cancelled out, refunds and discou
 
 > sales per day = units sold in the last 28 days ÷ days the product was **in stock** during those 28 days (at least 7 days, or the whole span if shorter)
 
+**How it's shown (1.1.1):** in words, rounded: 1 or more a day → "5 a day"; under 1 a day but at least 1 a week → "3 a week"; slower → "1 every 2 weeks". The exact rate (e.g. 0.43 per in-stock day) is in the tooltip and is what every calculation uses: rounding it would turn a 0.3-a-day seller into 0 (never reordered) or 1 (3× too much stock).
+
 **Floor of 7 days (since 1.1.0, 20 Nov 2026):** a product seen in stock for only a few hours (common after the stock history rebuild, §1c, when it was out almost the whole window) could otherwise turn 2 units into "2 a day" and inflate ₹ lost. Counting at least 7 in-stock days caps such a rate at units ÷ 7. It never stretches past the span measured, so a 3-day-old store or product is still divided by 3. Before: the floor was 1 day; on Sammsara two candleholders out 60 days showed ₹3.5 L lost on 0–2 units sold.
 
 Setting: *Sales history used* [28 days]. If the store's data starts later than 28 days ago, the window starts with the data. **A product's own window starts at its first stock record or first order**, so a product launched 5 days ago is measured over those 5 days, not diluted by 23 days before it existed. (Without this, a new launch looked like a slow, overstocked product.)

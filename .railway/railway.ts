@@ -55,6 +55,7 @@ export default defineRailway(() => {
       DIGEST_WEBHOOK_URL_WAREHOUSE: preserve(),
       PUBLIC_URL: preserve(),
       STOP_WAIT_MS: preserve(),
+      SYNC_MINUTES: preserve(),
     },
   });
   return project("stock-watch", { resources: [web, data] });

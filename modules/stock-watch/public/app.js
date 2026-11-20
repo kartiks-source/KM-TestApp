@@ -36,6 +36,15 @@
   };
   const moneyFull = (x) => `₹${inr.format(Math.round(+x || 0))}`;
   const n1 = (x) => (x == null ? '–' : (Math.round(x * 10) / 10).toLocaleString('en-IN'));
+  /** Sales rate in words people use: "5 a day", "3 a week", "1 every 2 weeks" (the maths keeps the exact rate, LOGIC §3). */
+  const rate = (x) => {
+    if (x == null || !Number.isFinite(x)) return '–';
+    if (x <= 0) return 'none';
+    if (x >= 0.95) return `${Math.round(x).toLocaleString('en-IN')} a day`;
+    const w = x * 7;
+    if (w >= 0.95) return `${Math.round(w)} a week`;
+    return `1 every ${Math.round(1 / w)} weeks`;
+  };
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   /* store time (SW-049): public/tz.js looks the offset up per moment, so daylight saving zones read right */
   const zone = () => (window.SW_TZ ? SW_TZ.zoneOf(state.settings) : null);
@@ -138,7 +147,7 @@
     const scopes = (sh.scopes || []).map((x) => `<span class="mono">${esc(x)}</span>`).join(', ');
     if (!sh.source) {
       return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · not connected</h2>
-        <p class="muted">Connect a store and the app reads stock every 15 minutes and new orders since the last read, straight from Shopify. It only ever reads: every call is checked, and anything that could change the store is refused. Read permissions needed: ${scopes}.</p>
+        <p class="muted">Connect a store and the app reads stock every 2 hours and new orders since the last read, straight from Shopify. It only ever reads: every call is checked, and anything that could change the store is refused. Read permissions needed: ${scopes}.</p>
         <p class="muted">Set these as Railway variables (the key is never typed into this page):</p>
         <dl class="kv"><dt>Performity POC API (decided)</dt><dd>Performity hands this app the current Shopify token for each allowed brand: <span class="mono">PERFORMITY_POC_API_URL, PERFORMITY_POC_API_KEY</span> (and <span class="mono">PERFORMITY_BRAND_ID</span> when more than one brand is allowed). A fresh token is asked for before each pull and never kept; this app never refreshes it. This server’s static outbound IP must be on Performity’s allow-list.</dd>
           <dt>What Shopify gives</dt><dd>The app’s <b>client ID + client secret</b> (Shopify Dev Dashboard). We swap them for a 24-hour token and renew it automatically. The app must be in the <b>same Shopify organisation</b> as the store, so the brand creates and installs it and shares the ID + secret.</dd>
@@ -149,7 +158,7 @@
     return `<div class="panel" style="grid-column:1/-1"><h2>Shopify (read-only) · ${esc(sh.store || '')}</h2>
       <dl class="kv"><dt>Key from</dt><dd>${where}</dd>
         <dt>Status</dt><dd>${!sh.ready ? `<span style="color:#E0506E">Missing: ${esc(sh.missing.join(', '))}</span>` : sh.running ? 'Pulling now…' : sh.lastError ? `<span style="color:#E0506E">${esc(sh.lastError)}</span>${sh.lastTry ? ` · tried ${dt(sh.lastTry)}` : ''}` : sh.lastSync ? `OK · last read ${dt(sh.lastSync)}` : 'First pull pending'}</dd>
-        <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 15 minutes' : 'Loads the last 60 days on the first pull'}</dd>
+        <dt>Order history</dt><dd>${sh.backfilled ? 'Last 60 days loaded, new orders added every 2 hours' : 'Loads the last 60 days on the first pull'}</dd>
         <dt>Reads only</dt><dd>${scopes} · API ${esc(sh.apiVersion || '')}</dd></dl>
       <div class="toolbar"><button class="btn" id="shopify-sync">Pull from Shopify now</button></div></div>`;
   }
@@ -513,7 +522,7 @@
       { k: 'daysLeft', label: 'Days left', f: daysCell, val: (p) => p.daysLeft ?? -1 },
       { k: 'lost', label: 'Sales lost', r: 1, tip: `Sales lost to stock-outs ${inPeriod()}`, f: (p) => (p.lost ? `<span class="lostv">${money(p.lost)}</span>` : '–') },
       { k: 'stock', label: 'In stock', r: 1, opt: 1, f: (p) => inr.format(p.stock) },
-      { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+      { k: 'perDay', label: 'Sells', r: 1, opt: 1, tip: 'How fast it sells while in stock (exact rate per in-stock day used in the maths)', f: (p) => `<span title="${n1(p.perDay)} per in-stock day">${rate(p.perDay)}</span>` },
       { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => p.trendPct ?? (p.trendNew ? 999 : -999) },
       { k: 'outs', label: 'Times out', r: 1, opt: 1 },
     ];
@@ -640,7 +649,7 @@
     { k: 'orderQty', label: 'Order', r: 1, tip: 'Units to order (only when an order is due)', f: (p) => (p.orderQty ? `<b>${inr.format(p.orderQty)}</b>` : '–') },
     { k: 'type', label: 'Category', opt: 1, f: (p) => `<span class="muted cat" title="${esc(p.type)}">${esc(p.type || '–')}</span>` },
     { k: 'trendPct', label: 'Trend', pr: 'w', tip: trendTip(), f: trendCell, val: (p) => (p.trendPct ?? (p.trendNew ? 999 : -999)), csv: (p) => p.trendPct ?? '' },
-    { k: 'perDay', label: 'Sells / day', r: 1, opt: 1, tip: 'Units sold per in-stock day', f: (p) => n1(p.perDay) },
+    { k: 'perDay', label: 'Sells', r: 1, opt: 1, tip: 'How fast it sells while in stock (exact rate per in-stock day used in the maths)', f: (p) => `<span title="${n1(p.perDay)} per in-stock day">${rate(p.perDay)}</span>` },
     { k: 'unitsSold', label: 'Units sold', r: 1, opt: 1, f: (p) => inr.format(p.unitsSold || 0) },
     { k: 'lostPct', label: 'Share of demand lost', r: 1, opt: 1, tip: 'Sales lost ÷ (sold + lost)', f: (p) => (p.lostPct ? `${n1(p.lostPct)}%` : '–') },
     { k: 'outs', label: 'Times out', r: 1, opt: 1 },
@@ -803,7 +812,7 @@
       <h2 class="sect">Connect your data</h2>
       <details class="panel fold"><summary><b>Shopify</b> <span class="muted">read-only, recommended</span></summary>${shopifyPanel()}</details>
       <details class="panel fold"><summary><b>Google Sheet</b> <span class="muted">from the Stock Watch sheet</span></summary>
-        <p class="muted">If the store’s Shopify Flow writes into a Google Sheet: in that sheet, File → Share → Publish to web → pick the tab → CSV, and paste the two links. Synced every 15 minutes.</p>
+        <p class="muted">If the store’s Shopify Flow writes into a Google Sheet: in that sheet, File → Share → Publish to web → pick the tab → CSV, and paste the two links. Synced every 2 hours.</p>
         <div class="field"><label for="sheet-stock">“Stock log” CSV link</label><input id="sheet-stock" value="${esc(s.sheetStockCsv)}" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?gid=…&output=csv"></div>
         <div class="field"><label for="sheet-order">“Order log” CSV link</label><input id="sheet-order" value="${esc(s.sheetOrderCsv)}" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?gid=…&output=csv"></div>
         <div class="toolbar"><button class="btn" id="sheet-save">Save and sync now</button></div></details>
@@ -862,7 +871,7 @@
         <section class="tiles dtiles">
           <div class="tile amber"><b>${p?.orderQty ? `${inr.format(p.orderQty)} pcs` : '–'}</b><span>order now${p?.orderQty ? ` · ${money(p.orderValue)} ${atCost()}` : ''}${p?.paceQty != null ? `<br><small id="pace-qty" title="Sales are falling (${p.trendPct ?? '–'}% this product, ${state.report.totals.storeTrendPct ?? '–'}% the typical product): the same order at the last 14 days’ in-stock pace, ${n1(p.pacePerDay)} a day">${inr.format(p.paceQty)} pcs at last 2 weeks’ pace</small>` : ''}</span></div>
           <div class="tile ${p?.daysLeft != null && p.daysLeft <= 3 ? 'lost' : ''}"><b>${p?.daysLeft == null ? (p?.stock <= 0 ? '0' : '–') : n1(p.daysLeft)}</b><span>days left · ${p?.stock ?? '–'} in stock</span></div>
-          <div class="tile"><b>${n1(p?.perDay)}</b><span>sells per in-stock day${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
+          <div class="tile"><b title="${n1(p?.perDay)} per in-stock day">${rate(p?.perDay)}</b><span>sells while in stock${p?.lowData ? ' · <abbr title="Under 5 units and 14 in-stock days to go on: capped at units ÷ days since its first sale, and never a best seller (LOGIC §3)">low data</abbr>' : ''}</span></div>
           ${gap ? `<div class="tile" id="lost-unknown" title="No stock record before ${esc(dateShort(gap))}, so stock-outs before then can’t be seen (Shopify’s change log didn’t add up for it)"><b>${p.lost ? money(p.lost) : 'Unknown'}</b><span>sales lost${p.lost ? ` since ${esc(dateShort(gap))}` : ''} · before ${esc(dateShort(gap))}: unknown</span></div>`
     : `<div class="tile lost"><b>${money(p?.lost)}</b><span>sales lost${p?.lostProfit != null ? ` · ${money(p.lostProfit)} profit` : ''}</span></div>`}
         </section>

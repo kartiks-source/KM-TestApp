@@ -343,12 +343,12 @@ test('server: /status is open, 200 without Shopify, and reports size and row cou
     assert.equal(j.ok, true); assert.equal(j.stale, false); assert.equal(j.shopify, false);
     assert.ok(j.orderRows > 0); assert.ok(j.stockRows > 0);
     const rep = await (await fetch(s.base + '/api/report')).json();
-    assert.deepEqual(rep.freshness, { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: 45 });
+    assert.deepEqual(rep.freshness, { shopify: false, lastPull: null, ageMin: null, stale: false, staleAfterMin: 255 });   // pull every 120 min (default) → stale after two missed pulls + 15
   } finally { await stop(s); }
 });
 
-test('server: /status 503 when the last Shopify pull is over 45 min old, 200 when recent', async () => {
-  for (const [ago, code] of [[50, 503], [5, 200]]) {
+test('server: /status 503 when the last Shopify pull is over two pull intervals old, 200 when recent', async () => {
+  for (const [ago, code] of [[260, 503], [100, 200]]) {
     const dir = tmpDir();
     fs.writeFileSync(path.join(dir, 'store.json'), JSON.stringify({ stock: [], orders: [], source: 'live', settings: {}, shopify: { lastSync: Date.now() - ago * 60e3 } }));
     const s = await startServer(dir, { ADMIN_PASSWORD: 'pw', SHOPIFY_STORE: 'test-store', SHOPIFY_CLIENT_ID: 'x' });
