@@ -224,3 +224,4 @@ Ordered by money impact. Each becomes a full item when pulled into a sprint.
 | SW-059 | Split app.js into per-page ES modules, wrap long lines | M | builder | tokens T5 |
 | SW-060 | Auth model upgrade (named users / Performity SSO) | M | security | architect idea, ADR-0011 |
 | SW-061 | Ads link: live spend on out-of-stock SKUs (needs Performity data) | M | product | product idea |
+| SW-062 | Per-store access: a brand's people see only their store (today every sign-in opens every store, ADR-0015) | M | security | multi-store spec 20 Nov |

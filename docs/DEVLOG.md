@@ -3,6 +3,15 @@
 Newest first. Date · module · what changed and why · anything open.
 Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
+## 2026-11-20 · multi-store + show everything by default
+stock-watch, branch `feature/multistore` (5ce0981, 6d5454d, e8f6fba merge of main, e6714bc, 0c27383, d3bfab1 + this entry; not pushed, not deployed). Resumed after the first builder was killed mid-UI.
+- Kept from the killed run: server side (ADR-0015: registry, `scope.run`, per-store folders, crash-safe migration, `?store=` + `sw_store` cookie, 404 on bad ids, one pull queue, per-store alerts/digest/CSV names, `/status` totals) and the half-done UI (`public/stores.js`, app.js store calls). Fixed in it: a comment had swallowed `state.q` (every page threw on load); ARIA `menuitemradio` without a menu → plain buttons with `aria-current`; picker / store bar / dot CSS was missing; duplicate doc comment in `server.js` freshness.
+- Store picker: pill menu with ok / stale / error dot + one status line per store, phone store bar (44 px) under the top bar, keyboard (Enter, arrows, Esc back to the pill), `?store=` + localStorage `sw-store` + cookie, reload on the same page; one store = plain name. Test `test/ui-stores.test.js` (in `test:ui`).
+- Show everything by default (ADR-0006 amended): role All default, Reorder opens on All, optional columns on (`sw-cols-off` remembers unticks), the right-most optional columns step aside with a note when they don't fit (never a sideways scroll 1280–1920), every Overview panel. `ui-helpers` tests updated (Reorder default tab, columns test rewritten); `roles.test.js` ALL.
+- Docs: LOGIC §9 table fit, §16 default, §18 picker; README; module AGENTS (files, status); API, FORMATS (browser keys), SECURITY (`sw_store` row), RUNBOOK (picker, local two-store check); CHANGELOG 0.10.0; BACKLOG SW-062 (per-store access).
+- Checked: `npm test` 230 pass / 13 skip (browser); `test:ui` 13/13 (Playwright 1.65.1 from npx cache, `PLAYWRIGHT_CHANNEL=chrome`); `smoke.js` 30/30; `roles-smoke.js` all pass at 5 widths. Stand-in API with `STAND_IN_BRANDS=2`: two uuid stores, red dots with the reason ("no connected Shopify store"). Screenshots of the picker at 1440 and 390 (demo and stand-in) kept outside the repo.
+- Open: five critics not run on this branch; shared dev log page row not added from this worktree; merge to `main` after critics. On Railway the first start moves today's demo data into `sammsara-demo`.
+
 ## 2026-11-20 · finish sprints · W4-ci
 stock-watch, branch `finish/W4-ci` (ede2ef7, 5ceb950, bbebac2; not pushed, not deployed). Closes SW-014 (browser tests never ran in CI) and the CI half of SW-023 (360×740, screenshots kept).
 - Root `package.json`: devDependency `playwright` pinned to 1.65.1 + `package-lock.json` (dev tooling only; the Dockerfile copies `modules/stock-watch`, so the deployed app stays dependency-free). Scripts `test:ui` (fails instead of silently skipping when Playwright is missing) and `test:smoke` (smoke + roles smoke).
