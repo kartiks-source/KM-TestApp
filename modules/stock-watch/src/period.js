@@ -31,6 +31,20 @@ function asOf(stock, orders, t) {
 }
 
 /**
+ * The catalog as it stood at a past time t, for "the 7 days before" (CEO digest, LOGIC.md §17): only the inactive
+ * flags of variants that were already inactive by then (archived, draft, untracked, deleted), never today's stock
+ * or price. Without them a variant archived while out of stock never ends its stock-out (Shopify sends no more rows
+ * for it), so the past report would count lost sales the page never showed.
+ */
+function catalogAsOf(catalog, t) {
+  const out = {};
+  for (const [id, c] of Object.entries(catalog || {})) {
+    if (c && c.active === false && Number.isFinite(+c.inactiveSince) && +c.inactiveSince <= t) out[id] = { active: false, status: c.status, inactiveSince: +c.inactiveSince };
+  }
+  return out;
+}
+
+/**
  * Yesterday, from a report that covers it: ₹ sold and lost on yesterday's local calendar day (the same
  * numbers as that day's bar on the Overview chart), how many products ran out (a stock-out started) and
  * how many came back (a stock-out ended). A product counts once even if it ran out twice.
@@ -59,4 +73,4 @@ function yesterdayFor(stock, orders, settings, r, extra = {}) {
   return yesterday(r, off) || yesterday(report(stock, orders, settings, { ...rest, now: r.generatedAt, days: 2 }), off);
 }
 
-module.exports = { monthStart, dayStart, range, asOf, yesterday, yesterdayFor };
+module.exports = { monthStart, dayStart, range, asOf, catalogAsOf, yesterday, yesterdayFor };

@@ -277,8 +277,9 @@ const digestCtx = {
   report({ days, now }) {
     const d = store.load(), rowsAt = period.asOf(d.stock, d.orders, now);
     /* today's digest: the same options as /api/report (catalog snapshot, Mark ordered); a past "7 days before" comparison
-       uses the rows as they stood then (the snapshot is today's stock, so it would be wrong for a past date) */
-    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all() } : {};
+       uses the rows as they stood then, plus only the catalog's inactive flags from before then (today's stock and price
+       would be wrong for a past date; without the flags an archived-while-out variant never ends its stock-out, §17) */
+    const live = Math.abs(Date.now() - now) < 36e5 ? { catalog: d.catalog, onOrder: onorder.all() } : { catalog: period.catalogAsOf(d.catalog, now) };
     const r = helpers.enrich(engine.report(rowsAt.stock, rowsAt.orders, d.settings, { days, now, ...live }));   // still-out ₹/day, Pause list: the page's numbers (§15)
     r.yesterday = period.yesterdayFor(rowsAt.stock, rowsAt.orders, d.settings, r, live);
     return r;
@@ -532,4 +533,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Stock-out Watch on http://localhost:${server.address().port}${PASSWORD ? ' (password on)' : ''}`));
 }
 
-module.exports = { server, syncShopify };
+module.exports = { server, syncShopify, digestCtx };

@@ -5,6 +5,12 @@ Shared copy for the team: https://claude.ai/artifact/27Q6x8r3rpZHYaNzhjW2Zq
 
 
 
+## 2026-11-20 · critic round 2 fixes
+stock-watch, on `main` (not pushed, not deployed). Verified P1 findings from critic round 2 (`Stock-Watch-r2-findings.json`), each checked against the code first.
+Fixed:
+- L1: CEO digest "vs the 7 days before" counted lost sales on a variant archived while out. The past report now gets the catalog's inactive flags from before then (`period.catalogAsOf`, `server.js` digestCtx); no stock or price. LOGIC §17; test in `test/digest.test.js`.
+- L2: ABC rank included inactive rows, so A count, best sellers at risk and order value moved with the period. Inactive rows are C and left out of the rank (`src/engine.js`). LOGIC §7a, §5a; engine test (7 / 30 / 60 / This month with 15 archived sellers).
+
 ## 2026-11-20 · stock-watch · Performity POC API contract
 - keys.js follows Performity's calling guide: `X-Api-Key`, `GET …/external/brands`, `POST …/external/fresh-token {brand_id}`, shop from `shop_domain` (must be *.myshopify.com), `expires_at` read as UTC (no zone; `null` = no expiry). Token asked before each pull (`beginPull`), reused only within the pull, re-asked on Shopify 401; never kept between pulls (fallback removed). Wrong key → 15-min local pause (never trips the 5-wrong-keys IP block); 429 waits; 500 retried once; 403 IP/brand, 404, 409 explained in plain words. Variables `PERFORMITY_POC_API_URL`, `PERFORMITY_POC_API_KEY`, `PERFORMITY_BRAND_ID` (aliases `TOKEN_API_URL/KEY`). Stand-in API rewritten to the contract. 8 tests.
 - Railway static outbound IP is disabled (Pro plan needed) — required for Performity's allow-list.

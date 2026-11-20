@@ -330,6 +330,25 @@ test('ABC rank and order value are the same at 7 / 30 / 60 days', () => {
   }
 });
 
+test('archived variants are not ranked: order value and best sellers are the same at 7 / 30 / 60 days and This month (critic r2 L2)', () => {
+  const now = Date.parse('2026-11-19T07:30:00Z');
+  const g = require('../src/demo').generate({ now });
+  /* 15 sellers archived 6 days ago, no sales since: all listed at 30 days (they sold), at 7 only if they lost sales */
+  const sellers = [...new Set(g.orders.filter((o) => o.t > now - 28 * D && o.t < now - 8 * D).map((o) => String(o.variantId)))].slice(0, 15);
+  const gone = new Set(sellers);
+  const orders = g.orders.filter((o) => !(gone.has(String(o.variantId)) && o.t > now - 7 * D));
+  const catalog = Object.fromEntries(sellers.map((id) => [id, { active: false, status: 'ARCHIVED', inactiveSince: now - 6 * D }]));
+  const runs = [{ days: 7 }, { days: 30 }, { days: 60 }, { from: Date.parse('2026-10-31T18:30:00Z') }].map((o) => E.report(g.stock, orders, {}, { ...o, now, catalog }));
+  const nIn = (r) => r.products.filter((p) => p.status === 'Inactive').length;
+  assert.ok(nIn(runs[1]) > nIn(runs[0]), `fixture: more inactive rows listed at 30 days (${nIn(runs[1])}) than at 7 (${nIn(runs[0])})`);
+  const key = (r) => Object.fromEntries(r.products.filter((p) => p.status !== 'Inactive').map((p) => [p.id, [p.abc, p.status, p.orderQty, p.orderValue]]));
+  for (const r of runs.slice(1)) {
+    assert.deepEqual(key(r), key(runs[0]));
+    for (const k of ['orderValueNow', 'orderValueAll', 'bestsellers', 'bestAtRisk']) assert.equal(r.totals[k], runs[0].totals[k], k);
+  }
+  assert.ok(runs[1].products.filter((p) => p.status === 'Inactive').every((p) => p.abc === 'C'), 'inactive rows are C');
+});
+
 test('ABC ranks on demand: a best seller out of stock most of the window stays A', () => {
   const now = Date.parse('2026-11-28T00:00:00Z');
   const stock = [{ t: now - 90 * D, variantId: 'best', sku: 'B', product: 'Best', before: 400, now: 400, price: 1000 },

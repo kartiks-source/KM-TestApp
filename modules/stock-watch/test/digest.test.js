@@ -203,3 +203,23 @@ test('routes: digest JSON + text, bad role 400, settings PUT validates, send-now
     assert.equal(S.publicConf().log[0].trigger, 'manual');
   } finally { server.close(); }
 });
+
+test('CEO "7 days before" ends a stock-out at archive time: a variant archived while out counts ₹0 then (critic r2 L1)', () => {
+  const { digestCtx } = require('../server');
+  const d = store.load(), T = Date.now();
+  const id = 'arch-while-out';
+  const rowsS = [{ t: T - 60 * DAY, variantId: id, sku: 'ARCH', product: 'Archived lamp', variant: '', before: 10, now: 10, price: 1000 },
+    { t: T - 40 * DAY, variantId: id, sku: 'ARCH', product: 'Archived lamp', variant: '', before: 1, now: 0, price: 1000 }];
+  const rowsO = Array.from({ length: 19 }, (_, i) => ({ t: T - 60 * DAY + i * DAY, order: `#arch${i}`, variantId: id, sku: 'ARCH', qty: 1, price: 1000 }));
+  d.stock.push(...rowsS); d.orders.push(...rowsO);
+  d.catalog[id] = { active: false, status: 'ARCHIVED', inactiveSince: T - 30 * DAY, stock: 0, price: 1000, product: 'Archived lamp' };
+  try {
+    const lostOf = (r) => (r.products.find((p) => p.id === id) || { lost: 0 }).lost;
+    assert.equal(lostOf(digestCtx.report({ days: 7, now: T - 7 * DAY })), 0, 'archived 30 d ago: nothing lost in the 7 days before');
+    assert.ok(lostOf(digestCtx.report({ days: 7, now: T - 35 * DAY })) > 0, 'before it was archived it was still out and losing sales');
+    assert.deepEqual(P.catalogAsOf(d.catalog, T - 35 * DAY)[id], undefined, 'not yet archived then: no flag');
+    assert.deepEqual(P.catalogAsOf(d.catalog, T - 7 * DAY)[id], { active: false, status: 'ARCHIVED', inactiveSince: T - 30 * DAY }, 'flags only, no stock or price');
+  } finally {
+    d.stock.splice(d.stock.length - rowsS.length); d.orders.splice(d.orders.length - rowsO.length); delete d.catalog[id];
+  }
+});

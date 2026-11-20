@@ -380,9 +380,12 @@ function report(stock, orders, settings = {}, opts = {}) {
 
   /* best sellers (ABC by ₹ demand a day: the sales rate × average price paid, both from the demand
      window, so the rank and every order quantity stay put when the period buttons change):
-     A = the products making the first 80% of demand, B = the next 15%, C = the rest and anything with none */
+     A = the products making the first 80% of demand, B = the next 15%, C = the rest and anything with none.
+     Inactive (archived, draft, untracked, deleted) rows are left out of the rank and are C: they are listed only when they
+     sold or lost sales in the period, so ranking them made A slots and order value move with the period (critic r2 L2). */
   const demandOf = (p) => p._plan.demand;
-  const byDemand = products.slice().sort((a, b) => demandOf(b) - demandOf(a) || String(a.id).localeCompare(String(b.id)));
+  for (const p of products) if (p.status === 'Inactive') p.abc = 'C';
+  const byDemand = products.filter((p) => p.status !== 'Inactive').sort((a, b) => demandOf(b) - demandOf(a) || String(a.id).localeCompare(String(b.id)));
   const allDemand = byDemand.reduce((s, p) => s + demandOf(p), 0);
   let run = 0;
   for (const p of byDemand) {
