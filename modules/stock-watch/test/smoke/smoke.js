@@ -113,7 +113,7 @@ async function run(browser, base, vp, own) {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' && !IGNORE.test(m.text() + (m.location()?.url || ''))) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('requestfailed', (r) => { if (!IGNORE.test(r.url())) errors.push(`request failed: ${r.url()}`); });
+  page.on('requestfailed', (r) => { const why = (r.failure() || {}).errorText || ''; if (!IGNORE.test(r.url()) && !/ERR_ABORTED|NS_BINDING_ABORTED|cancelled/i.test(why)) errors.push(`request failed: ${r.url()} (${why})`); });   // a call cancelled by moving to the next page is not an error (slow CI)
   await signIn(page, base);
 
   for (const p of PAGES) {

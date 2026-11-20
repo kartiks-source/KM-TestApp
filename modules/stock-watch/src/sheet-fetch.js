@@ -56,7 +56,10 @@ async function sheetText(link, { fetchImpl = fetch, maxRedirects = MAX_REDIRECTS
   try { u = new URL(String(link)); } catch { throw new Error('Sheet links must be Google Sheets "Publish to web" CSV links'); }
   const why = refuse(u, true);
   if (why) throw new Error(why);
-  const signal = AbortSignal.timeout(timeoutMs);
+  // A plain (ref'd) timer, not AbortSignal.timeout: that one is unref'd, so with nothing else
+  // pending the process could exit before the time limit fires (CI, Node 22).
+  const ctl = new AbortController(), signal = ctl.signal;
+  const timer = setTimeout(() => ctl.abort(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), timeoutMs);
   try {
     for (let hops = 0; ; hops++) {
       const r = await fetchImpl(u.href, { redirect: 'manual', signal, headers: { accept: 'text/csv, text/plain;q=0.9, */*;q=0.1' } });
@@ -76,7 +79,7 @@ async function sheetText(link, { fetchImpl = fetch, maxRedirects = MAX_REDIRECTS
   } catch (e) {
     if (signal.aborted || e.name === 'TimeoutError' || e.name === 'AbortError') throw new Error(`no answer within ${Math.round(timeoutMs / 1000)} s`);
     throw e;
-  }
+  } finally { clearTimeout(timer); }
 }
 
 module.exports = { sheetText, refuse, MAX_REDIRECTS, MAX_BYTES, TIMEOUT_MS };
