@@ -251,7 +251,10 @@ function prune(force = false, now = Date.now()) {
   const stock = pruneStock(d.stock, cut, d.catalog);
   if (stock.length !== d.stock.length) { d.stock = stock; d._stockKeys = new Set(d.stock.map(stockKey)); }
   if (d.orders.some((r) => r.t < cut)) { d.orders = d.orders.filter((r) => r.t >= cut); d._orderKeys = new Set(d.orders.map(orderKey)); }
-  if (d.catalog) for (const [id, c] of Object.entries(d.catalog)) if (c.status === 'DELETED' && c.inactiveSince < cut) delete d.catalog[id];
+  if (d.catalog) for (const [id, c] of Object.entries(d.catalog)) {
+    if (c.status === 'DELETED' && c.inactiveSince < cut) delete d.catalog[id];
+    else if (Array.isArray(c.spells) && c.spells.some((x) => x.to < cut)) { c.spells = c.spells.filter((x) => x.to >= cut); if (!c.spells.length) delete c.spells; }
+  }
 }
 
 /*
@@ -261,12 +264,17 @@ function prune(force = false, now = Date.now()) {
  * draft, untracked) keeps the time it was first seen inactive; one that disappears (deleted) is kept
  * as a DELETED entry, and so is any variant with stock rows that Shopify no longer returns.
  */
+const MAX_SPELLS = 20;   // past inactive spells kept per variant (older than 120 days are pruned anyway)
 function setCatalog(next, now = Date.now()) {
   const d = load(); const prev = d.catalog || {}; const out = {};
   const has = (o, id) => Object.hasOwn(o, id);   // variant IDs are data: never Object.prototype keys
   for (const [id, c] of Object.entries(next)) {
     const p = has(prev, id) ? prev[id] : null;
+    /* inactive spells that ended (made active again) are kept, so the engine still cuts stock-outs there (LOGIC.md §1) */
+    const spells = p && Array.isArray(p.spells) ? p.spells.slice(-MAX_SPELLS) : [];
+    if (c.active !== false && p && p.active === false && p.inactiveSince && p.inactiveSince < now) spells.push({ from: p.inactiveSince, to: now, status: p.status || 'INACTIVE' });
     out[id] = c.active !== false ? c : { ...c, inactiveSince: p && p.active === false && p.status !== 'DELETED' && p.inactiveSince ? p.inactiveSince : now };
+    if (spells.length) out[id] = { ...out[id], spells: spells.slice(-MAX_SPELLS) };
   }
   const tomb = (id, base) => { out[id] = { ...base, active: false, status: 'DELETED', inactiveSince: base.status === 'DELETED' && base.inactiveSince ? base.inactiveSince : now, stock: base.stock ?? null }; };
   for (const [id, p] of Object.entries(prev)) if (!has(out, id)) tomb(id, p);

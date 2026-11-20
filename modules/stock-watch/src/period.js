@@ -39,7 +39,17 @@ function asOf(stock, orders, t) {
 function catalogAsOf(catalog, t) {
   const out = {};
   for (const [id, c] of Object.entries(catalog || {})) {
-    if (c && c.active === false && Number.isFinite(+c.inactiveSince) && +c.inactiveSince <= t) out[id] = { active: false, status: c.status, inactiveSince: +c.inactiveSince };
+    if (!c) continue;
+    const e = {}, spells = [];
+    /* past spells (inactive, then active again): ended by t → kept as spells; still running at t → inactive then */
+    for (const s of Array.isArray(c.spells) ? c.spells : []) {
+      if (!(+s.from <= t)) continue;
+      if (+s.to <= t) spells.push({ from: +s.from, to: +s.to });
+      else Object.assign(e, { active: false, status: s.status || 'INACTIVE', inactiveSince: +s.from });
+    }
+    if (c.active === false && Number.isFinite(+c.inactiveSince) && +c.inactiveSince <= t) Object.assign(e, { active: false, status: c.status, inactiveSince: +c.inactiveSince });
+    if (spells.length) e.spells = spells;
+    if (Object.keys(e).length) out[id] = e;
   }
   return out;
 }

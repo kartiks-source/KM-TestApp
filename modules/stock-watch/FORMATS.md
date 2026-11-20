@@ -157,7 +157,8 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
   "orders": [ { "t": 0, "order": "#1001", "line": "?", "variantId": "", "sku": "", "qty": 1, "price": 0, "src": "…" } ],
   "catalog": { "<variantId>": { "productId": "", "product": "", "variant": "", "sku": "", "type": "", "vendor": "", "tags": [],
                 "price": 0, "cost": null, "status": "ACTIVE|ARCHIVED|DRAFT|UNTRACKED|DELETED", "tracked": true, "active": true,
-                "stock": 0, "seenAt": 0, "inactiveSince": "?" } },
+                "stock": 0, "seenAt": 0, "inactiveSince": "?",
+                "spells": "?[ { from: 0, to: 0, status: 'DRAFT' } ]" } },
   "source": "empty|demo|live", "everLive": true,
   "lastSync": null, "lastSyncError": null,
   "shopify": { "lastQty": { "<variantId>": 0 }, "ordersCursor": null, "lastSync": null, "lastError": null, "lastTry": null },
@@ -170,7 +171,7 @@ Outside `DATA_DIR`, in the app folder: `BUILD_SHA` (optional, SW-056): one line,
 
 - Times are ms since 1970 (UTC). `"?"` marks an optional key. `before` may be `null` (unknown).
 - Rows older than 120 days are pruned, except per variant the newest stock row and the row that opened a stock-out still running (ADR-0010).
-- `catalog` is Shopify only, replaced whole on every stock pull; a variant that disappears stays as `DELETED` until it is 120 days gone.
+- `catalog` is Shopify only, replaced whole on every stock pull; a variant that disappears stays as `DELETED` until it is 120 days gone. `spells` (optional) are the variant's past inactive spells, added when it turns active again (from = `inactiveSince`, to = the pull that saw it active); at most 20, each dropped 120 days after it ends (LOGIC §1). Older files without it load as before.
 - `settingsLog` keeps 200 entries, newest first; the ingest key shows as `(old key)` → `(new key)`. `syncRuns` keeps 20. `digest.log` keeps 50.
 - Keys starting with `_` are in-memory indexes and never written.
 - A file is accepted as a store when it is a JSON object with `stock` and `orders` arrays (restore also needs `settings`).

@@ -74,6 +74,39 @@ function episodes(changes, now) {
   return out;
 }
 
+/**
+ * Cut stock-outs at the times the variant couldn't be sold (archived, draft, untracked, deleted: LOGIC.md §1).
+ * spells = [{from, to}] sorted, to may be Infinity (inactive now). The part before a spell ends there (not open,
+ * no top-up); the part after it starts again when the variant came back, so a reactivated variant still at 0 is out.
+ */
+function cutBySpells(eps, spells) {
+  if (!spells.length) return eps;
+  const out = [];
+  for (const e of eps) {
+    let parts = [e];
+    for (const s of spells) {
+      const next = [];
+      for (const p of parts) {
+        if (s.to <= p.start || s.from >= p.end) { next.push(p); continue; }
+        if (s.from > p.start) next.push({ start: p.start, end: s.from, topUp: 0, open: false, inactive: true });
+        if (s.to < p.end) next.push({ ...p, start: s.to });
+      }
+      parts = next;
+    }
+    out.push(...parts);
+  }
+  return out;
+}
+
+/** Stock-outs and inactive spells merged into one sorted list of times it couldn't be sold (for the sales rate). */
+function unsellable(eps, spells, now) {
+  const all = eps.map((e) => ({ start: e.start, end: e.end })).concat(spells.filter((s) => s.from < now).map((s) => ({ start: s.from, end: Math.min(now, s.to) })))
+    .filter((x) => x.end > x.start).sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const x of all) { const l = out[out.length - 1]; if (l && x.start <= l.end) l.end = Math.max(l.end, x.end); else out.push({ ...x }); }
+  return out;
+}
+
 const overlap = (a, b, from, to) => Math.max(0, Math.min(b, to) - Math.max(a, from));
 
 /** Sales per day while the product could be bought: units ÷ in-stock days (at least one day).
@@ -279,6 +312,8 @@ function report(stock, orders, settings = {}, opts = {}) {
     if (num(c.price)) p.price = num(c.price); if (num(c.cost)) p.cost = num(c.cost);
     if (c.stock != null && Number.isFinite(+c.stock)) p.stock = num(c.stock);
     if (c.active === false) { p.inactive = c.status || 'INACTIVE'; p.inactiveSince = c.inactiveSince || now; }
+    /* earlier inactive spells of a variant that is active again (draft while sold out, reactivated on restock) */
+    if (Array.isArray(c.spells)) p.spells = c.spells.map((x) => ({ from: +x.from, to: +x.to })).filter((x) => Number.isFinite(x.from) && x.to > x.from);
   }
 
   const orderSpan = minMax(orders, (o) => o.t), stockSpan = minMax(stock, (r) => r.t);
@@ -303,12 +338,16 @@ function report(stock, orders, settings = {}, opts = {}) {
   for (const p of P.values()) {
     const name = [p.product, p.variant && p.variant !== 'Default Title' ? p.variant : ''].filter(Boolean).join(' · ') || p.sku || p.id;
     /* an inactive product can't be bought, so a stock-out it was in ends when it went inactive */
-    const eps = p.inactive ? episodes(p.changes, Math.min(now, Math.max(p.inactiveSince, p.changes.length ? p.changes[p.changes.length - 1].t : 0))) : episodes(p.changes, now);
+    /* and one that was inactive for a while and came back: the spell is cut out, so ₹ lost for those days never comes back later */
+    const spells = (p.spells || []).slice();
+    if (p.inactive) spells.push({ from: Math.min(now, Math.max(p.inactiveSince, p.changes.length ? p.changes[p.changes.length - 1].t : 0)), to: Infinity });
+    spells.sort((a, b) => a.from - b.from);
+    const eps = cutBySpells(episodes(p.changes, now), spells);
     if (p.inactive) for (const e of eps) if (e.open) { e.open = false; e.inactive = true; }
     const pFirst = Number.isFinite(p.first) ? p.first : demandFrom;
     const pFrom = Math.max(demandFrom, pFirst);   // a new launch isn't diluted by days before it existed
     /* a long stock-out (under 7 in-stock days in the window) looks further back, so it keeps its demand */
-    const rate = demandRate(p.lines, eps, { winFrom: pFrom, histFrom: Math.max(now - KEEP_DAYS * DAY, firstOrder, pFirst), now, wantDays: S.demandWindowDays, first: pFirst });
+    const rate = demandRate(p.lines, unsellable(eps, spells, now), { winFrom: pFrom, histFrom: Math.max(now - KEEP_DAYS * DAY, firstOrder, pFirst), now, wantDays: S.demandWindowDays, first: pFirst });
     const units = rate.units;
     const revenue = rate.lines.reduce((s, o) => s + num(o.qty) * num(o.price), 0);
     const price = units ? revenue / units : p.price;

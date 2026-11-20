@@ -18,6 +18,7 @@ New in this release:
 - Added: `store.json` carries `schemaVersion: 1`. Older files load and are saved with it; a file or `restore.json` from a newer version is refused and never overwritten (SW-047, `FORMATS.md`).
 - Added: group rows (Group by) show the 8-week trend bars like product rows: desktop Trend cell, phone card header (SW-021).
 - Fixed: real data arriving on a demo store (Flow, Sheet, CSV or Shopify) now also clears the demo's Mark ordered and slow-seller decisions, so a demo PO never lowers a real order. Removed the CSV upload's "Remove the demo data first" checkbox, which did nothing (SW-007).
+- Fixed: a variant set to draft or archived while sold out and made active again on restock no longer has its stock-out run through the inactive days: ₹ lost, past daily bars and Yesterday stay as they were. The inactive days don't count as in-stock days for the sales rate either (LOGIC §1, §3; final critic L1).
 - Changed: morning digest settings (hour, who gets it, pause) and a change of the server's digest webhook show in the settings change log (SW-029).
 
 ## 0.10.0 · 2026-11-20 · several stores, everything shown by default

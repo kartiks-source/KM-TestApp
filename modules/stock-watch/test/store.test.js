@@ -463,3 +463,51 @@ test('server: demo → Flow ingest or CSV import drops demo Mark ordered and dec
     } finally { await stop(s); }
   }
 });
+
+test('draft while sold out, reactivated on restock: ₹ lost for the draft days never comes back (final critic L1)', () => {
+  const s = freshStore(tmpDir()); const H = 3600e3;
+  const now = Date.parse('2026-11-20T06:30:00Z');
+  const orders = [];
+  for (let d = 26; d <= 60; d++) orders.push({ t: now - d * DAYMS + 5 * H, order: `#${d}`, variantId: '1', sku: 'S1', qty: 5, price: 1000 });
+  s.add('orders', orders, 'shopify');
+  let last = {};
+  const pull = (qty, t, status = 'ACTIVE') => { const r = SH.diffStock([gv(1, qty, {}, { status })], last, t); s.add('stock', r.rows, 'shopify'); s.setCatalog(r.catalog, t); last = r.lastQty; };
+  pull(40, now - 60 * DAYMS); pull(0, now - 25 * DAYMS); pull(0, now - 24 * DAYMS, 'DRAFT');
+  const at = (t) => { const d = s.load(); return E.report(d.stock, d.orders, {}, { now: t, days: 30, catalog: d.catalog }); };
+  const draft = at(now);
+  const so0 = draft.stockouts.filter((x) => x.id === '1');
+  assert.equal(so0.length, 1); assert.equal(so0[0].hours, 24);
+  const barDraft = draft.daily.find((x) => x.day === '2026-11-10');
+  assert.equal(barDraft.lost, 0, 'no ₹ lost while it was draft');
+
+  pull(10, now - DAYMS);   // restocked and active again (Shopify's blank-before row)
+  const c = s.load().catalog['1'];
+  assert.equal(c.active, true);
+  assert.deepEqual(c.spells, [{ from: now - 24 * DAYMS, to: now - DAYMS, status: 'DRAFT' }]);
+  const back = at(now);
+  const so1 = back.stockouts.filter((x) => x.id === '1');
+  assert.equal(so1.length, 1, 'still one 24 h stock-out, not one running through the draft days');
+  assert.equal(so1[0].hours, 24); assert.equal(so1[0].open, false);
+  assert.equal(back.daily.find((x) => x.day === '2026-11-10').lost, 0, 'a past daily bar does not change after the fact');
+  assert.ok(Math.abs(back.totals.lost - draft.totals.lost) <= draft.totals.lost * 0.05, `₹ lost stays put: ${draft.totals.lost} → ${back.totals.lost}`);
+  assert.ok(back.products.find((x) => x.id === '1').perDay >= 4.8, 'draft days are not in-stock days with no sales (≈0.6 a day if they were)');
+
+  /* the CEO digest's "7 days before" sees the spell too */
+  const P = require('../src/period');
+  assert.deepEqual(P.catalogAsOf(s.load().catalog, now - 3 * DAYMS)['1'], { active: false, status: 'DRAFT', inactiveSince: now - 24 * DAYMS });
+  assert.deepEqual(P.catalogAsOf(s.load().catalog, now)['1'], { spells: [{ from: now - 24 * DAYMS, to: now - DAYMS }] });
+
+  /* spells older than 120 days are pruned */
+  s.load().catalog['1'].spells[0].to = now - 121 * DAYMS;
+  s.prune(true, now);
+  assert.equal(s.load().catalog['1'].spells, undefined);
+});
+
+test('reactivated while still at 0: out again from the moment it came back', () => {
+  const now = Date.parse('2026-11-20T06:30:00Z');
+  const stock = [{ t: now - 20 * DAYMS, variantId: '1', before: 3, now: 0, price: 100 }, { t: now - 2 * DAYMS, variantId: '1', before: null, now: 0, price: 100 }];
+  const orders = [{ t: now - 25 * DAYMS, order: '#1', variantId: '1', qty: 10, price: 100 }];
+  const catalog = { 1: { product: 'P', variant: '', stock: 0, active: true, status: 'ACTIVE', spells: [{ from: now - 15 * DAYMS, to: now - 2 * DAYMS }] } };
+  const so = E.report(stock, orders, {}, { now, catalog }).stockouts.filter((x) => x.id === '1').sort((a, b) => a.start - b.start);
+  assert.deepEqual(so.map((x) => [x.start, x.end, x.open]), [[now - 20 * DAYMS, now - 15 * DAYMS, false], [now - 2 * DAYMS, null, true]]);
+});
