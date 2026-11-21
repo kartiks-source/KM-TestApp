@@ -23,7 +23,7 @@ Newest first. Each one: date, decision, who decided, why.
 
 ## 2026-11-19: Hosting
 - Standalone modules run on Railway, separate from the live dashboard (which stays on Coolify).
-- One repo (`kartiks-source/KM-TestApp`), one folder per module, context in Markdown.
+- One repo (`kartiks-source/stock-watch`, renamed from KM-TestApp on 20 Nov 2026; the old URL redirects), one folder per module, context in Markdown. One name everywhere: GitHub `stock-watch`, local folder `~/Downloads/stock-watch`, Railway project `stock-watch`.
 
 ## Open
 - **Shared packages for multi-module logic** (proposed by the cross-module critic, 19 Nov): `packages/shopify-read` (keys + read-only guard + pulls), `packages/rows` (row formats + FORMATS.md), `packages/stock-rules` (episodes, in-stock rate, plan, trend, sale definition) with their tests and LOGIC sections; modules keep their reports. A build step copies stock-rules into the Sheet's `SW` block, and a parity test runs the same data through both. npm workspaces; Dockerfile copies `packages/`. Do this before a second module reuses the logic.

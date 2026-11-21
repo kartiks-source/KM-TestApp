@@ -10,6 +10,9 @@ Older entries: [2026-11](devlog/2026-11.md)
 Older entries: [2026-11](devlog/2026-11.md)
 
 
+
+## 2026-11-20 · one name everywhere
+repo. GitHub repo renamed KM-TestApp → `stock-watch` (old URL redirects); local folder → `~/Downloads/stock-watch`; old repo `stockout-watch` deleted (user's yes). Merged worktrees removed. Railway service `web` → `stock-watch` pending (dashboard only; then `.railway/railway.ts` + deploy commands). App URL unchanged: Performity allows our key only from that Origin.
 ## 2026-11-20 · 1.1.5 · cancel/refund % and periods match Shopify exactly
 stock-watch 1.1.5, on `main` (not pushed, not deployed). User: cancel/refund % must equal Shopify's.
 - Periods: N store-calendar days, today included (`period.range` → `tz.daysStart`, DST-safe), for every number (report, product, groups, CSV, v1, digest). Dates beside the Period buttons ("22 Oct – 20 Nov"; hidden 761–1010 px, two lines on small phones).
